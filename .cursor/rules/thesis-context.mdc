@@ -1,0 +1,18 @@
+---
+description: Thesis continuation context and advisor requests
+alwaysApply: true
+---
+
+# Thesis Continuation Context
+
+Reference doc: `docs/Temporal_Planning___IJCAI25_Camera_Ready-2.txt`
+
+## Professor requests
+- Shift focus from goal reachability to reward maximization with a deadline. Note: goal reachability is the special case of reward 1 for reaching the goal before deadline.
+- Heuristic admissibility: explain why the current heuristic is inadmissible; explore whether it can be made admissible; if a heuristic is stochastic and only admissible on average, discuss what guarantees (if any) can be provided.
+
+## My current research starting points
+- Reward shaping under deadline: 0/1 goal reward baseline; consider shaped rewards such as `(D - t_goal) / D` to prefer earlier completion; consider time-based step rewards/penalties.
+- Admissible heuristic ideas: conservative duration relaxation (inflate stochastic durations with a safe surrogate); reverse exploration from goal to start to build safer bounds.
+- Calibration/validation: build a small-instance baseline MDP (state as precondition combinations or approximation), compute/learn value function, use it to study PTRPG inadmissibility and calibrate bounded heuristics (including "admissible on average" with confidence bounds).
+- Retry/geometric-success modeling: success after `r` tries is `1 - q^r` with `q = 1 - p`, where `r` is derived from remaining time or a cap; use for transition probability approximation and expected reward.

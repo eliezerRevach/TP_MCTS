@@ -13,5 +13,6 @@ parser.add_argument('-e', '--exploration_constant', help='the exploration consta
 parser.add_argument('-ge', '--garbage_amount', help='how many garbage actions to add to the domain', nargs='?', default=0, type=int)
 parser.add_argument('-oe', '--object_amount', help='how many different objects in the domain', nargs='?', default=1, type=int)
 parser.add_argument('-k', '--k', help='K random actions in the max planner', nargs='?', default=10, type=int)
+parser.add_argument('-rm', '--reward_mode', help='reward mode: deadline or terminal', nargs='?', default='deadline')
 
 args = parser.parse_args()

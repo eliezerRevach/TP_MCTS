@@ -7,9 +7,10 @@ from itertools import product
 
 
 class MDP:
-    def __init__(self, problem: "up.model.problem.Preoblem", discount_factor: float):
+    def __init__(self, problem: "up.model.problem.Preoblem", discount_factor: float, reward_mode: str = "deadline"):
         self._problem = problem
         self._discount_factor = discount_factor
+        self._reward_mode = reward_mode
 
     @property
     def problem(self):
@@ -19,8 +20,24 @@ class MDP:
     def discount_factor(self):
         return self._discount_factor
 
+    @property
+    def reward_mode(self):
+        return self._reward_mode
+
     def deadline(self):
         return self.problem.deadline
+
+    def terminal_reward(self, terminal: bool, state: "up.engines.State"):
+        if not terminal:
+            return 0
+        if self.reward_mode == "terminal":
+            return 1
+        if self.reward_mode == "deadline":
+            if hasattr(state, "current_time"):
+                return 1 if state.current_time <= self.deadline() else 0
+            return 1
+        raise ValueError(f"Unknown reward_mode: {self.reward_mode}")
+        return 1
 
     def initial_state(self):
         """
@@ -89,7 +106,7 @@ class MDP:
         # reward = 100 if terminal else 2 ** (common - len(self.problem.goals))
 
         # reward = 10 if terminal else relevant_reward
-        reward = 1 if terminal else relevant_reward
+        reward = self.terminal_reward(terminal, next_state) if relevant_reward == 0 else relevant_reward
 
         return terminal, next_state, reward
 
@@ -230,7 +247,7 @@ class combinationMDP(MDP):
         # reward = 100 if terminal else 2 ** (common - len(self.problem.goals))
 
         # reward = 10 if terminal else -1
-        reward = 1 if terminal else 0
+        reward = self.terminal_reward(terminal, next_state)
 
         return terminal, next_state, reward
 

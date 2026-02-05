@@ -43,6 +43,7 @@ def print_stats():
     print(f'Object Amount = {up.args.object_amount}')
     print(f'Garbage Action Amount = {up.args.garbage_amount}')
     print(f'K Random Actions = {up.args.k}')
+    print(f'Reward Mode = {up.args.reward_mode}')
 
 
 def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
@@ -78,7 +79,7 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
     print(f"Action amount= {len(ground_problem.actions)}, Proposition amount= {len(ground_problem.explicit_initial_values)}")
 
 
-    mdp = MDP(converted_problem, discount_factor=0.95)
+    mdp = MDP(converted_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
 
     params = (mdp, 90, search_time, search_depth, exploration_constant, selection_type, k)
     up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.plan, params)
@@ -141,8 +142,8 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
         converted_problem = convert_combination_problem._converted_problem
         split_problem = convert_combination_problem._split_problem
 
-    mdp = combinationMDP(converted_problem, discount_factor=0.95)
-    split_mdp = MDP(split_problem, discount_factor=0.95)
+    mdp = combinationMDP(converted_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
+    split_mdp = MDP(split_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
 
     if solver == 'rtdp':
         params = (mdp, split_mdp, 90, search_time, search_depth)
