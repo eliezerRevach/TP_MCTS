@@ -3,6 +3,7 @@ import time
 
 import dill
 import sys
+import random
 
 """For the bash script"""
 # Get the current directory (where the script is located)
@@ -15,6 +16,7 @@ sys.path.append(parent_directory)  # Add the path to your 'unified_planning' dir
 import unified_planning as up
 from unified_planning.shortcuts import *
 import unified_planning.domains
+import numpy as np
 
 
 # Map each domain name to its class
@@ -44,6 +46,14 @@ def print_stats():
     print(f'Garbage Action Amount = {up.args.garbage_amount}')
     print(f'K Random Actions = {up.args.k}')
     print(f'Reward Mode = {up.args.reward_mode}')
+    print(f'Seed = {up.args.seed}')
+
+
+def set_seed():
+    if up.args.seed is None:
+        return
+    random.seed(up.args.seed)
+    np.random.seed(up.args.seed)
 
 
 def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
@@ -53,6 +63,7 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
     """
     assert domain in domains
     print_stats()
+    set_seed()
     start_time = time.time()
 
     model = domains[domain](kind=domain_type, deadline=deadline, object_amount=object_amount, garbage_amount=garbage_amount)
@@ -113,6 +124,7 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
     """
     assert domain in domains
     print_stats()
+    set_seed()
 
     # create the pickle file name associated with the domain
     file_name = './pickle_domains/' + domains_files[domain]
