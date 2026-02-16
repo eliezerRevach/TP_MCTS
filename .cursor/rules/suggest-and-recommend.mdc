@@ -1,0 +1,14 @@
+---
+description: Suggest changes and high-level recommendations unless told to implement without question
+alwaysApply: true
+---
+
+# Suggest Before Implementing
+
+When the user asks you to do something:
+
+- **Think at a high level** before implementing: consider alternatives, edge cases, and whether there is a better or simpler solution.
+- **If you find something worth recommending**, mention it briefly (e.g., "You could also…", "Consider…"). You are not required to suggest a change every time—only when it adds value.
+- Do this **unless** the user explicitly says to implement without question (e.g., "just do it", "implement without question", "no suggestions").
+
+Keep suggestions concise. Do not block or delay the requested task; implement as asked and add recommendations only when they are worthwhile.
