@@ -1,0 +1,28 @@
+---
+description: Thesis paper summary and algorithm map for TP-MCTS work
+alwaysApply: true
+---
+
+# Thesis Summary and Algorithms
+
+Reference: `docs/Temporal_Planning___IJCAI25_Camera_Ready-2.txt`
+
+## Problem Setting
+- Plan online in stochastic domains with durative, concurrent actions and deadlines.
+- Model used in the paper: CoMDP+ (extends fMDP/CoMDP with start/end effects, overall/end conditions, deadline constraints).
+- Objective in the paper baseline: maximize probability of reaching goal before deadline.
+
+## Main Algorithms/Techniques to Keep in Mind
+- **TP-MCTS**: online MCTS-based planner that decides both *which* action and *when* to dispatch it.
+- **Offline compilation**: split each durative action into `start/end` snap actions and track execution with `InExecution(a)` fluents.
+- **Temporal reasoning**: maintain an STN per branch; enforce action ordering and duration constraints through STN updates.
+- **Evaluation heuristic (PTRPG)**: probabilistic temporal relaxed planning graph estimate used instead of standard rollouts.
+- **Backprop variants**:
+  - `earliest`: scalar value backup + earliest feasible scheduling.
+  - `root-interval`: value function over root execution times, using feasible root-time intervals from leaf STNs.
+- **Baselines in paper**: MW-RTDP and MW-MCTS (from Mausam & Weld formulation).
+
+## Report/Writeup Expectations for This Project
+- Explain design choices relative to TP-MCTS components: search, scheduling, heuristic, and temporal constraints.
+- Separate what is inherited from the paper vs what is newly proposed/modified in this thesis continuation.
+- When discussing results, include both success behavior and deadline/temporal-feasibility effects, not only goal reachability.

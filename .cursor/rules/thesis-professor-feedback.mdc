@@ -1,0 +1,35 @@
+---
+description: Professor meeting summary — reward, admissible heuristic, planning graph, propagation
+alwaysApply: true
+---
+
+# Thesis: Professor Feedback (Current Status)
+
+Reference: advisor meeting summary. Use this for design choices and evaluation plans.
+
+## 1. Reward
+
+- **Goal-state reward (when deadline met)** is fine but may already be effectively in place via the heuristic (e.g., value 1 if far from deadline, &lt;1 if close). **Action**: Run a comparison with vs without this reward, same random seed; check if there is any difference.
+- **Intermediate rewards** are the real test. Show that the planner prefers paths with more intermediate rewards (or fewer intermediate negative rewards). Add intermediate rewards and demonstrate this preference.
+
+## 2. Admissible Heuristic
+
+### A. Time vs probability
+
+- **Separate** (i) estimate of *when* the goal will be achieved from (ii) estimate of *probability of success*.
+- The algorithm uses the **probability** estimate. A more conservative *time* estimate does not imply a higher *probability* of success; so even if the time estimate is admissible, the probability estimate is not. This needs to be addressed.
+
+### B. Time estimate and sampling
+
+- Sampling many times can give something admissible with high probability, but we sample **different nodes**, not the same node repeatedly. Use the distinction (many samples per node vs many nodes) when designing or describing sampling-based admissibility.
+
+### C. Reusing the planning graph
+
+- The planning graph is **one parallel plan** (no branches), like BFS but keeping all "nodes" in a single layer per step.
+- **Reusing root graph at deeper levels**: The root’s first step includes many actions; in practice only one is applied, so reusing that graph is **too optimistic**. Repairing it may not be cheaper than building a new graph; construction should be quick. Explore if useful, but expectations are low.
+- **Helpful actions**: Use the relaxed planning graph to identify useful actions; in deterministic planning these are "Helpful Actions". **Do not** restrict to only helpful actions (you lose optimality). **Bias** toward them (e.g., higher initial value in MCTS) so the search focuses on them.
+
+### D. Value propagation and temporal constraints
+
+- Propagating values in the usual way is **not enough** because of temporal constraints. Even with perfect node estimates, propagation is an issue.
+- If propagation is **optimistic** and estimates are **optimistic**, then in the limit optimality is still guaranteed. Keep this in mind when arguing correctness or admissibility.

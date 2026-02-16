@@ -45,7 +45,10 @@ def print_stats():
     print(f'Object Amount = {up.args.object_amount}')
     print(f'Garbage Action Amount = {up.args.garbage_amount}')
     print(f'K Random Actions = {up.args.k}')
+    print(f'Heuristic Samples (CRN) = {up.args.heuristic_samples}')
+    print(f'Heuristic Mode = {up.args.heuristic_mode}')
     print(f'Reward Mode = {up.args.reward_mode}')
+    print(f'Goal Reward Enabled = {up.args.goal_reward_enabled}')
     print(f'Seed = {up.args.seed}')
 
 
@@ -57,7 +60,7 @@ def set_seed():
 
 
 def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
-                selection_type='avg', k=10):
+                selection_type='avg', k=10, heuristic_samples=50, heuristic_mode='crn_per_tree'):
     """
     Run split action to start and end actions logic - TP-MCTS approach
     """
@@ -90,9 +93,15 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
     print(f"Action amount= {len(ground_problem.actions)}, Proposition amount= {len(ground_problem.explicit_initial_values)}")
 
 
-    mdp = MDP(converted_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
+    goal_reward_enabled = bool(up.args.goal_reward_enabled)
+    mdp = MDP(
+        converted_problem,
+        discount_factor=0.95,
+        reward_mode=up.args.reward_mode,
+        goal_reward_enabled=goal_reward_enabled,
+    )
 
-    params = (mdp, 90, search_time, search_depth, exploration_constant, selection_type, k)
+    params = (mdp, 90, search_time, search_depth, exploration_constant, selection_type, k, heuristic_samples, heuristic_mode)
     up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.plan, params)
 
 
@@ -118,7 +127,7 @@ def create_combination_domain(domain, deadline, object_amount, garbage_amount):
 
 
 def run_combination(domain, runs, solver, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
-                    selection_type='avg', k=10):
+                    selection_type='avg', k=10, heuristic_samples=50, heuristic_mode='crn_per_tree'):
     """
     Run the combination logic - Mausem and Weld approach
     """
@@ -154,15 +163,26 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
         converted_problem = convert_combination_problem._converted_problem
         split_problem = convert_combination_problem._split_problem
 
-    mdp = combinationMDP(converted_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
-    split_mdp = MDP(split_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
+    goal_reward_enabled = bool(up.args.goal_reward_enabled)
+    mdp = combinationMDP(
+        converted_problem,
+        discount_factor=0.95,
+        reward_mode=up.args.reward_mode,
+        goal_reward_enabled=goal_reward_enabled,
+    )
+    split_mdp = MDP(
+        split_problem,
+        discount_factor=0.95,
+        reward_mode=up.args.reward_mode,
+        goal_reward_enabled=goal_reward_enabled,
+    )
 
     if solver == 'rtdp':
         params = (mdp, split_mdp, 90, search_time, search_depth)
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.rtdp.plan, params)
 
     else:
-        params = (mdp, split_mdp, 90, search_time, search_depth, exploration_constant, selection_type, k)
+        params = (mdp, split_mdp, 90, search_time, search_depth, exploration_constant, selection_type, k, heuristic_samples, heuristic_mode)
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.combination_plan, params)
 
 
@@ -172,9 +192,13 @@ if up.args.domain_type == 'combination':
     run_combination(domain=up.args.domain, runs=up.args.runs, solver=up.args.solver, deadline=up.args.deadline,
                     search_time=up.args.search_time,
                     search_depth=up.args.search_depth, exploration_constant=up.args.exploration_constant,
-                    selection_type=up.args.selection_type, object_amount=up.args.object_amount, garbage_amount=up.args.garbage_amount, k=up.args.k)
+                    selection_type=up.args.selection_type, object_amount=up.args.object_amount,
+                    garbage_amount=up.args.garbage_amount, k=up.args.k, heuristic_samples=up.args.heuristic_samples,
+                    heuristic_mode=up.args.heuristic_mode)
 else:
     run_regular(domain=up.args.domain, domain_type=up.args.domain_type, runs=up.args.runs, deadline=up.args.deadline,
                 search_time=up.args.search_time,
                 search_depth=up.args.search_depth, exploration_constant=up.args.exploration_constant,
-                selection_type=up.args.selection_type, object_amount=up.args.object_amount, garbage_amount=up.args.garbage_amount, k=up.args.k)
+                selection_type=up.args.selection_type, object_amount=up.args.object_amount,
+                garbage_amount=up.args.garbage_amount, k=up.args.k, heuristic_samples=up.args.heuristic_samples,
+                heuristic_mode=up.args.heuristic_mode)

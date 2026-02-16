@@ -7,10 +7,17 @@ from itertools import product
 
 
 class MDP:
-    def __init__(self, problem: "up.model.problem.Preoblem", discount_factor: float, reward_mode: str = "deadline"):
+    def __init__(
+        self,
+        problem: "up.model.problem.Preoblem",
+        discount_factor: float,
+        reward_mode: str = "deadline",
+        goal_reward_enabled: bool = True,
+    ):
         self._problem = problem
         self._discount_factor = discount_factor
         self._reward_mode = reward_mode
+        self._goal_reward_enabled = bool(goal_reward_enabled)
 
     @property
     def problem(self):
@@ -24,15 +31,21 @@ class MDP:
     def reward_mode(self):
         return self._reward_mode
 
+    @property
+    def goal_reward_enabled(self):
+        return self._goal_reward_enabled
+
     def deadline(self):
         return self.problem.deadline
 
     def terminal_reward(self, terminal: bool, state: "up.engines.State"):
+        if not self.goal_reward_enabled:
+            return 0
         if not terminal:
             return 0
         if self.reward_mode == "terminal":
             return 1
-        if self.reward_mode == "deadline":
+        if self.reward_mode in {"deadline", "deadline_step"}:
             if hasattr(state, "current_time"):
                 return 1 if state.current_time <= self.deadline() else 0
             return 1
@@ -106,7 +119,15 @@ class MDP:
         # reward = 100 if terminal else 2 ** (common - len(self.problem.goals))
 
         # reward = 10 if terminal else relevant_reward
-        reward = self.terminal_reward(terminal, next_state) if relevant_reward == 0 else relevant_reward
+        if relevant_reward == 0:
+            # Optional dense shaping for sparse-reward settings:
+            # keep terminal reward semantics, but discourage endless oscillations.
+            if self.reward_mode == "deadline_step" and not terminal:
+                reward = -0.01
+            else:
+                reward = self.terminal_reward(terminal, next_state)
+        else:
+            reward = relevant_reward
 
         return terminal, next_state, reward
 
@@ -169,8 +190,19 @@ class MDP:
 
 
 class combinationMDP(MDP):
-    def __init__(self, problem: "up.model.problem.Problem", discount_factor: float):
-        super().__init__(problem, discount_factor)
+    def __init__(
+        self,
+        problem: "up.model.problem.Problem",
+        discount_factor: float,
+        reward_mode: str = "deadline",
+        goal_reward_enabled: bool = True,
+    ):
+        super().__init__(
+            problem,
+            discount_factor,
+            reward_mode=reward_mode,
+            goal_reward_enabled=goal_reward_enabled,
+        )
 
     def initial_state(self):
         """

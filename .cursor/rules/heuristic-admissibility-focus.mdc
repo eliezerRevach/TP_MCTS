@@ -1,0 +1,27 @@
+---
+description: Admissible-heuristic research focus and known bias cases
+alwaysApply: true
+---
+
+# Heuristic Admissibility Focus
+
+This project's main direction is to study and improve **heuristic admissibility** under deadlines, while also examining "admissible on average" behavior with explicit guarantees.
+
+## Core Research Priorities
+- Shift framing from pure reachability to reward maximization under deadline (reachability is a special case reward).
+- For every heuristic claim, state clearly:
+  - whether it is admissible, inadmissible, or only admissible in expectation;
+  - what guarantee is provided (worst-case bound, confidence bound, or none).
+- Prefer conservative lower-bound reasoning when claiming admissibility.
+
+## Mandatory Bias Check: m-Doors Family
+- Use the m-doors setting as a recurring sanity check for heuristic bias.
+- Known failure mode to track:
+  - A biased heuristic may suggest "collect all keys once, then move `n` steps".
+  - Real cost can behave like about `2*m*n` because each door may require returning for a different key.
+- Any heuristic update must be tested against this pattern and similar "poly(m) gap" constructions.
+
+## Evaluation Discipline
+- Include counterexamples where heuristic guidance looks good locally but is globally misleading.
+- If using average-case calibration, report confidence/variance and failure probability on adversarial structures (like m-doors).
+- Do not present average performance as admissibility unless a formal bound is given.

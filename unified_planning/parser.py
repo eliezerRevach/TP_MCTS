@@ -14,6 +14,9 @@ parser.add_argument('-ge', '--garbage_amount', help='how many garbage actions to
 parser.add_argument('-oe', '--object_amount', help='how many different objects in the domain', nargs='?', default=1, type=int)
 parser.add_argument('-k', '--k', help='K random actions in the max planner', nargs='?', default=10, type=int)
 parser.add_argument('-rm', '--reward_mode', help='reward mode: deadline or terminal', nargs='?', default='deadline')
+parser.add_argument('--goal_reward_enabled', help='enable terminal/goal reward: 1 (on) or 0 (off)', nargs='?', default=1, type=int, choices=[0, 1])
 parser.add_argument('--seed', help='random seed for reproducibility', nargs='?', default=None, type=int)
+parser.add_argument('-hn', '--heuristic_samples', help='number of CRN heuristic scenarios to average', nargs='?', default=50, type=int)
+parser.add_argument('-hm', '--heuristic_mode', help='heuristic mode: legacy | crn_fixed | crn_per_tree', nargs='?', default='crn_per_tree')
 
 args = parser.parse_args()

@@ -13,12 +13,30 @@ from unified_planning.engines.linked_list import LinkedListNode
 
 class Base_MCTS:
     def __init__(self, mdp: "up.engines.MDP", search_depth: int,
-                 exploration_constant: float, k: int):
+                 exploration_constant: float, k: int, heuristic_samples: int = 50,
+                 tree_seed: int = None, heuristic_mode: str = "crn_per_tree"):
         self._mdp = mdp
         self._search_depth = search_depth
         self._exploration_constant = exploration_constant
         self._root_node = None
         self._k = k
+        self._heuristic_samples = max(1, int(heuristic_samples))
+        self._heuristic_mode = heuristic_mode
+        valid_modes = {"legacy", "crn_fixed", "crn_per_tree"}
+        if self._heuristic_mode not in valid_modes:
+            raise ValueError(f"Unknown heuristic_mode: {self._heuristic_mode}. Expected one of {valid_modes}.")
+
+        self._tree_seed = random.getrandbits(32) if tree_seed is None else int(tree_seed)
+        self._scenario_seeds = []
+        if self._heuristic_mode == "crn_fixed":
+            # Legacy CRN experiment: same scenario family for every tree.
+            self._scenario_seeds = [1009 * (i + 1) + 17 for i in range(self._heuristic_samples)]
+        elif self._heuristic_mode == "crn_per_tree":
+            # Improved CRN: shared within tree, refreshed across trees.
+            local_rng = random.Random(self._tree_seed)
+            self._scenario_seeds = [local_rng.getrandbits(32) for _ in range(self._heuristic_samples)]
+        self._heuristic_avg_cache = {}
+        self._heuristic_scenario_cache = {}
 
     @property
     def mdp(self):
@@ -31,6 +49,14 @@ class Base_MCTS:
     @property
     def k(self):
         return self._k
+
+    @property
+    def heuristic_samples(self):
+        return self._heuristic_samples
+
+    @property
+    def heuristic_mode(self):
+        return self._heuristic_mode
 
     def root_state(self):
         return self.root_node.state
@@ -45,6 +71,65 @@ class Base_MCTS:
 
     def set_root_node(self, root_node):
         self._root_node = root_node
+
+    def _seeded_trpg_value(self, trpg_factory, seed: int):
+        """
+        Evaluate TRPG with a deterministic scenario seed (CRN).
+        """
+        np_state = np.random.get_state()
+        py_state = random.getstate()
+        np.random.seed(seed)
+        random.seed(seed)
+        try:
+            return trpg_factory()
+        finally:
+            np.random.set_state(np_state)
+            random.setstate(py_state)
+
+    @staticmethod
+    def _lb_signature(lower_bounds):
+        if not lower_bounds:
+            return ()
+        return tuple(sorted((action.name, value) for action, value in lower_bounds.items()))
+
+    @staticmethod
+    def _state_signature(state, current_time):
+        predicates = tuple(sorted(str(pred) for pred in state.predicates))
+        return predicates, current_time
+
+    def trpg_value(self, mdp, state, current_time=0, lower_bounds=None):
+        """
+        Heuristic mode switch:
+        - legacy: original behavior (single stochastic PTRPG call, no CRN averaging).
+        - crn_fixed: average PTRPG over fixed global CRN scenarios.
+        - crn_per_tree: average PTRPG over CRN scenarios refreshed per tree.
+        """
+        if self.heuristic_mode == "legacy":
+            h = up.engines.heuristics.TRPG(mdp, state, current_time)
+            return h.get_heuristic(lower_bounds)
+
+        state_sig = self._state_signature(state, current_time)
+        lb_sig = self._lb_signature(lower_bounds)
+        avg_key = (state_sig, lb_sig)
+        cached_avg = self._heuristic_avg_cache.get(avg_key)
+        if cached_avg is not None:
+            return cached_avg
+
+        total = 0.0
+        for scenario_id, seed in enumerate(self._scenario_seeds):
+            scenario_key = (scenario_id, state_sig, lb_sig)
+            value = self._heuristic_scenario_cache.get(scenario_key)
+            if value is None:
+                def run():
+                    h = up.engines.heuristics.TRPG(mdp, state, current_time)
+                    return h.get_heuristic(lower_bounds)
+                value = self._seeded_trpg_value(run, seed)
+                self._heuristic_scenario_cache[scenario_key] = value
+            total += value
+
+        avg_value = total / self.heuristic_samples
+        self._heuristic_avg_cache[avg_key] = avg_value
+        return avg_value
 
     def default_policy(self, state: "up.engines.State"):
         """ Choose a random action. Heustics can be used here to improve simulations. """
@@ -126,8 +211,9 @@ class MCTS(Base_MCTS):
     """
     def __init__(self, mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", root_node: "up.engines.SNode",
                  root_state: "up.engines.state.State", search_depth: int,
-                 exploration_constant: float, selection_type, k: int):
-        super().__init__(mdp, search_depth, exploration_constant, k)
+                 exploration_constant: float, selection_type, k: int, heuristic_samples: int = 50,
+                 tree_seed: int = None, heuristic_mode: str = "crn_per_tree"):
+        super().__init__(mdp, search_depth, exploration_constant, k, heuristic_samples, tree_seed, heuristic_mode)
         self.split_mdp = split_mdp
         create_snode = self.create_Snode_max if selection_type == 'max' else self.create_Snode
         snode, _ = create_snode(root_state, 0)
@@ -171,8 +257,7 @@ class MCTS(Base_MCTS):
         current_time = 0
         if isinstance(state, up.engines.CombinationState):
             current_time = state.current_time
-        h = up.engines.heuristics.TRPG(self.split_mdp, state, current_time)
-        return h.get_heuristic()
+        return self.trpg_value(self.split_mdp, state, current_time)
 
     def selection(self, snode: "up.engines.Snode"):
         """
@@ -268,8 +353,9 @@ class C_MCTS(Base_MCTS):
     """
     def __init__(self, mdp, root_node: "up.engines.C_SNode", root_state: "up.engines.state.State", search_depth: int,
                  exploration_constant: float, stn: "up.plans.stn.STNPlan", selection_type, k: int,
-                 previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None):
-        super().__init__(mdp, search_depth, exploration_constant, k)
+                 previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None, heuristic_samples: int = 50,
+                 tree_seed: int = None, heuristic_mode: str = "crn_per_tree"):
+        super().__init__(mdp, search_depth, exploration_constant, k, heuristic_samples, tree_seed, heuristic_mode)
         self._previous_chosen_action_node = previous_chosen_action_node
 
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
@@ -488,17 +574,15 @@ class C_MCTS(Base_MCTS):
         if snode.parent:
             current_time = snode.parent.stn.get_current_end_time()
             lower_bounds = snode.parent.stn.get_lower_bound_potential_end_action()
-        h = up.engines.heuristics.TRPG(self.mdp, snode.state, current_time)
-        return h.get_heuristic(lower_bounds)
+        return self.trpg_value(self.mdp, snode.state, current_time, lower_bounds)
 
     def heuristic_init(self, state, stn):
         current_time = stn.get_current_end_time()
-        h = up.engines.heuristics.TRPG(self.mdp, state, current_time)
-        return h.get_heuristic()
+        return self.trpg_value(self.mdp, state, current_time)
 
 
 def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int, exploration_constant: float,
-         selection_type='avg', k=10):
+         selection_type='avg', k=10, heuristic_samples: int = 50, heuristic_mode: str = "crn_per_tree"):
     stn = create_init_stn(mdp)
     root_state = mdp.initial_state()
 
@@ -510,8 +594,10 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
 
     while stn.get_current_end_time() <= mdp.deadline():
         print(f"started step {step}")
+        tree_seed = random.getrandbits(32) if heuristic_mode == "crn_per_tree" else None
         mcts = C_MCTS(mdp, root_node, root_state, search_depth, exploration_constant, stn, selection_type, k,
-                      previous_action_node)
+                      previous_action_node, heuristic_samples=heuristic_samples, tree_seed=tree_seed,
+                      heuristic_mode=heuristic_mode)
         action = mcts.search(search_time, selection_type)
 
         if action == -1:
@@ -550,7 +636,7 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
 
 def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: int, search_time: int,
                      search_depth: int, exploration_constant: float,
-                     selection_type='avg', k=10):
+                     selection_type='avg', k=10, heuristic_samples: int = 50, heuristic_mode: str = "crn_per_tree"):
     root_state = mdp.initial_state()
     history = []
     step = 0
@@ -559,7 +645,9 @@ def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: 
     while root_state.current_time < mdp.deadline():
         print(f"started step {step}")
 
-        mcts = MCTS(mdp, split_mdp, root_node, root_state, search_depth, exploration_constant, selection_type, k)
+        tree_seed = random.getrandbits(32) if heuristic_mode == "crn_per_tree" else None
+        mcts = MCTS(mdp, split_mdp, root_node, root_state, search_depth, exploration_constant, selection_type, k,
+                    heuristic_samples=heuristic_samples, tree_seed=tree_seed, heuristic_mode=heuristic_mode)
         action = mcts.search(search_time, selection_type)
 
         print(f"Current state is {root_state}")
