@@ -1,0 +1,165 @@
+PTRPG “admissible on average” and confidence bounds
+===================================================
+
+Let:
+
+- \(s\) be the current state.
+- \(\xi\) be a random variable representing the outcomes of all probabilistic actions in the relaxed environment (i.e., the “dice rolls”).
+- \(V^{\*}_{\text{rel}}(s)\) be the true optimal value (e.g., probability of success) in the relaxed environment.
+- \(h_{\text{PTRPG}}(s,\xi)\) be the value (e.g., success probability \(p\)) returned by **one run** of PTRPG when the random outcomes are fixed to \(\xi\).
+
+The “admissible on average” (hindsight optimization) inequality in the relaxed environment is:
+
+\[
+V^{\*}_{\text{rel}}(s) \le \mathbb{E}_{\xi}\!\left[h_{\text{PTRPG}}(s,\xi)\right].
+\]
+
+
+Why the inequality holds
+------------------------
+
+### 1) The true problem (optimal policy before outcomes are known)
+
+In the relaxed MDP, you must commit to a policy \(\pi\) **without** knowing the realization of \(\xi\). You therefore maximize expected reward:
+
+\[
+V^{\*}_{\text{rel}}(s)
+  = \max_{\pi} \mathbb{E}_{\xi}\!\left[\mathrm{Reward}(s,\pi,\xi)\right].
+\]
+
+Here \(\mathrm{Reward}(s,\pi,\xi)\) denotes the reward obtained starting from \(s\) when executing policy \(\pi\) under outcome realization \(\xi\).
+
+### 2) What PTRPG does (optimize after outcomes are revealed)
+
+PTRPG effectively samples \(\xi\) first (i.e., fixes the stochastic outcomes), and then computes the best achievable outcome for that particular realization. Conceptually:
+
+\[
+h_{\text{PTRPG}}(s,\xi) \approx \max_{\pi} \mathrm{Reward}(s,\pi,\xi).
+\]
+
+So \(h_{\text{PTRPG}}(s,\xi)\) is a **hindsight** (perfect‑foresight) value for the sampled \(\xi\).
+
+### 3) “Expected maximum” vs. “maximum expected” (hindsight optimization)
+
+A standard inequality is:
+
+\[
+\mathbb{E}_{\xi}\!\left[\max_{\pi} f(\pi,\xi)\right]
+  \ge \max_{\pi} \mathbb{E}_{\xi}\!\left[f(\pi,\xi)\right].
+\]
+
+Taking \(f(\pi,\xi) = \mathrm{Reward}(s,\pi,\xi)\):
+
+\[
+\mathbb{E}_{\xi}\!\left[\max_{\pi} \mathrm{Reward}(s,\pi,\xi)\right]
+  \ge \max_{\pi} \mathbb{E}_{\xi}\!\left[\mathrm{Reward}(s,\pi,\xi)\right]
+  = V^{\*}_{\text{rel}}(s).
+\]
+
+Using \(h_{\text{PTRPG}}(s,\xi) \approx \max_{\pi} \mathrm{Reward}(s,\pi,\xi)\), we get
+
+\[
+\mathbb{E}_{\xi}\!\left[h_{\text{PTRPG}}(s,\xi)\right]
+  \gtrsim V^{\*}_{\text{rel}}(s),
+\]
+
+and in the idealized hindsight setting (if PTRPG returns the exact hindsight optimum), this is exactly
+
+\[
+V^{\*}_{\text{rel}}(s)
+  \le \mathbb{E}_{\xi}\!\left[h_{\text{PTRPG}}(s,\xi)\right].
+\]
+
+
+Setup for a confidence bound
+----------------------------
+
+Let \(r_1,\dots,r_n\) be i.i.d. samples of \(\xi\). Define the random variables
+
+\[
+X_i := h_{\text{PTRPG}}(s,r_i), \qquad i = 1,\dots,n,
+\]
+
+and their empirical mean
+
+\[
+\hat{x}(s,n) := \frac{1}{n} \sum_{i=1}^{n} X_i.
+\]
+
+Let the true mean be
+
+\[
+\mu := \mathbb{E}_{\xi}\!\left[h_{\text{PTRPG}}(s,\xi)\right].
+\]
+
+Assume the boundedness condition:
+
+\[
+0 \le X_i \le 1 \quad \text{for all } i.
+\]
+
+### Goal (choose \(b\) for confidence \(1-\delta\))
+
+We want
+
+\[
+\Pr\big(\hat{x}(s,n) + b \ge \mu\big) \ge 1 - \delta.
+\]
+
+Equivalently,
+
+\[
+\Pr\big(\mu - \hat{x}(s,n) \ge b\big) \le \delta.
+\]
+
+### Hoeffding bound (one‑sided)
+
+By Hoeffding’s inequality for bounded i.i.d. variables in \([0,1]\),
+
+\[
+\Pr\big(\mu - \hat{x}(s,n) \ge b\big) \le \exp(-2 n b^{2}).
+\]
+
+So it suffices to choose \(b\) such that
+
+\[
+\exp(-2 n b^{2}) \le \delta.
+\]
+
+Taking logs:
+
+\[
+-2 n b^{2} \le \ln \delta
+  \iff 2 n b^{2} \ge \ln \frac{1}{\delta}
+  \iff b \ge \sqrt{\frac{\ln(1/\delta)}{2n}}.
+\]
+
+
+Final choice of \(b\)
+---------------------
+
+A standard tight choice is
+
+\[
+b(n,\delta) = \sqrt{\frac{\ln(1/\delta)}{2n}}.
+\]
+
+Then
+
+\[
+\Pr\big(\hat{x}(s,n) + b(n,\delta) \ge \mu\big) \ge 1 - \delta.
+\]
+
+
+Practical recipe (sketch)
+-------------------------
+
+1. **Common scenarios (CRN)**: sample \(N\) fixed random scenarios once, shared by all nodes.
+2. **One‑time PTRPG precompute**: run PTRPG‑style forward expansion once from the root (up to the deadline) under those scenarios; store, per node‑signature, the needed statistics.
+3. **\(O(1)\) node evaluation**: during TP‑MCTS, any node reads cached stats and computes its heuristic mean \(p\) in \(O(1)\) time (using the paper’s mapping (1)–(4)).
+4. **Confidence bonus**: compute Hoeffding
+   \[
+   b(n,\delta) = \sqrt{\frac{\ln(1/\delta)}{2n}}.
+   \]
+5. **Search score**: use \(p + b(n,\delta)\) for optimistic selection (UCB‑style).
+

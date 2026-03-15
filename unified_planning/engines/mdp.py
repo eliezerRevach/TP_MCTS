@@ -99,14 +99,14 @@ class MDP:
         next_state = up.engines.State(new_preds)
 
         terminal = self.is_terminal(next_state)
-        relevant_reward = 0
+        relevant_reward = -0.01  # Small step penalty to discourage unnecessary actions/loops
         # relevant_reward = self.check_action_relevant(state, action)
 
         # common = len(self.problem.goals.intersection(state.predicates))
         # reward = 100 if terminal else 2 ** (common - len(self.problem.goals))
 
         # reward = 10 if terminal else relevant_reward
-        reward = self.terminal_reward(terminal, next_state) if relevant_reward == 0 else relevant_reward
+        reward = self.terminal_reward(terminal, next_state) + relevant_reward
 
         return terminal, next_state, reward
 
@@ -247,7 +247,8 @@ class combinationMDP(MDP):
         # reward = 100 if terminal else 2 ** (common - len(self.problem.goals))
 
         # reward = 10 if terminal else -1
-        reward = self.terminal_reward(terminal, next_state)
+        step_penalty = -0.01  # Small step penalty to discourage unnecessary actions/loops
+        reward = self.terminal_reward(terminal, next_state) + step_penalty
 
         return terminal, next_state, reward
 

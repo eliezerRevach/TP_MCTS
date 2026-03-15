@@ -1,0 +1,6 @@
+# Prototype / Thesis Experiments
+
+- This codebase is a **prototype** for testing different algorithms for the thesis—not production.
+- **Prefer**: minimal code, fast experiments, fast results, readability.
+- **Avoid**: production-style robustness, catching every edge case, extra defensive code.
+- When adding or changing code, favor small, clear implementations over comprehensive handling of edge cases.
