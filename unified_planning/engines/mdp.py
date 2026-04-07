@@ -139,7 +139,9 @@ class MDP:
         probability = list(prob_outcomes.keys())[index]
         values = list(prob_outcomes.values())[index]
         for v in values:
-            if values[v]:
+            val = values[v]
+            is_true = bool(val.bool_constant_value()) if hasattr(val, "bool_constant_value") else bool(val)
+            if is_true:
                 add_predicates.add(v)
             else:
                 del_predicates.add(v)
@@ -166,6 +168,58 @@ class MDP:
                 del_predicates.update(delete)
 
         return add_predicates, del_predicates
+
+    def transition_function(self, state: "up.engines.State", action: "up.engines.Action"):
+        """
+        Enumerates next-state distribution for the given (state, action).
+
+        This is used by planners/solvers that need an *expected* evaluation of
+        probabilistic effects without sampling counterfactual outcomes.
+        """
+        # Base deterministic update (including non-probabilistic add/del).
+        base_preds = set(state.predicates)
+        base_preds |= action.add_effects
+        base_preds -= action.del_effects
+
+        # Collect per-probabilistic-effect outcome sets.
+        per_effect_outcomes = []
+        for pe in action.probabilistic_effects:
+            prob_outcomes = pe.probability_function(state, None)
+            if not prob_outcomes:
+                continue
+            # Convert mapping(prob -> {fact: bool}) into a list of (prob, add_set, del_set).
+            effect_outcomes = []
+            for p, assignments in prob_outcomes.items():
+                add_predicates = set()
+                del_predicates = set()
+                for fact, value in assignments.items():
+                    is_true = bool(value.bool_constant_value()) if hasattr(value, "bool_constant_value") else bool(value)
+                    if is_true:
+                        add_predicates.add(fact)
+                    else:
+                        del_predicates.add(fact)
+                effect_outcomes.append((float(p), add_predicates, del_predicates))
+            per_effect_outcomes.append(effect_outcomes)
+
+        # No probabilistic effects: deterministic transition.
+        if not per_effect_outcomes:
+            return [(up.engines.State(base_preds), 1.0)]
+
+        # Combine independent probabilistic effects via cartesian product.
+        transitions = []
+        for combo in product(*per_effect_outcomes):
+            prob = 1.0
+            add = set()
+            delete = set()
+            for p, add_set, del_set in combo:
+                prob *= p
+                add |= add_set
+                delete |= del_set
+            preds = set(base_preds)
+            preds |= add
+            preds -= delete
+            transitions.append((up.engines.State(preds), prob))
+        return transitions
 
 
 class combinationMDP(MDP):

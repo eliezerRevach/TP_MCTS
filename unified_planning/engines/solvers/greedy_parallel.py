@@ -45,17 +45,31 @@ def _score_action(
     if candidate_stn.get_current_end_time() > mdp.deadline():
         return -math.inf, None, None, None, False
 
-    terminal, next_state, reward = mdp.step(state, action)
     current_time = candidate_stn.get_current_end_time()
-    h = _heuristic_value(
-        mdp=mdp,
-        state=next_state,
-        current_time=current_time,
-        heuristic_name=heuristic_name,
-        temporal_heuristic_depth=temporal_heuristic_depth,
-    )
-    score = reward + heuristic_weight * h - 0.001 * current_time
-    return score, next_state, candidate_stn, candidate_prev, terminal
+    # Expected-value scoring over probabilistic outcomes.
+    transitions = mdp.transition_function(state, action)
+    if not transitions:
+        return -math.inf, None, None, None, False
+
+    step_penalty = -0.01
+    expected_reward = 0.0
+    expected_h = 0.0
+    any_terminal = False
+    for next_state, prob in transitions:
+        terminal = mdp.is_terminal(next_state)
+        any_terminal = any_terminal or terminal
+        expected_reward += prob * (mdp.terminal_reward(terminal, next_state) + step_penalty)
+        expected_h += prob * _heuristic_value(
+            mdp=mdp,
+            state=next_state,
+            current_time=current_time,
+            heuristic_name=heuristic_name,
+            temporal_heuristic_depth=temporal_heuristic_depth,
+        )
+
+    score = expected_reward + heuristic_weight * expected_h - 0.001 * current_time
+    # Do not return a sampled next_state here; sampling must only happen for the chosen action.
+    return score, None, candidate_stn, candidate_prev, any_terminal
 
 
 def plan(
@@ -114,10 +128,11 @@ def plan(
             if best is None or not math.isfinite(best_score):
                 break
 
-            action, (_, next_state, next_stn, next_prev, terminal) = best
+            action, (_, _, next_stn, next_prev, _) = best
             print(f"Current state is {root_state}")
             print(f"The chosen action is {action.name}")
 
+            terminal, next_state, _ = mdp.step(root_state, action)
             root_state = next_state
             stn = next_stn
             previous_action_node = next_prev
