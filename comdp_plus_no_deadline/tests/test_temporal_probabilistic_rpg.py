@@ -153,7 +153,55 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         )
         self.assertAlmostEqual(default_score, baseline_score)
 
-    def test_atom_half_split_even_and_odd_depth(self):
+    def test_atom_half_split_eligibility_single_precondition_only(self):
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="a_to_b",
+                    pos_preconditions=frozenset({"A"}),
+                    add_effects=frozenset({"B"}),
+                    duration_steps=1,
+                )
+            ],
+            facts={"A", "B"},
+        )
+
+        eligibility = heuristic._build_atom_eligibility()
+        self.assertIn("B", eligibility)
+
+    def test_atom_half_split_rejects_conjunctive_preconditions(self):
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="ac_to_b",
+                    pos_preconditions=frozenset({"A", "C"}),
+                    add_effects=frozenset({"B"}),
+                    duration_steps=1,
+                )
+            ],
+            facts={"A", "C", "B"},
+        )
+
+        eligibility = heuristic._build_atom_eligibility()
+        self.assertNotIn("B", eligibility)
+
+    def test_atom_half_split_rejects_delayed_effects(self):
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="a_to_b_d2",
+                    pos_preconditions=frozenset({"A"}),
+                    add_effects=frozenset({"B"}),
+                    duration_steps=2,
+                )
+            ],
+            facts={"A", "B"},
+        )
+
+        eligibility = heuristic._build_atom_eligibility()
+        self.assertNotIn("B", eligibility)
+
+    def test_atom_half_split_matches_baseline_on_simple_case(self):
         effect = SyntheticProbabilisticEffect(
             outcomes={
                 0.5: {"B": True},
@@ -186,32 +234,44 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
             strategy="atom_half_split",
         )
 
-        self.assertAlmostEqual(score_depth2, 0.75)
-        self.assertAlmostEqual(score_depth3, 0.875)
+        baseline_depth2 = heuristic.heuristic_score(
+            {"A"},
+            {"B"},
+            fixed_depth=2,
+            strategy="baseline",
+        )
+        baseline_depth3 = heuristic.heuristic_score(
+            {"A"},
+            {"B"},
+            fixed_depth=3,
+            strategy="baseline",
+        )
 
-    def test_atom_half_split_non_atom_fact_falls_back_to_baseline(self):
-        compound_fact = ("door", "open")
+        self.assertAlmostEqual(score_depth2, baseline_depth2)
+        self.assertAlmostEqual(score_depth3, baseline_depth3)
+
+    def test_atom_half_split_conjunctive_case_falls_back_to_baseline(self):
         heuristic = TemporalProbabilisticRPGHeuristic(
             actions=[
                 SyntheticAction(
-                    name="seed_to_compound",
-                    pos_preconditions=frozenset({"SEED"}),
-                    add_effects=frozenset({compound_fact}),
+                    name="ac_to_b",
+                    pos_preconditions=frozenset({"A", "C"}),
+                    add_effects=frozenset({"B"}),
                     duration_steps=1,
                 )
             ],
-            facts={"SEED", compound_fact},
+            facts={"A", "C", "B"},
         )
 
         baseline_score = heuristic.heuristic_score(
-            {"SEED"},
-            {compound_fact},
+            {"A", "C"},
+            {"B"},
             fixed_depth=1,
             strategy="baseline",
         )
         atom_split_score = heuristic.heuristic_score(
-            {"SEED"},
-            {compound_fact},
+            {"A", "C"},
+            {"B"},
             fixed_depth=1,
             strategy="atom_half_split",
         )
