@@ -50,6 +50,7 @@ def print_stats():
     print(f'Seed = {up.args.seed}')
     print(f'Heuristic = {up.args.heuristic_name}')
     print(f'Temporal Heuristic Depth = {up.args.temporal_heuristic_depth}')
+    print(f'Temporal Heuristic Strategy = {up.args.temporal_heuristic_strategy}')
 
 
 def set_seed():
@@ -60,7 +61,8 @@ def set_seed():
 
 
 def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
-                selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25):
+                selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
+                temporal_heuristic_strategy='baseline'):
     """
     Run split action to start and end actions logic - TP-MCTS approach
     """
@@ -105,6 +107,7 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
         k,
         heuristic_name,
         temporal_heuristic_depth,
+        temporal_heuristic_strategy,
     )
     if up.args.solver == 'greedy_parallel':
         up.engines.solvers.evaluate.evaluation_loop(runs, greedy_parallel_solver.plan, params)
@@ -134,7 +137,8 @@ def create_combination_domain(domain, deadline, object_amount, garbage_amount):
 
 
 def run_combination(domain, runs, solver, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
-                    selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25):
+                    selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
+                    temporal_heuristic_strategy='baseline'):
     """
     Run the combination logic - Mausem and Weld approach
     """
@@ -174,7 +178,16 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
     split_mdp = MDP(split_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
 
     if solver == 'rtdp':
-        params = (mdp, split_mdp, 90, search_time, search_depth, heuristic_name, temporal_heuristic_depth)
+        params = (
+            mdp,
+            split_mdp,
+            90,
+            search_time,
+            search_depth,
+            heuristic_name,
+            temporal_heuristic_depth,
+            temporal_heuristic_strategy,
+        )
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.rtdp.plan, params)
 
     else:
@@ -189,6 +202,7 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
             k,
             heuristic_name,
             temporal_heuristic_depth,
+            temporal_heuristic_strategy,
         )
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.combination_plan, params)
 
@@ -202,7 +216,8 @@ if up.args.domain_type == 'combination':
                     selection_type=up.args.selection_type, object_amount=up.args.object_amount,
                     garbage_amount=up.args.garbage_amount, k=up.args.k,
                     heuristic_name=up.args.heuristic_name,
-                    temporal_heuristic_depth=up.args.temporal_heuristic_depth)
+                    temporal_heuristic_depth=up.args.temporal_heuristic_depth,
+                    temporal_heuristic_strategy=up.args.temporal_heuristic_strategy)
 else:
     run_regular(domain=up.args.domain, domain_type=up.args.domain_type, runs=up.args.runs, deadline=up.args.deadline,
                 search_time=up.args.search_time,
@@ -210,4 +225,5 @@ else:
                 selection_type=up.args.selection_type, object_amount=up.args.object_amount,
                 garbage_amount=up.args.garbage_amount, k=up.args.k,
                 heuristic_name=up.args.heuristic_name,
-                temporal_heuristic_depth=up.args.temporal_heuristic_depth)
+                temporal_heuristic_depth=up.args.temporal_heuristic_depth,
+                temporal_heuristic_strategy=up.args.temporal_heuristic_strategy)

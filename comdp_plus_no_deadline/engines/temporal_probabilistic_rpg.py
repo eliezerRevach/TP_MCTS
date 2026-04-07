@@ -70,7 +70,9 @@ class TemporalProbabilisticRPGHeuristic:
         self._facts: Set[Fact] = set(facts or [])
         self._action_models = self._build_action_models()
         # Cross-query memoization to reuse the same fixed-depth computation.
-        self._query_cache: Dict[Tuple[frozenset[Fact], int, int], TemporalPropagationResult] = {}
+        self._query_cache: Dict[Tuple[frozenset[Fact], int, int, str], TemporalPropagationResult] = {}
+        # Dedicated memoization for the atom half-split experiment.
+        self._atom_split_cache: Dict[Tuple[frozenset[Fact], Fact, int, str], float] = {}
 
     @classmethod
     def from_problem(cls, problem) -> "TemporalProbabilisticRPGHeuristic":
@@ -83,11 +85,13 @@ class TemporalProbabilisticRPGHeuristic:
         state,
         fixed_depth: int = 25,
         start_time: float = 0.0,
+        strategy: str = "baseline",
         debug: bool = False,
     ) -> TemporalPropagationResult:
         state_facts = _extract_state_facts(state)
         start_layer = max(0, int(math.floor(start_time)))
-        query_key = (frozenset(state_facts), int(fixed_depth), start_layer)
+        chosen_strategy = self._normalize_strategy(strategy)
+        query_key = (frozenset(state_facts), int(fixed_depth), start_layer, chosen_strategy)
         if query_key in self._query_cache:
             cached = self._query_cache[query_key]
             return TemporalPropagationResult(
@@ -98,6 +102,16 @@ class TemporalProbabilisticRPGHeuristic:
                 fact_cache_hits=cached.fact_cache_hits,
                 action_cache_hits=cached.action_cache_hits,
             )
+
+        if chosen_strategy == "atom_half_split":
+            result = self._heuristic_propagate_atom_half_split(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
 
         depth = max(0, int(fixed_depth))
         facts = self._facts.union(state_facts)
@@ -214,12 +228,14 @@ class TemporalProbabilisticRPGHeuristic:
         aggregation: str = "product",
         fixed_depth: int = 25,
         start_time: float = 0.0,
+        strategy: str = "baseline",
         debug: bool = False,
     ):
         result = self.heuristic_propagate(
             state=state,
             fixed_depth=fixed_depth,
             start_time=start_time,
+            strategy=strategy,
             debug=debug,
         )
         final_probabilities = result.probabilities_by_layer[result.depth_used]
@@ -240,6 +256,170 @@ class TemporalProbabilisticRPGHeuristic:
         if debug:
             return score, result
         return score
+
+    @staticmethod
+    def _normalize_strategy(strategy: str) -> str:
+        value = (strategy or "baseline").strip().lower()
+        if value not in {"baseline", "atom_half_split"}:
+            raise ValueError(
+                f"Unknown temporal heuristic strategy: {strategy!r}. "
+                "Supported strategies: baseline, atom_half_split."
+            )
+        return value
+
+    @staticmethod
+    def _is_atom_fact(fact: Fact) -> bool:
+        return not isinstance(fact, (list, tuple, set, frozenset))
+
+    @staticmethod
+    def _combine_independent_successes(*probabilities: float) -> float:
+        failure = 1.0
+        for probability in probabilities:
+            failure *= 1.0 - _clamp_probability(probability)
+        return _clamp_probability(1.0 - failure)
+
+    def _heuristic_propagate_atom_half_split(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        _ = max(0, int(math.floor(start_time)))
+        facts = self._facts.union(state_facts)
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        state_signature = frozenset(state_facts)
+        fact_cache_hits = 0
+        action_cache_hits = 0
+
+        if depth == 0:
+            return TemporalPropagationResult(
+                probabilities_by_layer=probabilities_by_layer,
+                depth_used=depth,
+                traces=[],
+                cache_hit=False,
+                fact_cache_hits=0,
+                action_cache_hits=0,
+            )
+
+        for layer in range(1, depth + 1):
+            probabilities_by_layer[layer] = dict(probabilities_by_layer[layer - 1])
+
+        action_support_cache: Dict[str, float] = {}
+        one_step_probability_cache: Dict[Fact, float] = {}
+        one_step_achievers: Dict[Fact, List[TemporalRelaxedActionModel]] = {}
+        for action_model in self._action_models:
+            if action_model.effect_delay_steps != 1:
+                continue
+            for fact in action_model.add_probabilities.keys():
+                one_step_achievers.setdefault(fact, []).append(action_model)
+
+        zero_layer_probabilities = probabilities_by_layer[0]
+
+        def one_step_probability(fact: Fact) -> float:
+            nonlocal action_cache_hits
+            if fact in one_step_probability_cache:
+                return one_step_probability_cache[fact]
+
+            current = _clamp_probability(zero_layer_probabilities.get(fact, 0.0))
+            failure = 1.0
+            for action_model in one_step_achievers.get(fact, []):
+                if action_model.name in action_support_cache:
+                    support = action_support_cache[action_model.name]
+                    action_cache_hits += 1
+                else:
+                    probs_for_preconditions = {
+                        precondition: _clamp_probability(zero_layer_probabilities.get(precondition, 0.0))
+                        for precondition in action_model.preconditions
+                    }
+                    support = compute_precondition_support(
+                        action_model.preconditions,
+                        probs_for_preconditions,
+                        strict=True,
+                    )
+                    action_support_cache[action_model.name] = support
+
+                success = _clamp_probability(support * action_model.add_probabilities.get(fact, 0.0))
+                failure *= 1.0 - success
+
+            hazard = _clamp_probability(1.0 - failure)
+            one_step_probability_cache[fact] = _clamp_probability(current + (1.0 - current) * hazard)
+            return one_step_probability_cache[fact]
+
+        def atom_probability(fact: Fact, horizon: int) -> float:
+            nonlocal fact_cache_hits
+            horizon = max(0, int(horizon))
+            cache_key = (state_signature, fact, horizon, "atom_half_split")
+            if cache_key in self._atom_split_cache:
+                fact_cache_hits += 1
+                return self._atom_split_cache[cache_key]
+
+            if horizon == 0:
+                value = _clamp_probability(probabilities_by_layer[0].get(fact, 0.0))
+            elif horizon == 1:
+                value = one_step_probability(fact)
+            elif horizon % 2 == 0:
+                half = atom_probability(fact, horizon // 2)
+                value = self._combine_independent_successes(half, half)
+            else:
+                half = atom_probability(fact, horizon // 2)
+                first = atom_probability(fact, 1)
+                value = self._combine_independent_successes(first, half, half)
+
+            value = _clamp_probability(value)
+            self._atom_split_cache[cache_key] = value
+            return value
+
+        non_atomic_facts = [fact for fact in facts if not self._is_atom_fact(fact)]
+        baseline_final_probabilities: Dict[Fact, float] = {}
+        if non_atomic_facts:
+            baseline_result = self.heuristic_propagate(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                strategy="baseline",
+                debug=False,
+            )
+            baseline_final_probabilities = baseline_result.probabilities_by_layer[baseline_result.depth_used]
+
+        for fact in facts:
+            if self._is_atom_fact(fact):
+                probabilities_by_layer[depth][fact] = atom_probability(fact, depth)
+            else:
+                probabilities_by_layer[depth][fact] = _clamp_probability(
+                    baseline_final_probabilities.get(fact, probabilities_by_layer[0].get(fact, 0.0))
+                )
+
+        traces: List[TemporalLayerTrace] = []
+        if debug:
+            traces.append(
+                TemporalLayerTrace(
+                    layer=0,
+                    fact_probabilities=dict(probabilities_by_layer[0]),
+                )
+            )
+            traces.append(
+                TemporalLayerTrace(
+                    layer=depth,
+                    fact_probabilities=dict(probabilities_by_layer[depth]),
+                )
+            )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+        )
 
     def _build_action_models(self) -> List[TemporalRelaxedActionModel]:
         models: List[TemporalRelaxedActionModel] = []

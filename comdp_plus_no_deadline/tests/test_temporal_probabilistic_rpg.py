@@ -1,5 +1,6 @@
 import unittest
 from dataclasses import dataclass
+from typing import Mapping
 
 import unified_planning as up
 from unified_planning.shortcuts import BoolType, OverallPreconditionTiming
@@ -13,11 +14,21 @@ from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
 class SyntheticAction:
     name: str
     pos_preconditions: frozenset[str]
-    add_effects: frozenset[str]
+    add_effects: frozenset[object]
     duration_steps: int
+    probabilistic_effects: tuple = ()
 
     def duration_int(self) -> int:
         return self.duration_steps
+
+
+@dataclass(frozen=True)
+class SyntheticProbabilisticEffect:
+    outcomes: Mapping[float, Mapping[object, object]]
+
+    def probability_function(self, state, env):
+        del state, env
+        return self.outcomes
 
 
 class TestTemporalProbabilisticRPG(unittest.TestCase):
@@ -119,6 +130,127 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
 
         self.assertAlmostEqual(score_depth3, 0.0)
         self.assertAlmostEqual(score_depth4, 1.0)
+
+    def test_strategy_baseline_matches_default(self):
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="a_to_b",
+                    pos_preconditions=frozenset({"A"}),
+                    add_effects=frozenset({"B"}),
+                    duration_steps=1,
+                )
+            ],
+            facts={"A", "B"},
+        )
+
+        default_score = heuristic.heuristic_score({"A"}, {"B"}, fixed_depth=1)
+        baseline_score = heuristic.heuristic_score(
+            {"A"},
+            {"B"},
+            fixed_depth=1,
+            strategy="baseline",
+        )
+        self.assertAlmostEqual(default_score, baseline_score)
+
+    def test_atom_half_split_even_and_odd_depth(self):
+        effect = SyntheticProbabilisticEffect(
+            outcomes={
+                0.5: {"B": True},
+                0.4: {},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="a_to_b_prob",
+                    pos_preconditions=frozenset({"A"}),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect,),
+                )
+            ],
+            facts={"A", "B"},
+        )
+
+        score_depth2 = heuristic.heuristic_score(
+            {"A"},
+            {"B"},
+            fixed_depth=2,
+            strategy="atom_half_split",
+        )
+        score_depth3 = heuristic.heuristic_score(
+            {"A"},
+            {"B"},
+            fixed_depth=3,
+            strategy="atom_half_split",
+        )
+
+        self.assertAlmostEqual(score_depth2, 0.75)
+        self.assertAlmostEqual(score_depth3, 0.875)
+
+    def test_atom_half_split_non_atom_fact_falls_back_to_baseline(self):
+        compound_fact = ("door", "open")
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="seed_to_compound",
+                    pos_preconditions=frozenset({"SEED"}),
+                    add_effects=frozenset({compound_fact}),
+                    duration_steps=1,
+                )
+            ],
+            facts={"SEED", compound_fact},
+        )
+
+        baseline_score = heuristic.heuristic_score(
+            {"SEED"},
+            {compound_fact},
+            fixed_depth=1,
+            strategy="baseline",
+        )
+        atom_split_score = heuristic.heuristic_score(
+            {"SEED"},
+            {compound_fact},
+            fixed_depth=1,
+            strategy="atom_half_split",
+        )
+
+        self.assertAlmostEqual(atom_split_score, baseline_score)
+
+    def test_atom_half_split_reuses_fact_memo_across_queries(self):
+        effect = SyntheticProbabilisticEffect(
+            outcomes={
+                0.3: {"B": True},
+                0.7: {"B": False},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="a_to_b_prob",
+                    pos_preconditions=frozenset({"A"}),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect,),
+                )
+            ],
+            facts={"A", "B"},
+        )
+
+        first = heuristic.heuristic_propagate(
+            {"A"},
+            fixed_depth=3,
+            strategy="atom_half_split",
+        )
+        second = heuristic.heuristic_propagate(
+            {"A"},
+            fixed_depth=5,
+            strategy="atom_half_split",
+        )
+
+        self.assertFalse(first.cache_hit)
+        self.assertGreaterEqual(second.fact_cache_hits, 1)
 
 
 if __name__ == "__main__":

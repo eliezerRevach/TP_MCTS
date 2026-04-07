@@ -44,6 +44,7 @@ class TestGreedyParallel(unittest.TestCase):
             exploration_constant=10,
             heuristic_name="temporal_probabilistic_rpg",
             temporal_heuristic_depth=10,
+            temporal_heuristic_strategy="atom_half_split",
         )
         self.assertEqual(success, 1)
         self.assertLessEqual(makespan, 3)
@@ -66,6 +67,7 @@ class TestGreedyParallel(unittest.TestCase):
             exploration_constant=10,
             heuristic_name="temporal_probabilistic_rpg",
             temporal_heuristic_depth=10,
+            temporal_heuristic_strategy="baseline",
         )
         self.assertEqual(success, 0)
         self.assertEqual(makespan, -float("inf"))

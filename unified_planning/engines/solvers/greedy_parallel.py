@@ -11,9 +11,16 @@ def _heuristic_value(
     current_time: float,
     heuristic_name: str,
     temporal_heuristic_depth: int,
+    temporal_heuristic_strategy: str,
 ) -> float:
     if heuristic_name == "temporal_probabilistic_rpg":
-        return _temporal_heuristic(mdp, state, current_time, temporal_heuristic_depth)
+        return _temporal_heuristic(
+            mdp,
+            state,
+            current_time,
+            temporal_heuristic_depth,
+            temporal_heuristic_strategy,
+        )
     heuristic = up.engines.heuristics.TRPG(mdp, state, current_time)
     return heuristic.get_heuristic()
 
@@ -26,6 +33,7 @@ def _score_action(
     action: "up.engines.Action",
     heuristic_name: str,
     temporal_heuristic_depth: int,
+    temporal_heuristic_strategy: str,
     heuristic_weight: float,
 ):
     candidate_stn = stn.clone()
@@ -65,6 +73,7 @@ def _score_action(
             current_time=current_time,
             heuristic_name=heuristic_name,
             temporal_heuristic_depth=temporal_heuristic_depth,
+            temporal_heuristic_strategy=temporal_heuristic_strategy,
         )
 
     score = expected_reward + heuristic_weight * expected_h - 0.001 * current_time
@@ -82,6 +91,7 @@ def plan(
     k: int = 10,
     heuristic_name: str = "trpg",
     temporal_heuristic_depth: int = 25,
+    temporal_heuristic_strategy: str = "baseline",
 ):
     """
     Heuristic-only greedy dispatcher (no MCTS tree).
@@ -119,6 +129,7 @@ def plan(
                     action=action,
                     heuristic_name=heuristic_name,
                     temporal_heuristic_depth=temporal_heuristic_depth,
+                    temporal_heuristic_strategy=temporal_heuristic_strategy,
                     heuristic_weight=heuristic_weight,
                 )
                 if candidate[0] > best_score:

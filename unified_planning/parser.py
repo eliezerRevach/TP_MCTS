@@ -34,5 +34,11 @@ parser.add_argument(
     default=25,
     type=int,
 )
+parser.add_argument(
+    '--temporal_heuristic_strategy',
+    help='strategy for temporal_probabilistic_rpg: baseline or atom_half_split',
+    nargs='?',
+    default='baseline',
+)
 
 args = parser.parse_args()

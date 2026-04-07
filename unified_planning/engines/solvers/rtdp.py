@@ -15,6 +15,7 @@ class RTDP:
         search_depth: int,
         heuristic_name: str = "trpg",
         temporal_heuristic_depth: int = 25,
+        temporal_heuristic_strategy: str = "baseline",
     ):
         self._mdp = mdp
         self._root_state = root_state
@@ -24,6 +25,7 @@ class RTDP:
         self.split_mdp = split_mdp
         self.heuristic_name = heuristic_name
         self.temporal_heuristic_depth = temporal_heuristic_depth
+        self.temporal_heuristic_strategy = temporal_heuristic_strategy
 
     @property
     def mdp(self):
@@ -130,6 +132,7 @@ class RTDP:
                 state,
                 current_time,
                 self.temporal_heuristic_depth,
+                self.temporal_heuristic_strategy,
             )
         h = up.engines.heuristics.TRPG(self.split_mdp, state, current_time)
         return h.get_heuristic()
@@ -143,6 +146,7 @@ def plan(
     search_depth: int,
     heuristic_name: str = "trpg",
     temporal_heuristic_depth: int = 25,
+    temporal_heuristic_strategy: str = "baseline",
 ):
     root_state = mdp.initial_state()
 
@@ -155,6 +159,7 @@ def plan(
         search_depth,
         heuristic_name=heuristic_name,
         temporal_heuristic_depth=temporal_heuristic_depth,
+        temporal_heuristic_strategy=temporal_heuristic_strategy,
     )
 
     while root_state.current_time < mdp.deadline():
