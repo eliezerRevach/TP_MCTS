@@ -31,6 +31,12 @@ You can also choose domain directly:
 python -m comdp_plus_no_deadline.run_no_deadline --domain nasa_rover --object_amount 2 --domain_type regular --runs 3
 ```
 
+To use the optimistic probabilistic RPG heuristic:
+
+```bash
+python -m comdp_plus_no_deadline.run_no_deadline --domain nasa_rover --domain_type regular --heuristic_name probabilistic_rpg --heuristic_aggregation product --heuristic_layers 25
+```
+
 ## Run smoke benchmarks (all 5 presets)
 
 ```bash
@@ -42,5 +48,6 @@ python -m comdp_plus_no_deadline.run_smoke
 ```bash
 python -m comdp_plus_no_deadline.tests.test_no_deadline_setup
 python -m comdp_plus_no_deadline.tests.test_greedy_solver
+python -m comdp_plus_no_deadline.tests.test_probabilistic_rpg
 ```
 

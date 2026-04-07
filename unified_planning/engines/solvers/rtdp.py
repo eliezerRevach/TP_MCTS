@@ -3,15 +3,27 @@ import math
 import time
 import random
 
+from unified_planning.engines.solvers.mcts import _temporal_heuristic
+
 
 class RTDP:
-    def __init__(self, mdp, split_mdp, root_state: "up.engines.state.State", search_depth: int):
+    def __init__(
+        self,
+        mdp,
+        split_mdp,
+        root_state: "up.engines.state.State",
+        search_depth: int,
+        heuristic_name: str = "trpg",
+        temporal_heuristic_depth: int = 25,
+    ):
         self._mdp = mdp
         self._root_state = root_state
         self._search_depth = search_depth
         self.Q = {}
         self.current_time = 0
         self.split_mdp = split_mdp
+        self.heuristic_name = heuristic_name
+        self.temporal_heuristic_depth = temporal_heuristic_depth
 
     @property
     def mdp(self):
@@ -112,16 +124,38 @@ class RTDP:
         current_time = 0
         if isinstance(state, up.engines.CombinationState):
             current_time = state.current_time
+        if self.heuristic_name == "temporal_probabilistic_rpg":
+            return _temporal_heuristic(
+                self.split_mdp,
+                state,
+                current_time,
+                self.temporal_heuristic_depth,
+            )
         h = up.engines.heuristics.TRPG(self.split_mdp, state, current_time)
         return h.get_heuristic()
 
 
-def plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int):
+def plan(
+    mdp: "up.engines.MDP",
+    split_mdp: "up.engines.MDP",
+    steps: int,
+    search_time: int,
+    search_depth: int,
+    heuristic_name: str = "trpg",
+    temporal_heuristic_depth: int = 25,
+):
     root_state = mdp.initial_state()
 
     step = 0
     history = []
-    rtdp = RTDP(mdp, split_mdp, root_state, search_depth)
+    rtdp = RTDP(
+        mdp,
+        split_mdp,
+        root_state,
+        search_depth,
+        heuristic_name=heuristic_name,
+        temporal_heuristic_depth=temporal_heuristic_depth,
+    )
 
     while root_state.current_time < mdp.deadline():
         print(f"started step {step}")

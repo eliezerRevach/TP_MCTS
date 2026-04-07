@@ -10,7 +10,7 @@ Reference: `docs/Temporal_Planning___IJCAI25_Camera_Ready-2.txt`
 ## Problem Setting
 - Plan online in stochastic domains with durative, concurrent actions and deadlines.
 - Model used in the paper: CoMDP+ (extends fMDP/CoMDP with start/end effects, overall/end conditions, deadline constraints).
-- Objective in the paper baseline: maximize probability of reaching goal before deadline.
+- Objective in the paper baseline: maximize probability of reaching goal before deadline (historical baseline for comparison).
 
 ## Main Algorithms/Techniques to Keep in Mind
 - **TP-MCTS**: online MCTS-based planner that decides both *which* action and *when* to dispatch it.

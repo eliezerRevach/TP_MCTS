@@ -7,7 +7,13 @@ parser.add_argument('-sd', '--search_depth', help='search depth of ', nargs='?',
 parser.add_argument('-se', '--selection_type', help='selection type in MCTS algorithm', nargs='?', default='avg')
 parser.add_argument('-r', '--runs', help='how many runs to run the script', nargs='?', default=1, type=int)
 parser.add_argument('-dt', '--domain_type', help='combination, new approach or new approach same as the baseline', nargs='?', default='regular')
-parser.add_argument('-s', '--solver', help='solver', nargs='?', default='mcts')
+parser.add_argument(
+    '-s',
+    '--solver',
+    help='solver: mcts, rtdp, or greedy_parallel',
+    nargs='?',
+    default='mcts',
+)
 parser.add_argument('-do', '--domain', help='domain')
 parser.add_argument('-e', '--exploration_constant', help='the exploration constant for mcts solver', nargs='?', default=10, type=int)
 parser.add_argument('-ge', '--garbage_amount', help='how many garbage actions to add to the domain', nargs='?', default=0, type=int)
@@ -15,5 +21,18 @@ parser.add_argument('-oe', '--object_amount', help='how many different objects i
 parser.add_argument('-k', '--k', help='K random actions in the max planner', nargs='?', default=10, type=int)
 parser.add_argument('-rm', '--reward_mode', help='reward mode: deadline or terminal', nargs='?', default='deadline')
 parser.add_argument('--seed', help='random seed for reproducibility', nargs='?', default=None, type=int)
+parser.add_argument(
+    '--heuristic_name',
+    help='heuristic to evaluate leaf states: trpg or temporal_probabilistic_rpg',
+    nargs='?',
+    default='trpg',
+)
+parser.add_argument(
+    '--temporal_heuristic_depth',
+    help='fixed temporal lookahead depth for temporal_probabilistic_rpg',
+    nargs='?',
+    default=25,
+    type=int,
+)
 
 args = parser.parse_args()

@@ -74,6 +74,21 @@ def parse_args():
     parser.add_argument("--garbage_amount", type=int, default=0)
     parser.add_argument("--max_steps", type=int, default=250)
     parser.add_argument("--heuristic_weight", type=float, default=0.2)
+    parser.add_argument(
+        "--heuristic_name",
+        choices=["goal_count", "probabilistic_rpg", "temporal_probabilistic_rpg"],
+        default="goal_count",
+    )
+    parser.add_argument(
+        "--heuristic_aggregation",
+        choices=["product", "min"],
+        default="product",
+    )
+    parser.add_argument("--heuristic_layers", type=int, default=25)
+    parser.add_argument("--heuristic_epsilon", type=float, default=1e-6)
+    parser.add_argument("--goal_threshold", type=float, default=0.99)
+    parser.add_argument("--temporal_heuristic_depth", type=int, default=25)
+    parser.add_argument("--deadline", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--scenario", choices=PRESETS.keys(), default=None)
     return parser.parse_args(_CLI_ARGS)
@@ -93,20 +108,49 @@ def main():
             args.domain, args.object_amount, args.garbage_amount
         )
         mdp = MDP(converted_problem, discount_factor=0.95, reward_mode="terminal")
-        params = (mdp, args.max_steps, args.heuristic_weight)
+        params = (
+            mdp,
+            args.max_steps,
+            args.heuristic_weight,
+            args.heuristic_name,
+            args.heuristic_aggregation,
+            args.heuristic_layers,
+            args.heuristic_epsilon,
+            args.goal_threshold,
+            args.temporal_heuristic_depth,
+            args.deadline,
+        )
         result = evaluation_loop(args.runs, regular_greedy_plan, params)
     else:
         converted_problem = build_combination_problem(
             args.domain, args.object_amount, args.garbage_amount
         )
         mdp = combinationMDP(converted_problem, discount_factor=0.95, reward_mode="terminal")
-        params = (mdp, args.max_steps, args.heuristic_weight)
+        params = (
+            mdp,
+            args.max_steps,
+            args.heuristic_weight,
+            0.02,
+            args.heuristic_name,
+            args.heuristic_aggregation,
+            args.heuristic_layers,
+            args.heuristic_epsilon,
+            args.goal_threshold,
+            args.temporal_heuristic_depth,
+            args.deadline,
+        )
         result = evaluation_loop(args.runs, combination_greedy_plan, params)
 
     print("=== No-Deadline CoMDP+ Greedy Baseline ===")
     print(f"domain={args.domain} domain_type={args.domain_type}")
+    if args.deadline is not None:
+        print(f"deadline={args.deadline}")
     print(f"runs={result['runs']} success_rate={result['success_rate']:.3f}")
     print(f"avg_makespan={result['avg_makespan']:.3f}")
+    successful = [r for r in result["results"] if r.success == 1]
+    if successful:
+        avg_success_makespan = sum(r.makespan for r in successful) / len(successful)
+        print(f"avg_makespan_success_only={avg_success_makespan:.3f}")
     print(f"avg_plan_length={result['avg_plan_length']:.3f}")
     print(f"avg_cumulative_reward={result['avg_cumulative_reward']:.3f}")
 

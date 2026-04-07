@@ -8,7 +8,6 @@ alwaysApply: true
 This project's main direction is to study and improve **heuristic admissibility** under deadlines, while also examining "admissible on average" behavior with explicit guarantees.
 
 ## Core Research Priorities
-- Shift framing from pure reachability to reward maximization under deadline (reachability is a special case reward).
 - For every heuristic claim, state clearly:
   - whether it is admissible, inadmissible, or only admissible in expectation;
   - what guarantee is provided (worst-case bound, confidence bound, or none).

@@ -1,0 +1,36 @@
+flowchart TD
+  s0["State S0
+  tired=false
+  rock=none
+  car_out=false
+  free(hands)=free(legs)=true"] --> choose{"OR: choose which action(s) to start now"}
+
+  choose -->|"hands only"| actSearch["start search (dur=2)"]
+  choose -->|"legs only"| actGas["start push_gas (dur=2)"]
+  choose -->|"hands only"| actCar["start push_car (dur=2)"]
+  choose -->|"hands+legs"| actBoth["start push_car_gas (dur=4)"]
+  choose -->|"hands+legs"| actPlace["start place_rock(r) (dur=2)"]
+  choose -->|"needs both free overall"| actRest["start rest (dur=1)"]
+
+  actSearch --> chSearch((chance))
+  chSearch -->|"0.1"| sBad["State: got_rock(bad)"]
+  chSearch -->|"0.9"| sGood["State: got_rock(good)"]
+
+  actGas --> chGas((chance))
+  chGas -->|"p = 0.1/0.2/0.4 (none/bad/good)"| goal["Goal: car_out=true"]
+  chGas -->|"1-p"| s0
+
+  actCar --> chCar((chance))
+  chCar -->|"p = 0.1/0.3/0.48 (none/bad/good)"| goal
+  chCar -->|"0.4 tired"| tired["State: tired=true"]
+
+  actBoth --> chBoth((chance))
+  chBoth -->|"p = 0.2/0.4/0.9 (none/bad/good)"| goal
+  chBoth -->|"0.4 tired"| tired
+
+  actPlace --> chPlace((chance))
+  chPlace -->|"0.6"| placed["State: rock_under_car(r)=true"]
+  chPlace -->|"0.4 tired"| tired
+
+  actRest --> s0
+  tired --> actRest

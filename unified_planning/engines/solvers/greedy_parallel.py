@@ -1,0 +1,142 @@
+import math
+
+import unified_planning as up
+from unified_planning.engines.solvers.mcts import _temporal_heuristic
+from unified_planning.engines.utils import create_init_stn, update_stn
+
+
+def _heuristic_value(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    current_time: float,
+    heuristic_name: str,
+    temporal_heuristic_depth: int,
+) -> float:
+    if heuristic_name == "temporal_probabilistic_rpg":
+        return _temporal_heuristic(mdp, state, current_time, temporal_heuristic_depth)
+    heuristic = up.engines.heuristics.TRPG(mdp, state, current_time)
+    return heuristic.get_heuristic()
+
+
+def _score_action(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
+    previous_action_node: "up.plans.stn.STNPlanNode",
+    action: "up.engines.Action",
+    heuristic_name: str,
+    temporal_heuristic_depth: int,
+    heuristic_weight: float,
+):
+    candidate_stn = stn.clone()
+    candidate_prev = previous_action_node
+    try:
+        candidate_prev = update_stn(
+            candidate_stn,
+            action,
+            candidate_prev,
+            type="SetTime",
+        )
+    except Exception:
+        return -math.inf, None, None, None, False
+
+    if not candidate_stn.is_consistent():
+        return -math.inf, None, None, None, False
+    if candidate_stn.get_current_end_time() > mdp.deadline():
+        return -math.inf, None, None, None, False
+
+    terminal, next_state, reward = mdp.step(state, action)
+    current_time = candidate_stn.get_current_end_time()
+    h = _heuristic_value(
+        mdp=mdp,
+        state=next_state,
+        current_time=current_time,
+        heuristic_name=heuristic_name,
+        temporal_heuristic_depth=temporal_heuristic_depth,
+    )
+    score = reward + heuristic_weight * h - 0.001 * current_time
+    return score, next_state, candidate_stn, candidate_prev, terminal
+
+
+def plan(
+    mdp: "up.engines.MDP",
+    steps: int,
+    search_time: int,
+    search_depth: int,
+    exploration_constant: float,
+    selection_type: str = "avg",
+    k: int = 10,
+    heuristic_name: str = "trpg",
+    temporal_heuristic_depth: int = 25,
+):
+    """
+    Heuristic-only greedy dispatcher (no MCTS tree).
+
+    At each decision step, greedily dispatches a feasible set of actions while
+    staying STN-consistent. Action scoring is immediate reward + heuristic value.
+    """
+    del search_time, search_depth, exploration_constant, selection_type, k
+
+    stn = create_init_stn(mdp)
+    root_state = mdp.initial_state()
+    previous_action_node = None
+    max_parallel_set_size = 32
+    heuristic_weight = 0.2
+    step = 0
+
+    while stn.get_current_end_time() <= mdp.deadline() and step < steps:
+        print(f"started step {step}")
+        decision_time = stn.get_current_end_time()
+        chosen_in_set = 0
+
+        while chosen_in_set < max_parallel_set_size:
+            legal_actions = mdp.legal_actions(root_state)
+            if not legal_actions:
+                break
+
+            best = None
+            best_score = -math.inf
+            for action in legal_actions:
+                candidate = _score_action(
+                    mdp=mdp,
+                    state=root_state,
+                    stn=stn,
+                    previous_action_node=previous_action_node,
+                    action=action,
+                    heuristic_name=heuristic_name,
+                    temporal_heuristic_depth=temporal_heuristic_depth,
+                    heuristic_weight=heuristic_weight,
+                )
+                if candidate[0] > best_score:
+                    best_score = candidate[0]
+                    best = (action, candidate)
+
+            if best is None or not math.isfinite(best_score):
+                break
+
+            action, (_, next_state, next_stn, next_prev, terminal) = best
+            print(f"Current state is {root_state}")
+            print(f"The chosen action is {action.name}")
+
+            root_state = next_state
+            stn = next_stn
+            previous_action_node = next_prev
+            chosen_in_set += 1
+
+            print(f"The time of the plan so far: {stn.get_current_end_time()}")
+            if terminal:
+                print(f"Current state is {root_state}")
+                print(f"The amount of time the plan took: {stn.get_current_end_time()}")
+                return 1, stn.get_current_end_time()
+
+            # Keep each dispatch step as one parallel time slice.
+            if stn.get_current_end_time() > decision_time:
+                break
+
+        if chosen_in_set == 0:
+            print("A valid plan is not found")
+            return 0, -math.inf
+        step += 1
+
+    print("A valid plan is not found")
+    return 0, -math.inf

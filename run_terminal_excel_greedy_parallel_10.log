@@ -1,0 +1,1336 @@
+Model = nasa_rover
+Solver = greedy_parallel
+Selection Type = rootInterval
+Exploration Constant = 10
+Search time = 1
+Search depth = 40
+Deadline = 20
+Domain Type = regular
+Object Amount = 1
+Garbage Action Amount = 0
+K Random Actions = 10
+Reward Mode = terminal
+Seed = 123
+Heuristic = temporal_probabilistic_rpg
+Temporal Heuristic Depth = 25
+Compilation Time nasa_rover object=1, garbage=0: 0.048290252685546875 seconds
+Action amount= 33, Proposition amount= 9
+Started round 0
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 8
+Current state is state: free_s(s1) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x0_h0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The amount of time the plan took: 16
+Started round 1
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; have_image(r0, o0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 12
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; communicated_image_data(o0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; communicated_image_data(o0) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 13
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; communicated_image_data(o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 13
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; communicated_image_data(o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h0, x0) ; ready(h1, x0) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 7
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; free_h(h1) ; communicated_image_data(o0) ; full(s0) ; free_s(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; free_h(h1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; free_h(h1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; free_h(h1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; ready_to_drop(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; ready_to_drop(s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 15
+started step 8
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 15
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+started step 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 17
+started step 10
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; 
+The chosen action is start_sample_rock_good_r0_s1_x0_h0
+The time of the plan so far: 17
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 18
+started step 11
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 18
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; ready(h0, x0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 18
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_image_data(o0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 19
+started step 12
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_image_data(o0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 19
+started step 13
+A valid plan is not found
+Started round 2
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 8
+Current state is state: free_s(s1) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x0_h0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The amount of time the plan took: 16
+Started round 3
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 12
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 13
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 8
+Current state is state: have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; communicated_rock_data(x1) ; ready(h0, x0) ; free_s(s0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s0_x0_h0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 17
+started step 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 17
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 18
+started step 10
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 18
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s0_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_sample_rock_good_r0_s0_x0_h0
+The time of the plan so far: 19
+started step 11
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 19
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 19
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 19
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 20
+started step 12
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 20
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 20
+started step 13
+A valid plan is not found
+Started round 4
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; have_image(r0, o0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 5
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; full(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; full(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; full(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; full(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s0) ; have_rock_analysis(r0, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; have_rock_analysis(r0, x1) ; inExecution(start-turn_on_dropping_s1) ; full(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-turn_on_good_hand_h0_x0) ; full(s0) ; have_rock_analysis(r0, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; full(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 15
+started step 6
+Current state is state: have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s0) ; ready_to_drop(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 15
+Current state is state: have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; full(s0) ; ready_to_drop(s0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 15
+Current state is state: free_s(s1) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; full(s0) ; ready_to_drop(s0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 15
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s0) ; ready_to_drop(s0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 15
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 16
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 16
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: free_s(s1) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The amount of time the plan took: 16
+Started round 5
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 8
+Current state is state: free_s(s1) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x0_h0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 15
+started step 9
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 15
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The amount of time the plan took: 16
+Started round 6
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 13
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 8
+Current state is state: free_s(s1) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x0_h0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The amount of time the plan took: 16
+Started round 7
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 13
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 8
+Current state is state: have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; free_h(h1) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; free_h(h1) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; free_h(h1) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; free_h(h1) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; free_h(h1) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 15
+started step 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 15
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+started step 10
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 17
+started step 11
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 18
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; have_image(r0, o0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The amount of time the plan took: 18
+Started round 8
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 8
+Current state is state: free_s(s1) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x0_h0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 15
+started step 9
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The amount of time the plan took: 16
+Started round 9
+started step 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; free_s(s0) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 0
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_h(h1) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s0) ; inExecution(start-turn_on_dropping_s1) ; ready(h1, x0) ; 
+The chosen action is start_turn_on_good_hand_h0_x1
+The time of the plan so far: 0
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s0) ; free_c(c0) ; inExecution(start-turn_on_dropping_s1) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 1
+started step 1
+Current state is state: store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x1) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 1
+Current state is state: free_s(s1) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 4
+started step 2
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_take_image_r0_o0_c0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; ready_to_drop(s0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s0
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; free_s(s0) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is start_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 4
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 4
+Current state is state: calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-sample_rock_good_r0_s1_x1_h0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; ready(h0, x1) ; 
+The chosen action is end_sample_rock_good_r0_s1_x1_h0
+The time of the plan so far: 9
+started step 3
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; free_h(h0) ; good(h0) ; free_c(c0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_good_hand_h0_x0
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_rock_data_r0_x1
+The time of the plan so far: 9
+Current state is state: free_s(s1) ; calibrated(c0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_turn_on_dropping_s1
+The time of the plan so far: 9
+Current state is state: calibrated(c0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-take_image_r0_o0_c0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is end_take_image_r0_o0_c0
+The time of the plan so far: 10
+started step 4
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_communicate_image_data_r0_o0
+The time of the plan so far: 10
+Current state is state: store_of(s0, r0) ; have_image(r0, o0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; inExecution(start-communicate_image_data_r0_o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; 
+The chosen action is start_calibrate_c0_o0
+The time of the plan so far: 10
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; inExecution(start-turn_on_dropping_s1) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; 
+The chosen action is end_turn_on_dropping_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-turn_on_good_hand_h0_x0) ; have_rock_analysis(r0, x1) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_turn_on_good_hand_h0_x0
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; inExecution(start-communicate_image_data_r0_o0) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is start_drop_s1
+The time of the plan so far: 10
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_rock_data_r0_x1) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_rock_data_r0_x1
+The time of the plan so far: 11
+started step 5
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; have_rock_analysis(r0, x1) ; communicated_rock_data(x1) ; ready(h0, x0) ; ready(h1, x0) ; inExecution(start-communicate_image_data_r0_o0) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_communicate_image_data_r0_o0
+The time of the plan so far: 12
+started step 6
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; inExecution(start-drop_s1) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; full(s1) ; ready_to_drop(s1) ; 
+The chosen action is end_drop_s1
+The time of the plan so far: 13
+started step 7
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-sample_rock_r0_s0_x0_h1) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; ready(h0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_sample_rock_r0_s0_x0_h1
+The time of the plan so far: 14
+started step 8
+Current state is state: free_s(s1) ; have_image(r0, o0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_communicate_rock_data_r0_x0
+The time of the plan so far: 14
+Current state is state: free_s(s1) ; have_image(r0, o0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_sample_rock_good_r0_s1_x0_h0
+The time of the plan so far: 14
+Current state is state: have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; inExecution(start-calibrate_c0_o0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_calibrate_c0_o0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_turn_on_dropping_s0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_h(h1) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; have_rock_analysis(r0, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is turn_on_hand_h1_x0
+The time of the plan so far: 14
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; inExecution(start-turn_on_dropping_s0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready(h0, x0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_turn_on_dropping_s0
+The time of the plan so far: 15
+started step 9
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; inExecution(start-communicate_rock_data_r0_x0) ; store_of(s0, r0) ; store_of(s1, r0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; have_rock_analysis(r0, x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is start_drop_s0
+The time of the plan so far: 15
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; inExecution(start-communicate_rock_data_r0_x0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The chosen action is end_communicate_rock_data_r0_x0
+The time of the plan so far: 16
+Current state is state: calibrated(c0, o0) ; have_image(r0, o0) ; inExecution(start-sample_rock_good_r0_s1_x0_h0) ; have_rock_analysis(r0, x0) ; store_of(s0, r0) ; store_of(s1, r0) ; inExecution(start-drop_s0) ; on_board(c0, r0) ; hand_of(h0, r0) ; hand_of(h1, r0) ; good(h0) ; free_c(c0) ; communicated_rock_data(x0) ; communicated_rock_data(x1) ; communicated_image_data(o0) ; full(s0) ; ready_to_drop(s0) ; ready(h0, x0) ; free_s(s0) ; ready(h1, x0) ; have_rock_analysis(r0, x1) ; 
+The amount of time the plan took: 16
+Completed = 10
+Amount of success = 8
+Average success time = 16.25
+STD success time = 0.25
