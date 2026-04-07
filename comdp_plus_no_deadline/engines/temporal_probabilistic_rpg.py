@@ -112,6 +112,15 @@ class TemporalProbabilisticRPGHeuristic:
             )
             self._query_cache[query_key] = result
             return result
+        if chosen_strategy == "atom_backtrack_exact":
+            result = self._heuristic_propagate_atom_backtrack_exact(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
 
         depth = max(0, int(fixed_depth))
         facts = self._facts.union(state_facts)
@@ -260,10 +269,10 @@ class TemporalProbabilisticRPGHeuristic:
     @staticmethod
     def _normalize_strategy(strategy: str) -> str:
         value = (strategy or "baseline").strip().lower()
-        if value not in {"baseline", "atom_half_split"}:
+        if value not in {"baseline", "atom_half_split", "atom_backtrack_exact"}:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, atom_half_split."
+                "Supported strategies: baseline, atom_half_split, atom_backtrack_exact."
             )
         return value
 
@@ -436,6 +445,132 @@ class TemporalProbabilisticRPGHeuristic:
                         arrivals=arrivals,
                     )
                 )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+        )
+
+    def _heuristic_propagate_atom_backtrack_exact(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        del start_time
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        achievers_by_fact: Dict[Fact, List[TemporalRelaxedActionModel]] = {}
+        for action_model in self._action_models:
+            for fact in action_model.add_probabilities.keys():
+                achievers_by_fact.setdefault(fact, []).append(action_model)
+
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        fact_memo: Dict[Tuple[Fact, int], float] = {}
+        action_term_memo: Dict[Tuple[str, Fact, int], float] = {}
+        recursion_stack: Set[Tuple[Fact, int]] = set()
+
+        def is_atom_action(action_model: TemporalRelaxedActionModel) -> bool:
+            return (
+                len(action_model.preconditions) == 0
+                or action_model.preconditions.issubset(state_facts)
+            )
+
+        def fact_probability(fact: Fact, horizon: int) -> float:
+            nonlocal fact_cache_hits
+            horizon = int(horizon)
+            if horizon < 0:
+                return 0.0
+            key = (fact, horizon)
+            if key in fact_memo:
+                fact_cache_hits += 1
+                return fact_memo[key]
+            if key in recursion_stack:
+                # Conservative fallback for cyclic dependencies.
+                return 0.0
+
+            if fact in state_facts:
+                value = 1.0
+            elif horizon == 0:
+                value = 0.0
+            else:
+                recursion_stack.add(key)
+                failure = 1.0
+                for action_model in achievers_by_fact.get(fact, []):
+                    action_key = (action_model.name, fact, horizon)
+                    if action_key in action_term_memo:
+                        action_cache_hits += 1
+                        achiever_failure = action_term_memo[action_key]
+                    else:
+                        delay = max(0, int(action_model.effect_delay_steps))
+                        add_probability = _clamp_probability(
+                            action_model.add_probabilities.get(fact, 0.0)
+                        )
+                        if add_probability <= 0.0 or horizon < delay:
+                            achiever_failure = 1.0
+                        else:
+                            first_completion = max(1, delay)
+                            attempts = horizon - first_completion + 1
+                            if attempts <= 0:
+                                achiever_failure = 1.0
+                            elif is_atom_action(action_model):
+                                achiever_failure = _clamp_probability(
+                                    (1.0 - add_probability) ** attempts
+                                )
+                            else:
+                                achiever_failure = 1.0
+                                for completion_time in range(first_completion, horizon + 1):
+                                    available_horizon = completion_time - delay
+                                    precondition_support = 1.0
+                                    for precondition in action_model.preconditions:
+                                        precondition_support *= fact_probability(
+                                            precondition,
+                                            available_horizon,
+                                        )
+                                    step_success = _clamp_probability(
+                                        add_probability * precondition_support
+                                    )
+                                    achiever_failure *= 1.0 - step_success
+                                achiever_failure = _clamp_probability(achiever_failure)
+                        action_term_memo[action_key] = achiever_failure
+
+                    failure *= achiever_failure
+                recursion_stack.remove(key)
+                value = _clamp_probability(1.0 - failure)
+
+            fact_memo[key] = value
+            return value
+
+        for fact in facts:
+            probabilities_by_layer[depth][fact] = fact_probability(fact, depth)
+
+        traces: List[TemporalLayerTrace] = []
+        if debug:
+            traces.append(
+                TemporalLayerTrace(
+                    layer=0,
+                    fact_probabilities=dict(probabilities_by_layer[0]),
+                )
+            )
+            traces.append(
+                TemporalLayerTrace(
+                    layer=depth,
+                    fact_probabilities=dict(probabilities_by_layer[depth]),
+                )
+            )
 
         return TemporalPropagationResult(
             probabilities_by_layer=probabilities_by_layer,

@@ -36,7 +36,11 @@ parser.add_argument(
 )
 parser.add_argument(
     '--temporal_heuristic_strategy',
-    help='strategy for temporal_probabilistic_rpg: baseline or atom_half_split',
+    help=(
+        'strategy for temporal_probabilistic_rpg: baseline (layered), '
+        'atom_half_split (approximate half-interval on eligible atoms), '
+        'or atom_backtrack_exact (memoized exact atom backtrack vs horizon)'
+    ),
     nargs='?',
     default='baseline',
 )

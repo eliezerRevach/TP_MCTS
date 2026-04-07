@@ -312,6 +312,88 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         self.assertFalse(first.cache_hit)
         self.assertGreaterEqual(second.fact_cache_hits, 1)
 
+    def test_atom_backtrack_exact_matches_closed_form_single_step_atom(self):
+        p_add = 0.3
+        effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_add: {"DOOR": True},
+                1.0 - p_add: {},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="search_and_open",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect,),
+                )
+            ],
+            facts={"DOOR"},
+        )
+
+        depth = 5
+        score = heuristic.heuristic_score(
+            set(),
+            {"DOOR"},
+            fixed_depth=depth,
+            strategy="atom_backtrack_exact",
+        )
+        expected = 1.0 - (1.0 - p_add) ** depth
+        self.assertAlmostEqual(score, expected)
+
+    def test_atom_backtrack_exact_matches_closed_form_two_step_chain(self):
+        p_key = 0.4
+        p_open_with_key = 0.6
+        get_key_effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_key: {"KEY": True},
+                1.0 - p_key: {},
+            }
+        )
+        open_effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_open_with_key: {"DOOR": True},
+                1.0 - p_open_with_key: {},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="search_key",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(get_key_effect,),
+                ),
+                SyntheticAction(
+                    name="open_with_key",
+                    pos_preconditions=frozenset({"KEY"}),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(open_effect,),
+                ),
+            ],
+            facts={"KEY", "DOOR"},
+        )
+
+        depth = 5
+        score = heuristic.heuristic_score(
+            set(),
+            {"DOOR"},
+            fixed_depth=depth,
+            strategy="atom_backtrack_exact",
+        )
+
+        expected_failure = 1.0
+        for i in range(1, depth + 1):
+            key_by_prev = 1.0 - (1.0 - p_key) ** (i - 1)
+            step_success = p_open_with_key * key_by_prev
+            expected_failure *= 1.0 - step_success
+        expected = 1.0 - expected_failure
+        self.assertAlmostEqual(score, expected)
+
 
 if __name__ == "__main__":
     unittest.main()
