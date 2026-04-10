@@ -444,5 +444,182 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         self.assertAlmostEqual(score, expected)
 
 
+class TestExpectedTime(unittest.TestCase):
+    """Tests for TemporalProbabilisticRPGHeuristic.heuristic_expected_time."""
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _brute_force_expected_time(failure_at_t, max_t=50_000):
+        """Sum failure_at_t(t) for t=0..max_t until convergence.
+
+        The tail-sum formula E[T] = sum_{t=0}^{inf} P(T > t) includes the t=0
+        term which is always 1.0 for any goal not yet in the initial state.
+        """
+        E_T = 0.0
+        for t in range(0, max_t + 1):
+            f = failure_at_t(t)
+            E_T += f
+            if f < 1e-14:
+                break
+        return E_T
+
+    # ------------------------------------------------------------------
+    # single atom (exact closed form: E[T] = 1/p)
+    # ------------------------------------------------------------------
+
+    def test_expected_time_single_atom(self):
+        p_add = 0.3
+        effect = SyntheticProbabilisticEffect(
+            outcomes={p_add: {"DOOR": True}, 1.0 - p_add: {}}
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="try_open",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect,),
+                )
+            ],
+            facts={"DOOR"},
+        )
+        result = heuristic.heuristic_expected_time(set(), {"DOOR"})
+        self.assertAlmostEqual(result, 1.0 / p_add, places=6)
+
+    def test_expected_time_deterministic_atom(self):
+        effect = SyntheticProbabilisticEffect(
+            outcomes={1.0: {"DOOR": True}}
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="open",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect,),
+                )
+            ],
+            facts={"DOOR"},
+        )
+        result = heuristic.heuristic_expected_time(set(), {"DOOR"})
+        self.assertAlmostEqual(result, 1.0, places=6)
+
+    # ------------------------------------------------------------------
+    # two-step chain A -> B: compare against brute-force sum
+    # ------------------------------------------------------------------
+
+    def test_expected_time_two_step_chain(self):
+        p_key = 0.4
+        p_open = 0.6
+        get_key_effect = SyntheticProbabilisticEffect(
+            outcomes={p_key: {"KEY": True}, 1.0 - p_key: {}}
+        )
+        open_effect = SyntheticProbabilisticEffect(
+            outcomes={p_open: {"DOOR": True}, 1.0 - p_open: {}}
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="get_key",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(get_key_effect,),
+                ),
+                SyntheticAction(
+                    name="open_door",
+                    pos_preconditions=frozenset({"KEY"}),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(open_effect,),
+                ),
+            ],
+            facts={"KEY", "DOOR"},
+        )
+
+        # Brute-force reference: failure_door(t) = prod_{s=1}^{t} (1 - p_open*(1-(1-p_key)^(s-1)))
+        # At t=0 the product is empty, so failure_door(0) = 1.0.
+        def brute_failure(t):
+            f = 1.0
+            for s in range(1, t + 1):
+                key_avail = 1.0 - (1.0 - p_key) ** (s - 1)
+                f *= 1.0 - p_open * key_avail
+            return f  # = 1.0 at t=0
+
+        expected = self._brute_force_expected_time(brute_failure)
+        result = heuristic.heuristic_expected_time(set(), {"DOOR"})
+        self.assertAlmostEqual(result, expected, places=4)
+
+    # ------------------------------------------------------------------
+    # conjunctive goals: E[max(T_A, T_B)] for two independent atoms
+    # ------------------------------------------------------------------
+
+    def test_expected_time_conjunctive_goals(self):
+        # Use p values that differ from 1-p to avoid duplicate dict keys in outcomes.
+        p_a = 0.4
+        p_b = 0.3
+        effect_a = SyntheticProbabilisticEffect(
+            outcomes={p_a: {"A": True}, 1.0 - p_a: {}}
+        )
+        effect_b = SyntheticProbabilisticEffect(
+            outcomes={p_b: {"B": True}, 1.0 - p_b: {}}
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="do_a",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect_a,),
+                ),
+                SyntheticAction(
+                    name="do_b",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect_b,),
+                ),
+            ],
+            facts={"A", "B"},
+        )
+
+        # Brute-force: joint_failure(t) = 1 - P(A by t)*P(B by t)
+        #            = 1 - (1-(1-p_a)^t) * (1-(1-p_b)^t)
+        # At t=0 both facts are unachieved, so joint_failure(0) = 1.0.
+        def brute_joint_failure(t):
+            p_a_by_t = 1.0 - (1.0 - p_a) ** t
+            p_b_by_t = 1.0 - (1.0 - p_b) ** t
+            return 1.0 - p_a_by_t * p_b_by_t  # = 1.0 at t=0
+
+        expected = self._brute_force_expected_time(brute_joint_failure)
+        result = heuristic.heuristic_expected_time(set(), {"A", "B"})
+        self.assertAlmostEqual(result, expected, places=3)
+
+    # ------------------------------------------------------------------
+    # edge cases
+    # ------------------------------------------------------------------
+
+    def test_expected_time_unreachable_returns_inf(self):
+        heuristic = TemporalProbabilisticRPGHeuristic(actions=[], facts={"DOOR"})
+        result = heuristic.heuristic_expected_time(set(), {"DOOR"})
+        self.assertEqual(result, float("inf"))
+
+    def test_expected_time_already_achieved_returns_zero(self):
+        heuristic = TemporalProbabilisticRPGHeuristic(actions=[], facts={"DOOR"})
+        result = heuristic.heuristic_expected_time({"DOOR"}, {"DOOR"})
+        self.assertAlmostEqual(result, 0.0, places=10)
+
+    def test_expected_time_empty_goals_returns_zero(self):
+        heuristic = TemporalProbabilisticRPGHeuristic(actions=[], facts=set())
+        result = heuristic.heuristic_expected_time(set(), set())
+        self.assertAlmostEqual(result, 0.0, places=10)
+
+
 if __name__ == "__main__":
     unittest.main()

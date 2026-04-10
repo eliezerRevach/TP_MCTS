@@ -853,6 +853,243 @@ class TemporalProbabilisticRPGHeuristic:
             action_cache_hits=action_cache_hits,
         )
 
+    def heuristic_expected_time(
+        self,
+        state,
+        goal_facts: Iterable[Fact],
+        epsilon: float = 1e-12,
+        max_iter: int = 100_000,
+    ) -> float:
+        """
+        Estimate E[T_goal] — expected steps to achieve all goal facts — without
+        any deadline or fixed depth.
+
+        Uses the tail-sum identity:
+            E[T] = sum_{t=0}^{inf} P(T > t) = sum_{t=0}^{inf} failure(t)
+
+        where failure(t) is the probability that the goal has NOT been achieved
+        by step t, represented as a product formula.  The sum is accumulated
+        until the joint failure drops below `epsilon`.
+
+        For atom actions (all preconditions satisfied in the current state) the
+        per-fact expected time reduces to the exact closed-form 1/p (geometric
+        distribution), so no iteration is needed.
+
+        For conjunctive goals {g1, ..., gk} the joint failure at step t is:
+            1 - prod_i (1 - failure_i(t))
+        which is also additive in the tail sum.
+        """
+        state_facts = frozenset(_extract_state_facts(state))
+        goals = list(goal_facts)
+
+        if not goals:
+            return 0.0
+        if all(g in state_facts for g in goals):
+            return 0.0
+
+        # Build per-fact failure generators: functions t -> failure_i(t).
+        # We materialise them as iteratively updated floats (one value per t)
+        # so the main loop can stay O(goals * achievers * preconditions) per step.
+
+        # For each goal we need to track the running failure product over t.
+        # We delegate to _expected_time_single_fact for the scalar E[T] when
+        # only one goal is involved (fast path), and fall back to the joint
+        # accumulator for conjunctive goals.
+
+        if len(goals) == 1:
+            return self._expected_time_single_fact(
+                goals[0], state_facts, epsilon=epsilon, max_iter=max_iter
+            )
+
+        # Conjunctive goal: E[T_goal] = sum_t [1 - prod_i (1 - failure_i(t))]
+        # We accumulate the joint tail probability per t.
+        # Each per-fact failure sequence is stepped incrementally.
+        fact_states = {
+            g: self._make_failure_stepper(g, state_facts) for g in goals
+        }
+
+        # Include the t=0 term: all goals not achieved at t=0, so joint_failure=1.
+        E_T = 1.0
+        for _t in range(max_iter):
+            # Advance each per-fact failure stepper by one step.
+            failures = [stepper() for stepper in fact_states.values()]
+            joint_success = 1.0
+            for f in failures:
+                joint_success *= 1.0 - f
+            joint_failure = _clamp_probability(1.0 - joint_success)
+            E_T += joint_failure
+            if joint_failure < epsilon:
+                break
+
+        return E_T
+
+    # ------------------------------------------------------------------
+    # Internal helpers for heuristic_expected_time
+    # ------------------------------------------------------------------
+
+    def _expected_time_single_fact(
+        self,
+        fact: Fact,
+        state_facts: frozenset,
+        epsilon: float,
+        max_iter: int,
+    ) -> float:
+        """Compute E[T_fact] for a single fact via the tail-sum accumulator."""
+        if fact in state_facts:
+            return 0.0
+        achievers = self._actions_by_effect_fact.get(fact, [])
+        if not achievers:
+            return float("inf")
+
+        # Fast path: all achievers are atoms (preconditions in state).
+        # Combined atom achievers act like parallel independent Bernoulli trials
+        # each step; the combined success probability per step is:
+        #   p_combined = 1 - prod_a (1 - p_a)
+        # so E[T] = 1 / p_combined.
+        all_atom = all(
+            action_model.preconditions.issubset(state_facts)
+            and action_model.effect_delay_steps == 1
+            for action_model in achievers
+        )
+        if all_atom:
+            combined_failure = 1.0
+            for action_model in achievers:
+                p = _clamp_probability(action_model.add_probabilities.get(fact, 0.0))
+                combined_failure *= 1.0 - p
+            p_combined = _clamp_probability(1.0 - combined_failure)
+            if p_combined <= 0.0:
+                return float("inf")
+            return 1.0 / p_combined
+
+        # General path: iterate the failure stepper.
+        # Include the t=0 term: P(fact not achieved by t=0) = 1.0 (not in state).
+        stepper = self._make_failure_stepper(fact, state_facts)
+        E_T = 1.0
+        for _t in range(max_iter):
+            f = stepper()
+            E_T += f
+            if f < epsilon:
+                break
+        return E_T
+
+    def _make_failure_stepper(self, fact: Fact, state_facts: frozenset):
+        """
+        Return a zero-argument callable that, on each successive call (for
+        t = 1, 2, 3, ...), returns failure_fact(t) = P(fact not achieved by t).
+
+        The recurrence is:
+            failure(t) = failure(t-1) * prod_{achievers a} (1 - step_success_a(t))
+
+        where for achiever a with delay d and add-probability p_a:
+            step_success_a(t) = p_a * prod_{prec in a.preconditions} P(prec available at t-d)
+
+        P(prec available at t) is itself computed via a nested stepper (or the
+        closed-form 1-(1-p)^t for atom preconditions).  Preconditions already in
+        state_facts have availability 1 at all t >= 0.
+        """
+        achievers = self._actions_by_effect_fact.get(fact, [])
+        if not achievers or fact in state_facts:
+            # Already true or unreachable — failure is always 0 or always 1.
+            # (Caller handles the state_facts case before calling this.)
+            constant = 0.0 if fact in state_facts else 1.0
+
+            def _const():
+                return constant
+
+            return _const
+
+        # Build availability functions for each precondition of each achiever.
+        # availability_fn(prec) -> callable that returns P(prec at t) on each call.
+        availability_cache: Dict[Fact, object] = {}
+
+        def _avail_fn(prec: Fact):
+            if prec in availability_cache:
+                return availability_cache[prec]
+            if prec in state_facts:
+                # Always available.
+                def _always_one():
+                    return 1.0
+                availability_cache[prec] = _always_one
+                return _always_one
+            # Recursive: build a failure stepper for the precondition and
+            # derive availability as 1 - failure.
+            prec_stepper = self._make_failure_stepper(prec, state_facts)
+            # An action with effect_delay_steps=d can succeed at completion step t
+            # only if the precondition was available at step t-d.  Since the stepper
+            # for this fact is called once per step of the PARENT action, we must
+            # return the availability from the PREVIOUS step (one-step lag):
+            #   returned value at parent step t  =  P(prec achieved by step t-1)
+            # We achieve this by returning the old availability before advancing.
+            avail_state = [0.0]  # P(prec achieved by t=0) = 0 (not in state)
+
+            def _avail():
+                old = avail_state[0]
+                f = prec_stepper()
+                avail_state[0] = _clamp_probability(1.0 - f)
+                return old
+
+            availability_cache[prec] = _avail
+            return _avail
+
+        # Pre-build availability callables for all preconditions.
+        achiever_avail: List[Tuple[TemporalRelaxedActionModel, float, List]] = []
+        for action_model in achievers:
+            p_a = _clamp_probability(action_model.add_probabilities.get(fact, 0.0))
+            if p_a <= 0.0:
+                continue
+            prec_fns = [_avail_fn(prec) for prec in action_model.preconditions]
+            achiever_avail.append((action_model, p_a, prec_fns))
+
+        if not achiever_avail:
+            def _inf():
+                return 1.0
+            return _inf
+
+        # Delay buffers: each achiever has a delay d, meaning its effects
+        # contribute to failure at step t using precondition availability at t-d.
+        # We implement this with a ring buffer of recent availability values per
+        # precondition.  For simplicity (and because delays are small in practice)
+        # we keep a small deque per (achiever, prec).
+        from collections import deque as _deque
+
+        delay_buffers: List[List[_deque]] = []
+        for action_model, p_a, prec_fns in achiever_avail:
+            d = max(0, int(action_model.effect_delay_steps) - 1)
+            bufs = [_deque([0.0] * d, maxlen=d + 1) if d > 0 else None for _ in prec_fns]
+            delay_buffers.append(bufs)
+
+        failure_state = [1.0]  # running failure product, starts at 1 (nothing achieved)
+
+        def _step():
+            # Advance all availability functions by one step and read delayed values.
+            current_avails: List[List[float]] = []
+            for (action_model, p_a, prec_fns), bufs in zip(achiever_avail, delay_buffers):
+                d = max(0, int(action_model.effect_delay_steps) - 1)
+                avail_now = []
+                for fn, buf in zip(prec_fns, bufs):
+                    fresh = fn()  # advance by one step
+                    if d > 0:
+                        buf.append(fresh)
+                        delayed = buf[0]  # oldest value = d steps ago
+                    else:
+                        delayed = fresh
+                    avail_now.append(delayed)
+                current_avails.append(avail_now)
+
+            # Compute step survival factor: prod_a (1 - step_success_a).
+            step_survival = 1.0
+            for (action_model, p_a, _prec_fns), avails in zip(achiever_avail, current_avails):
+                prec_support = 1.0
+                for av in avails:
+                    prec_support *= av
+                step_success = _clamp_probability(p_a * prec_support)
+                step_survival *= 1.0 - step_success
+
+            failure_state[0] = _clamp_probability(failure_state[0] * step_survival)
+            return failure_state[0]
+
+        return _step
+
     def _build_action_models(self) -> List[TemporalRelaxedActionModel]:
         models: List[TemporalRelaxedActionModel] = []
         for action in self._actions:

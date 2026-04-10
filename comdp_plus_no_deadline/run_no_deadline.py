@@ -76,7 +76,7 @@ def parse_args():
     parser.add_argument("--heuristic_weight", type=float, default=0.2)
     parser.add_argument(
         "--heuristic_name",
-        choices=["goal_count", "probabilistic_rpg", "temporal_probabilistic_rpg"],
+        choices=["goal_count", "probabilistic_rpg", "temporal_probabilistic_rpg", "expected_time"],
         default="goal_count",
     )
     parser.add_argument(

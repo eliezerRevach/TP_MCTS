@@ -87,6 +87,10 @@ def _state_heuristic_score(
             fixed_depth=effective_depth,
             start_time=temporal_current_time,
         )
+    if heuristic_name == "expected_time":
+        heuristic = _get_temporal_probabilistic_rpg_heuristic(mdp)
+        e_t = heuristic.heuristic_expected_time(state, mdp.problem.goals)
+        return -e_t
     raise ValueError(f"Unknown heuristic_name: {heuristic_name}")
 
 
