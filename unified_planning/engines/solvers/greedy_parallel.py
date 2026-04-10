@@ -79,7 +79,7 @@ def _score_action(
         expected_reward += prob * (mdp.terminal_reward(terminal, next_state) + step_penalty)
         if (
             heuristic_name == "temporal_probabilistic_rpg"
-            and temporal_heuristic_strategy in ("baseline_cached", "atom_backtrack_cached")
+            and temporal_heuristic_strategy == "baseline_cached"
         ):
             h_value, candidate_cache = _heuristic_value(
                 mdp=mdp,
@@ -175,20 +175,15 @@ def plan(
             terminal, next_state, _ = mdp.step(root_state, action)
             if (
                 heuristic_name == "temporal_probabilistic_rpg"
-                and temporal_heuristic_strategy in ("baseline_cached", "atom_backtrack_cached")
+                and temporal_heuristic_strategy == "baseline_cached"
             ):
                 cache_update = transition_cache_by_state.get(next_state)
-                if temporal_heuristic_strategy == "atom_backtrack_cached":
-                    # cache_update is a ReadOnlyMemoCache snapshot; adopt it
-                    # as the warm-start base for the next scoring round.
+                if isinstance(cache_update, tuple):
+                    if temporal_cache_table is not None:
+                        temp_dict, new_state_facts = cache_update
+                        temporal_cache_table.apply_temp(temp_dict, new_state_facts)
+                else:
                     temporal_cache_table = cache_update
-                elif temporal_heuristic_strategy == "baseline_cached":
-                    if isinstance(cache_update, tuple):
-                        if temporal_cache_table is not None:
-                            temp_dict, new_state_facts = cache_update
-                            temporal_cache_table.apply_temp(temp_dict, new_state_facts)
-                    else:
-                        temporal_cache_table = cache_update
             root_state = next_state
             stn = next_stn
             previous_action_node = next_prev
