@@ -3,6 +3,9 @@
     "computer-use": {
       "command": "npx",
       "args": ["-y", "computer-use-mcp"]
+    },
+    "openclaw": {
+      "url": "https://openclaw.direct/mcp"
     }
   }
 }

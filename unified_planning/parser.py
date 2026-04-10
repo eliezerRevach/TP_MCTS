@@ -1,5 +1,24 @@
 import argparse
 
+
+def _parse_temporal_heuristic_strategy(value: str) -> str:
+    normalized = str(value).strip().lower()
+    aliases = {
+        "1": "baseline",
+        "2": "atom_half_split",
+        "3": "atom_backtrack_exact",
+        "baseline": "baseline",
+        "atom_half_split": "atom_half_split",
+        "atom_backtrack_exact": "atom_backtrack_exact",
+    }
+    if normalized not in aliases:
+        raise argparse.ArgumentTypeError(
+            "temporal_heuristic_strategy must be one of: "
+            "1|baseline, 2|atom_half_split, 3|atom_backtrack_exact"
+        )
+    return aliases[normalized]
+
+
 parser = argparse.ArgumentParser(description='Description of your script')
 parser.add_argument('-d', '--deadline', help='deadline of the problem', nargs='?', default=None, type=int)
 parser.add_argument('-st', '--search_time', help='amount of time in each step', nargs='?', default=1, type=int)
@@ -37,12 +56,14 @@ parser.add_argument(
 parser.add_argument(
     '--temporal_heuristic_strategy',
     help=(
-        'strategy for temporal_probabilistic_rpg: baseline (layered), '
-        'atom_half_split (approximate half-interval on eligible atoms), '
-        'or atom_backtrack_exact (memoized exact atom backtrack vs horizon)'
+        'strategy for temporal_probabilistic_rpg: '
+        '1|baseline (layered), '
+        '2|atom_half_split (approximate half-interval on eligible atoms), '
+        '3|atom_backtrack_exact (memoized exact atom backtrack vs horizon)'
     ),
     nargs='?',
     default='baseline',
+    type=_parse_temporal_heuristic_strategy,
 )
 
 args = parser.parse_args()
