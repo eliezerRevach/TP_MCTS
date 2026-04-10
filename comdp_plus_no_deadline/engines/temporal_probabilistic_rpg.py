@@ -90,9 +90,17 @@ class TemporalProbabilisticRPGHeuristic:
     Actions are ignored at a layer when their precondition support is zero.
     """
 
-    def __init__(self, actions: Sequence[object], facts: Optional[Iterable[Fact]] = None):
+    def __init__(
+        self,
+        actions: Sequence[object],
+        facts: Optional[Iterable[Fact]] = None,
+        initial_facts: Optional[Iterable[Fact]] = None,
+    ):
         self._actions = list(actions)
         self._facts: Set[Fact] = set(facts or [])
+        # Facts that are TRUE in the initial state (used to seed the ET tables).
+        # Distinct from self._facts which includes goals and other known facts.
+        self._initial_facts: frozenset = frozenset(initial_facts or [])
         self._action_models = self._build_action_models()
         self._fact_dependency_graph = self._build_fact_dependency_graph()
         self._actions_by_effect_fact = self._build_actions_by_effect_fact()
@@ -100,12 +108,16 @@ class TemporalProbabilisticRPGHeuristic:
         self._query_cache: Dict[Tuple[frozenset[Fact], int, int, str], TemporalPropagationResult] = {}
         # Dedicated memoization for the atom strategy recurrence.
         self._atom_split_cache: Dict[Tuple[frozenset[Fact], Fact, int, str], float] = {}
+        # Precomputed availability tables for heuristic_expected_time.
+        # Built once at construction; each query just reads from these tables.
+        self._et_table_depth: int = 200
+        self._et_tables: Dict[Fact, List[Tuple["TemporalRelaxedActionModel", float, List[List[float]]]]] = self._build_et_tables()
 
     @classmethod
     def from_problem(cls, problem) -> "TemporalProbabilisticRPGHeuristic":
-        facts = set(getattr(problem, "initial_values", {}).keys())
-        facts.update(getattr(problem, "goals", set()))
-        return cls(getattr(problem, "actions", []), facts=facts)
+        initial = set(getattr(problem, "initial_values", {}).keys())
+        facts = initial | set(getattr(problem, "goals", set()))
+        return cls(getattr(problem, "actions", []), facts=facts, initial_facts=initial)
 
     def heuristic_propagate(
         self,
@@ -857,28 +869,22 @@ class TemporalProbabilisticRPGHeuristic:
         self,
         state,
         goal_facts: Iterable[Fact],
-        epsilon: float = 1e-12,
-        max_iter: int = 10_000,
-        stall_window: int = 50,
     ) -> float:
         """
         Estimate E[T_goal] — expected steps to achieve all goal facts — without
         any deadline or fixed depth.
 
         Uses the tail-sum identity:
-            E[T] = sum_{t=0}^{inf} P(T > t) = sum_{t=0}^{inf} failure(t)
+            E[T] = sum_{t=0}^{inf} P(T > t)
 
-        where failure(t) is the probability that the goal has NOT been achieved
-        by step t, represented as a product formula.  The sum is accumulated
-        until the joint failure drops below `epsilon`.
-
-        For atom actions (all preconditions satisfied in the current state) the
-        per-fact expected time reduces to the exact closed-form 1/p (geometric
-        distribution), so no iteration is needed.
+        Precondition availability tables are precomputed once at construction
+        in the all-false world.  At query time, preconditions that are true in
+        ``state`` are substituted with availability = 1.0 — no recursion, no
+        stepper allocation, just list index reads.
 
         For conjunctive goals {g1, ..., gk} the joint failure at step t is:
             1 - prod_i (1 - failure_i(t))
-        which is also additive in the tail sum.
+        summed to give E[T_goal] = E[max(T_g1, ..., T_gk)].
         """
         state_facts = frozenset(_extract_state_facts(state))
         goals = list(goal_facts)
@@ -888,226 +894,253 @@ class TemporalProbabilisticRPGHeuristic:
         if all(g in state_facts for g in goals):
             return 0.0
 
-        # Build per-fact failure generators: functions t -> failure_i(t).
-        # We materialise them as iteratively updated floats (one value per t)
-        # so the main loop can stay O(goals * achievers * preconditions) per step.
-
-        # For each goal we need to track the running failure product over t.
-        # We delegate to _expected_time_single_fact for the scalar E[T] when
-        # only one goal is involved (fast path), and fall back to the joint
-        # accumulator for conjunctive goals.
-
         if len(goals) == 1:
-            return self._expected_time_single_fact(
-                goals[0], state_facts, epsilon=epsilon, max_iter=max_iter
-            )
+            return self._et_from_tables(goals[0], state_facts)
 
-        # Conjunctive goal: E[T_goal] = sum_t [1 - prod_i (1 - failure_i(t))]
-        # We accumulate the joint tail probability per t.
-        # Each per-fact failure sequence is stepped incrementally.
-        fact_states = {
-            g: self._make_failure_stepper(g, state_facts) for g in goals
-        }
-
+        # Conjunctive: E[T_goal] = 1 + sum_{s=1}^{S} joint_failure(s) + tail
+        S = self._et_table_depth
         E_T = 1.0
-        prev_jf = 1.0
-        for t in range(max_iter):
-            failures = [stepper() for stepper in fact_states.values()]
+        failure_per_goal = [1.0] * len(goals)
+        for s in range(1, S + 1):
             joint_success = 1.0
-            for f in failures:
-                joint_success *= 1.0 - f
+            for i, g in enumerate(goals):
+                failure_per_goal[i] = self._failure_at_step(g, s, state_facts, failure_per_goal[i])
+                joint_success *= 1.0 - failure_per_goal[i]
             joint_failure = _clamp_probability(1.0 - joint_success)
             E_T += joint_failure
-            if joint_failure < epsilon:
+            if joint_failure < 1e-12:
                 break
-            if t >= stall_window and t % stall_window == 0:
-                if joint_failure > prev_jf * 0.99:
-                    return float("inf")
-                prev_jf = joint_failure
         else:
-            if E_T > max_iter * 0.9:
+            # Geometric tail: rate = geometric mean of per-goal tail rates
+            tail_survival = 1.0
+            for i, g in enumerate(goals):
+                tail_survival *= self._et_tail_survival(g, state_facts)
+            if tail_survival >= 1.0:
                 return float("inf")
+            joint_failure_at_S = _clamp_probability(1.0 - sum(
+                (1.0 - failure_per_goal[i]) for i in range(len(goals))
+            ) + (len(goals) - 1))
+            last_jf = _clamp_probability(1.0 - prod(
+                1.0 - failure_per_goal[i] for i in range(len(goals))
+            ))
+            if last_jf > 0.0:
+                E_T += last_jf * tail_survival / (1.0 - tail_survival)
 
         return E_T
 
     # ------------------------------------------------------------------
-    # Internal helpers for heuristic_expected_time
+    # Internal helpers for heuristic_expected_time (table-based)
     # ------------------------------------------------------------------
 
-    def _expected_time_single_fact(
+    def _build_et_tables(self) -> Dict[Fact, List[Tuple["TemporalRelaxedActionModel", float, List[List[float]]]]]:
+        """
+        Precompute, for each fact, a list of (action_model, p_a, prec_avail_tables).
+
+        prec_avail_tables[i][s] = P(precondition_i achieved by step s+1) seeded
+        from the initial state (self._facts).
+
+        Uses an iterative forward-propagation approach (no recursion, no cycle
+        guards needed):
+          - Facts in self._facts start available (delete-free: they stay true forever).
+          - Dynamic facts start unavailable and accumulate availability as actions fire.
+          - Each step s computes availability using the previous step's values.
+
+        This is essentially the planning graph computed forward from the initial state.
+        """
+        S = self._et_table_depth
+        all_achievable = set(self._actions_by_effect_fact.keys())
+
+        # fact_avail[fact][s] = P(fact achieved by step s+1), 0-indexed.
+        # Seed from self._initial_facts: facts that are TRUE in the initial
+        # state start fully available (delete-free relaxation: they stay true).
+        # Goals and other non-initial facts start at 0 and grow as steps unfold.
+        fact_avail: Dict[Fact, List[float]] = {}
+        for fact in all_achievable:
+            if fact in self._initial_facts:
+                fact_avail[fact] = [1.0] * S  # always available (initially true)
+            else:
+                fact_avail[fact] = [0.0] * S
+
+        # Pre-cache static tables to avoid re-creating them in the loop.
+        static_avail_true: List[float] = [1.0] * S
+        static_avail_false: List[float] = [0.0] * S
+
+        def _get_prec_avail_fast(prec: Fact) -> List[float]:
+            if prec in fact_avail:
+                return fact_avail[prec]
+            # Static fact (no achievers): initially true → always available;
+            # otherwise never achievable.
+            return static_avail_true if prec in self._initial_facts else static_avail_false
+
+        # Precompute achiever lists with numeric parameters for speed.
+        # achiever_specs[fact] = [(p_a, delay, [prec_avail_ref, ...]), ...]
+        achiever_specs: Dict[Fact, List[Tuple[float, int, List[List[float]]]]] = {}
+        for fact in all_achievable:
+            specs = []
+            for action_model in self._actions_by_effect_fact.get(fact, []):
+                p_a = _clamp_probability(action_model.add_probabilities.get(fact, 0.0))
+                if p_a <= 0.0:
+                    continue
+                delay = max(0, int(action_model.effect_delay_steps) - 1)
+                prec_refs = [_get_prec_avail_fast(prec) for prec in action_model.preconditions]
+                specs.append((p_a, delay, prec_refs))
+            achiever_specs[fact] = specs
+
+        # Iterative forward pass: compute step s for all facts before moving to s+1.
+        # s is 0-indexed; avail[s] = P(fact by step s+1).
+        for s in range(S):
+            for fact in all_achievable:
+                if fact_avail[fact][s] >= 1.0:
+                    # Already fully available — no need to update.
+                    if s + 1 < S:
+                        fact_avail[fact][s + 1] = 1.0
+                    continue
+                prev_failure = 1.0 - (fact_avail[fact][s - 1] if s > 0 else 0.0)
+                step_survival = 1.0
+                for p_a, delay, prec_refs in achiever_specs[fact]:
+                    prec_support = 1.0
+                    idx = s - delay - 1  # avail at step s-delay (0-indexed)
+                    for pa_ref in prec_refs:
+                        prec_support *= pa_ref[idx] if idx >= 0 else 0.0
+                    step_success = _clamp_probability(p_a * prec_support)
+                    step_survival *= 1.0 - step_success
+                failure = _clamp_probability(prev_failure * step_survival)
+                fact_avail[fact][s] = _clamp_probability(1.0 - failure)
+
+        # Build et_tables from the precomputed avail tables.
+        et_tables: Dict[Fact, List[Tuple["TemporalRelaxedActionModel", float, List[List[float]]]]] = {}
+        for fact in all_achievable:
+            entries = []
+            for action_model in self._actions_by_effect_fact.get(fact, []):
+                p_a = _clamp_probability(action_model.add_probabilities.get(fact, 0.0))
+                if p_a <= 0.0:
+                    continue
+                prec_avail_tables = [
+                    _get_prec_avail_fast(prec) for prec in action_model.preconditions
+                ]
+                entries.append((action_model, p_a, prec_avail_tables))
+            if entries:
+                et_tables[fact] = entries
+        return et_tables
+
+    def _et_tail_survival(self, fact: Fact, state_facts: frozenset) -> float:
+        """
+        Return the per-step survival factor in the geometric tail for this fact
+        given the current state.  This is the step_survival value once all
+        preconditions have stabilized (i.e. at large s where prec_avail ~ 1 for
+        true precs, or the precomputed asymptote for false ones).
+        """
+        achievers_data = self._et_tables.get(fact)
+        if not achievers_data:
+            return 1.0
+        S = self._et_table_depth
+        step_survival = 1.0
+        for action_model, p_a, prec_avail_tables in achievers_data:
+            prec_support = 1.0
+            for prec, pa_table in zip(action_model.preconditions, prec_avail_tables):
+                if prec in state_facts:
+                    avail = 1.0
+                else:
+                    avail = pa_table[S - 1]  # asymptotic value
+                prec_support *= avail
+            step_success = _clamp_probability(p_a * prec_support)
+            step_survival *= 1.0 - step_success
+        return step_survival
+
+    def _failure_at_step(
         self,
         fact: Fact,
+        s: int,
         state_facts: frozenset,
-        epsilon: float,
-        max_iter: int,
-        stall_window: int = 50,
+        prev_failure: float,
     ) -> float:
-        """Compute E[T_fact] for a single fact via the tail-sum accumulator."""
+        """
+        Return failure_fact(s) given failure_fact(s-1) = prev_failure.
+
+        step_survival at s is computed from precomputed tables:
+        - preconditions in state_facts contribute availability 1.0
+        - preconditions not in state_facts contribute their precomputed
+          all-false availability at step s (0-indexed: s-1 with lag: s-2)
+        """
+        achievers_data = self._et_tables.get(fact)
+        if not achievers_data:
+            return prev_failure  # no achievers, failure stays at prev value
+
+        step_survival = 1.0
+        for action_model, p_a, prec_avail_tables in achievers_data:
+            prec_support = 1.0
+            for prec, pa_table in zip(action_model.preconditions, prec_avail_tables):
+                if prec in state_facts:
+                    avail = 1.0
+                else:
+                    # Precondition availability at step s-delay-1 (lagged).
+                    delay = max(0, int(action_model.effect_delay_steps) - 1)
+                    idx = s - delay - 2  # s - delay - 1, then 0-indexed
+                    avail = pa_table[idx] if idx >= 0 else 0.0
+                prec_support *= avail
+            step_success = _clamp_probability(p_a * prec_support)
+            step_survival *= 1.0 - step_success
+        return _clamp_probability(prev_failure * step_survival)
+
+    def _et_from_tables(self, fact: Fact, state_facts: frozenset) -> float:
+        """
+        Compute E[T_fact] using the precomputed availability tables.
+
+        No recursion, no stepper allocation.  Each step is O(achievers * precs)
+        list index reads.  A geometric tail closes the sum beyond table depth.
+        """
         if fact in state_facts:
             return 0.0
-        achievers = self._actions_by_effect_fact.get(fact, [])
-        if not achievers:
+        achievers_data = self._et_tables.get(fact)
+        if not achievers_data:
             return float("inf")
 
-        # Fast path: all achievers are atoms (preconditions in state).
-        # Combined atom achievers act like parallel independent Bernoulli trials
-        # each step; the combined success probability per step is:
-        #   p_combined = 1 - prod_a (1 - p_a)
-        # so E[T] = 1 / p_combined.
-        all_atom = all(
+        # Fast path: all achievers fully unlocked (all precs in state_facts).
+        # Combined success per step is constant -> E[T] = 1 / p_combined.
+        all_unlocked = all(
             action_model.preconditions.issubset(state_facts)
             and action_model.effect_delay_steps == 1
-            for action_model in achievers
+            for action_model, _p_a, _prec_tables in achievers_data
         )
-        if all_atom:
+        if all_unlocked:
             combined_failure = 1.0
-            for action_model in achievers:
-                p = _clamp_probability(action_model.add_probabilities.get(fact, 0.0))
-                combined_failure *= 1.0 - p
+            for action_model, p_a, _ in achievers_data:
+                combined_failure *= 1.0 - p_a
             p_combined = _clamp_probability(1.0 - combined_failure)
             if p_combined <= 0.0:
                 return float("inf")
             return 1.0 / p_combined
 
-        # General path: iterate the failure stepper.
-        stepper = self._make_failure_stepper(fact, state_facts)
-        E_T = 1.0
-        prev_f = 1.0
-        for t in range(max_iter):
-            f = stepper()
-            E_T += f
-            if f < epsilon:
-                break
-            # Stall detection: if failure barely decreased over stall_window
-            # steps, the fact is effectively unreachable — return inf.
-            if t >= stall_window and t % stall_window == 0:
-                if f > prev_f * 0.99:
-                    return float("inf")
-                prev_f = f
-        else:
-            return float("inf")
-        return E_T
-
-    def _make_failure_stepper(
-        self,
-        fact: Fact,
-        state_facts: frozenset,
-        _building: Optional[Set[Fact]] = None,
-    ):
-        """
-        Return a zero-argument callable that, on each successive call (for
-        t = 1, 2, 3, ...), returns failure_fact(t) = P(fact not achieved by t).
-
-        The recurrence is:
-            failure(t) = failure(t-1) * prod_{achievers a} (1 - step_success_a(t))
-
-        where for achiever a with delay d and add-probability p_a:
-            step_success_a(t) = p_a * prod_{prec in a.preconditions} P(prec available at t-d)
-
-        P(prec available at t) is itself computed via a nested stepper (or the
-        closed-form 1-(1-p)^t for atom preconditions).  Preconditions already in
-        state_facts have availability 1 at all t >= 0.
-
-        ``_building`` tracks facts currently being built to break cycles in the
-        dependency graph (real domains may have A -> B -> A).  A cyclic
-        precondition is treated as permanently unavailable (failure = 1).
-        """
-        if _building is None:
-            _building = set()
-
-        achievers = self._actions_by_effect_fact.get(fact, [])
-        if not achievers or fact in state_facts or fact in _building:
-            constant = 0.0 if fact in state_facts else 1.0
-
-            def _const():
-                return constant
-
-            return _const
-
-        _building.add(fact)
-
-        # Build availability functions for each precondition of each achiever.
-        availability_cache: Dict[Fact, object] = {}
-
-        def _avail_fn(prec: Fact):
-            if prec in availability_cache:
-                return availability_cache[prec]
-            if prec in state_facts:
-                def _always_one():
-                    return 1.0
-                availability_cache[prec] = _always_one
-                return _always_one
-            prec_stepper = self._make_failure_stepper(prec, state_facts, _building)
-            avail_state = [0.0]
-
-            def _avail():
-                old = avail_state[0]
-                f = prec_stepper()
-                avail_state[0] = _clamp_probability(1.0 - f)
-                return old
-
-            availability_cache[prec] = _avail
-            return _avail
-
-        # Pre-build availability callables for all preconditions.
-        achiever_avail: List[Tuple[TemporalRelaxedActionModel, float, List]] = []
-        for action_model in achievers:
-            p_a = _clamp_probability(action_model.add_probabilities.get(fact, 0.0))
-            if p_a <= 0.0:
-                continue
-            prec_fns = [_avail_fn(prec) for prec in action_model.preconditions]
-            achiever_avail.append((action_model, p_a, prec_fns))
-
-        if not achiever_avail:
-            def _inf():
-                return 1.0
-            return _inf
-
-        # Delay buffers: each achiever has a delay d, meaning its effects
-        # contribute to failure at step t using precondition availability at t-d.
-        # We implement this with a ring buffer of recent availability values per
-        # precondition.  For simplicity (and because delays are small in practice)
-        # we keep a small deque per (achiever, prec).
-        from collections import deque as _deque
-
-        delay_buffers: List[List[_deque]] = []
-        for action_model, p_a, prec_fns in achiever_avail:
-            d = max(0, int(action_model.effect_delay_steps) - 1)
-            bufs = [_deque([0.0] * d, maxlen=d + 1) if d > 0 else None for _ in prec_fns]
-            delay_buffers.append(bufs)
-
-        failure_state = [1.0]  # running failure product, starts at 1 (nothing achieved)
-
-        def _step():
-            # Advance all availability functions by one step and read delayed values.
-            current_avails: List[List[float]] = []
-            for (action_model, p_a, prec_fns), bufs in zip(achiever_avail, delay_buffers):
-                d = max(0, int(action_model.effect_delay_steps) - 1)
-                avail_now = []
-                for fn, buf in zip(prec_fns, bufs):
-                    fresh = fn()  # advance by one step
-                    if d > 0:
-                        buf.append(fresh)
-                        delayed = buf[0]  # oldest value = d steps ago
-                    else:
-                        delayed = fresh
-                    avail_now.append(delayed)
-                current_avails.append(avail_now)
-
-            # Compute step survival factor: prod_a (1 - step_success_a).
+        # General path: iterate table, accumulate tail-sum.
+        S = self._et_table_depth
+        failure = 1.0
+        E_T = 1.0  # t=0 term: P(T > 0) = 1 since fact not in state
+        for s in range(1, S + 1):
             step_survival = 1.0
-            for (action_model, p_a, _prec_fns), avails in zip(achiever_avail, current_avails):
+            for action_model, p_a, prec_avail_tables in achievers_data:
                 prec_support = 1.0
-                for av in avails:
-                    prec_support *= av
+                delay = max(0, int(action_model.effect_delay_steps) - 1)
+                for prec, pa_table in zip(action_model.preconditions, prec_avail_tables):
+                    if prec in state_facts:
+                        avail = 1.0
+                    else:
+                        idx = s - delay - 2  # lag: use availability at step s-delay-1
+                        avail = pa_table[idx] if idx >= 0 else 0.0
+                    prec_support *= avail
                 step_success = _clamp_probability(p_a * prec_support)
                 step_survival *= 1.0 - step_success
+            failure = _clamp_probability(failure * step_survival)
+            E_T += failure
+            if failure < 1e-12:
+                return E_T
 
-            failure_state[0] = _clamp_probability(failure_state[0] * step_survival)
-            return failure_state[0]
-
-        _building.discard(fact)
-        return _step
+        # Geometric tail: failure(s) ~ failure(S) * tail_survival^(s-S) for s > S.
+        # sum_{s=S+1}^{inf} failure(S) * tail_survival^(s-S) = failure(S) * tail_survival / (1 - tail_survival)
+        tail_survival = self._et_tail_survival(fact, state_facts)
+        if tail_survival >= 1.0:
+            return float("inf")
+        E_T += failure * tail_survival / (1.0 - tail_survival)
+        return E_T
 
     def _build_action_models(self) -> List[TemporalRelaxedActionModel]:
         models: List[TemporalRelaxedActionModel] = []
