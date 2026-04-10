@@ -179,8 +179,8 @@ def plan(
             ):
                 cache_update = transition_cache_by_state.get(next_state)
                 if temporal_heuristic_strategy == "atom_backtrack_cached":
-                    # cache_update is always a FormulaCache (or None on fallback);
-                    # just adopt it as the new master cache for the next step.
+                    # cache_update is a ReadOnlyMemoCache snapshot; adopt it
+                    # as the warm-start base for the next scoring round.
                     temporal_cache_table = cache_update
                 elif temporal_heuristic_strategy == "baseline_cached":
                     if isinstance(cache_update, tuple):
