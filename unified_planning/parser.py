@@ -34,7 +34,7 @@ parser.add_argument('-dt', '--domain_type', help='combination, new approach or n
 parser.add_argument(
     '-s',
     '--solver',
-    help='solver: mcts, rtdp, or greedy_parallel',
+    help='solver: mcts, rtdp, greedy_parallel, or heuristic_tree',
     nargs='?',
     default='mcts',
 )
@@ -71,6 +71,14 @@ parser.add_argument(
     nargs='?',
     default='baseline',
     type=_parse_temporal_heuristic_strategy,
+)
+
+parser.add_argument(
+    '--tree_depth',
+    help='lookahead depth for heuristic_tree solver (separate from temporal_heuristic_depth)',
+    nargs='?',
+    default=3,
+    type=int,
 )
 
 args = parser.parse_args()

@@ -17,6 +17,7 @@ import unified_planning as up
 from unified_planning.shortcuts import *
 import unified_planning.domains
 import unified_planning.engines.solvers.greedy_parallel as greedy_parallel_solver
+import unified_planning.engines.solvers.heuristic_tree as heuristic_tree_solver
 import numpy as np
 
 
@@ -62,7 +63,7 @@ def set_seed():
 
 def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
                 selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
-                temporal_heuristic_strategy='baseline'):
+                temporal_heuristic_strategy='baseline', tree_depth=3):
     """
     Run split action to start and end actions logic - TP-MCTS approach
     """
@@ -111,6 +112,9 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
     )
     if up.args.solver == 'greedy_parallel':
         up.engines.solvers.evaluate.evaluation_loop(runs, greedy_parallel_solver.plan, params)
+    elif up.args.solver == 'heuristic_tree':
+        tree_params = params + (tree_depth,)
+        up.engines.solvers.evaluate.evaluation_loop(runs, heuristic_tree_solver.plan, tree_params)
     else:
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.plan, params)
 
@@ -226,4 +230,5 @@ else:
                 garbage_amount=up.args.garbage_amount, k=up.args.k,
                 heuristic_name=up.args.heuristic_name,
                 temporal_heuristic_depth=up.args.temporal_heuristic_depth,
-                temporal_heuristic_strategy=up.args.temporal_heuristic_strategy)
+                temporal_heuristic_strategy=up.args.temporal_heuristic_strategy,
+                tree_depth=up.args.tree_depth)
