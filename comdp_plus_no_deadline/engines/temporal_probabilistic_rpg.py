@@ -423,9 +423,12 @@ class TemporalProbabilisticRPGHeuristic:
         action_support_cache: Dict[Tuple[str, int], float] = {}
         fact_support_cache: Dict[Tuple[Fact, int], float] = {}
 
-        relevant_actions: Set[TemporalRelaxedActionModel] = set()
+        # Models hold a dict field (add_probabilities), so they cannot live in a set().
+        relevant_by_name: Dict[str, TemporalRelaxedActionModel] = {}
         for fact in dirty_facts:
-            relevant_actions.update(self._actions_by_effect_fact.get(fact, []))
+            for action_model in self._actions_by_effect_fact.get(fact, []):
+                relevant_by_name.setdefault(action_model.name, action_model)
+        relevant_actions = list(relevant_by_name.values())
 
         def fact_support(fact: Fact, layer: int) -> float:
             nonlocal fact_cache_hits
