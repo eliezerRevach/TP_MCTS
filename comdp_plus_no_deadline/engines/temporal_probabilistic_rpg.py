@@ -858,7 +858,8 @@ class TemporalProbabilisticRPGHeuristic:
         state,
         goal_facts: Iterable[Fact],
         epsilon: float = 1e-12,
-        max_iter: int = 100_000,
+        max_iter: int = 10_000,
+        stall_window: int = 50,
     ) -> float:
         """
         Estimate E[T_goal] — expected steps to achieve all goal facts — without
@@ -908,10 +909,9 @@ class TemporalProbabilisticRPGHeuristic:
             g: self._make_failure_stepper(g, state_facts) for g in goals
         }
 
-        # Include the t=0 term: all goals not achieved at t=0, so joint_failure=1.
         E_T = 1.0
-        for _t in range(max_iter):
-            # Advance each per-fact failure stepper by one step.
+        prev_jf = 1.0
+        for t in range(max_iter):
             failures = [stepper() for stepper in fact_states.values()]
             joint_success = 1.0
             for f in failures:
@@ -920,6 +920,13 @@ class TemporalProbabilisticRPGHeuristic:
             E_T += joint_failure
             if joint_failure < epsilon:
                 break
+            if t >= stall_window and t % stall_window == 0:
+                if joint_failure > prev_jf * 0.99:
+                    return float("inf")
+                prev_jf = joint_failure
+        else:
+            if E_T > max_iter * 0.9:
+                return float("inf")
 
         return E_T
 
@@ -933,6 +940,7 @@ class TemporalProbabilisticRPGHeuristic:
         state_facts: frozenset,
         epsilon: float,
         max_iter: int,
+        stall_window: int = 50,
     ) -> float:
         """Compute E[T_fact] for a single fact via the tail-sum accumulator."""
         if fact in state_facts:
@@ -962,17 +970,30 @@ class TemporalProbabilisticRPGHeuristic:
             return 1.0 / p_combined
 
         # General path: iterate the failure stepper.
-        # Include the t=0 term: P(fact not achieved by t=0) = 1.0 (not in state).
         stepper = self._make_failure_stepper(fact, state_facts)
         E_T = 1.0
-        for _t in range(max_iter):
+        prev_f = 1.0
+        for t in range(max_iter):
             f = stepper()
             E_T += f
             if f < epsilon:
                 break
+            # Stall detection: if failure barely decreased over stall_window
+            # steps, the fact is effectively unreachable — return inf.
+            if t >= stall_window and t % stall_window == 0:
+                if f > prev_f * 0.99:
+                    return float("inf")
+                prev_f = f
+        else:
+            return float("inf")
         return E_T
 
-    def _make_failure_stepper(self, fact: Fact, state_facts: frozenset):
+    def _make_failure_stepper(
+        self,
+        fact: Fact,
+        state_facts: frozenset,
+        _building: Optional[Set[Fact]] = None,
+    ):
         """
         Return a zero-argument callable that, on each successive call (for
         t = 1, 2, 3, ...), returns failure_fact(t) = P(fact not achieved by t).
@@ -986,11 +1007,16 @@ class TemporalProbabilisticRPGHeuristic:
         P(prec available at t) is itself computed via a nested stepper (or the
         closed-form 1-(1-p)^t for atom preconditions).  Preconditions already in
         state_facts have availability 1 at all t >= 0.
+
+        ``_building`` tracks facts currently being built to break cycles in the
+        dependency graph (real domains may have A -> B -> A).  A cyclic
+        precondition is treated as permanently unavailable (failure = 1).
         """
+        if _building is None:
+            _building = set()
+
         achievers = self._actions_by_effect_fact.get(fact, [])
-        if not achievers or fact in state_facts:
-            # Already true or unreachable — failure is always 0 or always 1.
-            # (Caller handles the state_facts case before calling this.)
+        if not achievers or fact in state_facts or fact in _building:
             constant = 0.0 if fact in state_facts else 1.0
 
             def _const():
@@ -998,29 +1024,21 @@ class TemporalProbabilisticRPGHeuristic:
 
             return _const
 
+        _building.add(fact)
+
         # Build availability functions for each precondition of each achiever.
-        # availability_fn(prec) -> callable that returns P(prec at t) on each call.
         availability_cache: Dict[Fact, object] = {}
 
         def _avail_fn(prec: Fact):
             if prec in availability_cache:
                 return availability_cache[prec]
             if prec in state_facts:
-                # Always available.
                 def _always_one():
                     return 1.0
                 availability_cache[prec] = _always_one
                 return _always_one
-            # Recursive: build a failure stepper for the precondition and
-            # derive availability as 1 - failure.
-            prec_stepper = self._make_failure_stepper(prec, state_facts)
-            # An action with effect_delay_steps=d can succeed at completion step t
-            # only if the precondition was available at step t-d.  Since the stepper
-            # for this fact is called once per step of the PARENT action, we must
-            # return the availability from the PREVIOUS step (one-step lag):
-            #   returned value at parent step t  =  P(prec achieved by step t-1)
-            # We achieve this by returning the old availability before advancing.
-            avail_state = [0.0]  # P(prec achieved by t=0) = 0 (not in state)
+            prec_stepper = self._make_failure_stepper(prec, state_facts, _building)
+            avail_state = [0.0]
 
             def _avail():
                 old = avail_state[0]
@@ -1088,6 +1106,7 @@ class TemporalProbabilisticRPGHeuristic:
             failure_state[0] = _clamp_probability(failure_state[0] * step_survival)
             return failure_state[0]
 
+        _building.discard(fact)
         return _step
 
     def _build_action_models(self) -> List[TemporalRelaxedActionModel]:
