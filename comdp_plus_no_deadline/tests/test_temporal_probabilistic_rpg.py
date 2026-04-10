@@ -444,5 +444,126 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         self.assertAlmostEqual(score, expected)
 
 
+class TestAtomBacktrackCached(unittest.TestCase):
+    """Verify that atom_backtrack_cached produces scores identical to
+    atom_backtrack_exact when evaluated on the same state sequence, and that
+    the FormulaCache is reused correctly after state changes."""
+
+    def _make_chain_heuristic(self):
+        p_key = 0.4
+        p_open = 0.6
+        get_key_effect = SyntheticProbabilisticEffect(
+            outcomes={p_key: {"KEY": True}, 1.0 - p_key: {}}
+        )
+        open_effect = SyntheticProbabilisticEffect(
+            outcomes={p_open: {"DOOR": True}, 1.0 - p_open: {}}
+        )
+        return TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="get_key",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(get_key_effect,),
+                ),
+                SyntheticAction(
+                    name="open_with_key",
+                    pos_preconditions=frozenset({"KEY"}),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(open_effect,),
+                ),
+            ],
+            facts={"KEY", "DOOR"},
+        )
+
+    def test_first_call_matches_atom_backtrack_exact(self):
+        """First call (no cache) must match atom_backtrack_exact exactly."""
+        h = self._make_chain_heuristic()
+        depth = 5
+        state = set()
+
+        score_exact = h.heuristic_score(state, {"DOOR"}, fixed_depth=depth, strategy="atom_backtrack_exact")
+        score_cached = h.heuristic_score(state, {"DOOR"}, fixed_depth=depth, strategy="atom_backtrack_cached")
+
+        self.assertAlmostEqual(score_exact, score_cached, places=9)
+
+    def test_subsequent_call_same_state_matches(self):
+        """Second call with same state and existing FormulaCache must match."""
+        h = self._make_chain_heuristic()
+        depth = 5
+        state = set()
+
+        score1, fc = h.heuristic_score(
+            state, {"DOOR"}, fixed_depth=depth,
+            strategy="atom_backtrack_cached", return_cache_table=True,
+        )
+        # Re-evaluate same state with the returned FormulaCache.
+        score2, fc2 = h.heuristic_score(
+            state, {"DOOR"}, fixed_depth=depth,
+            strategy="atom_backtrack_cached", cached_table=fc, return_cache_table=True,
+        )
+
+        self.assertAlmostEqual(score1, score2, places=9)
+        # All entries should have been cache hits (no recomputation needed).
+        from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import FormulaCache
+        self.assertIsInstance(fc, FormulaCache)
+        self.assertIsInstance(fc2, FormulaCache)
+
+    def test_state_change_invalidates_and_recomputes_correctly(self):
+        """After a state change the result must still match atom_backtrack_exact."""
+        h = self._make_chain_heuristic()
+        depth = 5
+
+        # Start from empty state.
+        _, fc = h.heuristic_score(
+            set(), {"DOOR"}, fixed_depth=depth,
+            strategy="atom_backtrack_cached", return_cache_table=True,
+        )
+
+        # Now KEY becomes true -- simulate a state transition.
+        new_state = {"KEY"}
+        score_exact = h.heuristic_score(new_state, {"DOOR"}, fixed_depth=depth, strategy="atom_backtrack_exact")
+        score_cached, _ = h.heuristic_score(
+            new_state, {"DOOR"}, fixed_depth=depth,
+            strategy="atom_backtrack_cached", cached_table=fc, return_cache_table=True,
+        )
+
+        self.assertAlmostEqual(score_exact, score_cached, places=9)
+
+    def test_multiple_state_changes_match(self):
+        """Repeated state transitions must produce consistent results."""
+        h = self._make_chain_heuristic()
+        depth = 5
+        state_sequence = [set(), {"KEY"}, set(), {"KEY"}, set()]
+
+        fc = None
+        for state in state_sequence:
+            score_exact = h.heuristic_score(
+                state, {"DOOR"}, fixed_depth=depth, strategy="atom_backtrack_exact"
+            )
+            score_cached, fc = h.heuristic_score(
+                state, {"DOOR"}, fixed_depth=depth,
+                strategy="atom_backtrack_cached", cached_table=fc, return_cache_table=True,
+            )
+            self.assertAlmostEqual(
+                score_exact, score_cached, places=9,
+                msg=f"Mismatch for state={state}: exact={score_exact}, cached={score_cached}",
+            )
+
+    def test_formula_cache_return_type(self):
+        """heuristic_score with return_cache_table=True must return a FormulaCache."""
+        from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import FormulaCache
+        h = self._make_chain_heuristic()
+        _, result = h.heuristic_score(
+            set(), {"DOOR"}, fixed_depth=3,
+            strategy="atom_backtrack_cached", return_cache_table=True,
+        )
+        self.assertIsInstance(result, FormulaCache)
+        self.assertIsInstance(result.fact_memo, dict)
+        self.assertIsInstance(result.reverse_deps_fact, dict)
+
+
 if __name__ == "__main__":
     unittest.main()

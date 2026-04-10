@@ -45,6 +45,11 @@ class TemporalPropagationResult:
     fact_cache_hits: int
     action_cache_hits: int
     cached_table: Optional["CachedPTRPGTable"] = None
+    # Carries the FormulaCache produced by atom_backtrack_cached so the
+    # caller can commit it after mdp.step().
+    formula_cache: Optional["FormulaCache"] = None
+    # Carries the (temp_dict, new_state_facts) pair from baseline_cached.
+    temp_result: Optional[Tuple[Dict[int, Dict[Fact, float]], frozenset]] = None
 
 
 @dataclass
@@ -66,6 +71,43 @@ class CachedPTRPGTable:
             depth_used=self.depth_used,
             start_layer=self.start_layer,
         )
+
+
+@dataclass
+class FormulaCache:
+    """Persistent memoization for atom_backtrack_cached across greedy steps.
+
+    Stores the same memos as a single atom_backtrack_exact call, plus a
+    reverse-dependency index so that when state facts change only the memo
+    entries that transitively read those facts are evicted.
+
+    Design (Option A -- transitive base-fact tracking):
+      Each memo entry records the complete set of state facts it read as
+      base cases during its computation.  On state change we look up every
+      memo key that depended on a changed fact and pop it.  Re-running
+      fact_probability then recomputes only those evicted entries.
+    """
+
+    fact_memo: Dict[Tuple[Fact, int], float]
+    action_term_memo: Dict[Tuple[str, Fact, int], float]
+    # reverse_deps_fact[base_fact] = set of (fact, horizon) memo keys that
+    # transitively read base_fact as a state base case.
+    reverse_deps_fact: Dict[Fact, Set[Tuple[Fact, int]]]
+    # reverse_deps_action[base_fact] = set of (action_name, fact, horizon)
+    # memo keys that transitively read base_fact.
+    reverse_deps_action: Dict[Fact, Set[Tuple[str, Fact, int]]]
+    state_facts: frozenset
+
+    def invalidate(self, changed_facts: Set[Fact]) -> None:
+        """Evict all memo entries that depend on any of the changed facts."""
+        for base_fact in changed_facts:
+            for key in self.reverse_deps_fact.pop(base_fact, set()):
+                self.fact_memo.pop(key, None)
+            for key in self.reverse_deps_action.pop(base_fact, set()):
+                self.action_term_memo.pop(key, None)
+        # Evict reverse-dep entries for changed facts that are no longer
+        # present (they may have migrated from one side of the base case).
+        # state_facts is updated by the caller after invalidate().
 
 
 def _clamp_probability(value: float) -> float:
@@ -110,7 +152,7 @@ class TemporalProbabilisticRPGHeuristic:
         fixed_depth: int = 25,
         start_time: float = 0.0,
         strategy: str = "baseline",
-        cached_table: Optional[CachedPTRPGTable] = None,
+        cached_table=None,
         debug: bool = False,
     ) -> TemporalPropagationResult:
         state_facts = _extract_state_facts(state)
@@ -145,6 +187,19 @@ class TemporalProbabilisticRPGHeuristic:
                 debug=debug,
             )
             self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "atom_backtrack_cached":
+            # cached_table carries a FormulaCache (or None) for this strategy.
+            formula_cache = cached_table if isinstance(cached_table, FormulaCache) else None
+            result = self._heuristic_propagate_atom_backtrack_cached(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                formula_cache=formula_cache,
+                debug=debug,
+            )
+            # Do NOT store in _query_cache: the result depends on the live
+            # FormulaCache state and must not be replayed from a stale snapshot.
             return result
         if chosen_strategy == "baseline_cached":
             result = self._heuristic_propagate_baseline_cached(
@@ -281,7 +336,7 @@ class TemporalProbabilisticRPGHeuristic:
         fixed_depth: int = 25,
         start_time: float = 0.0,
         strategy: str = "baseline",
-        cached_table: Optional[CachedPTRPGTable] = None,
+        cached_table=None,
         return_cache_table: bool = False,
         debug: bool = False,
     ):
@@ -311,16 +366,42 @@ class TemporalProbabilisticRPGHeuristic:
         if debug:
             return score, result
         if return_cache_table:
-            return score, result.cached_table
+            # atom_backtrack_cached: return the live FormulaCache object.
+            if result.formula_cache is not None:
+                return score, result.formula_cache
+            # baseline_cached: return (temp_dict, new_state_facts) pair.
+            if result.temp_result is not None:
+                return score, result.temp_result
+            # All other strategies: return a CachedPTRPGTable clone.
+            if result.cached_table is not None:
+                ct = result.cached_table
+                return score, CachedPTRPGTable(
+                    probabilities_by_layer={
+                        layer: dict(vals)
+                        for layer, vals in ct.probabilities_by_layer.items()
+                    },
+                    state_facts=frozenset(ct.state_facts),
+                    depth_used=ct.depth_used,
+                    start_layer=ct.start_layer,
+                )
+            return score, None
         return score
 
     @staticmethod
     def _normalize_strategy(strategy: str) -> str:
         value = (strategy or "baseline").strip().lower()
-        if value not in {"baseline", "baseline_cached", "atom_half_split", "atom_backtrack_exact"}:
+        valid = {
+            "baseline",
+            "baseline_cached",
+            "atom_half_split",
+            "atom_backtrack_exact",
+            "atom_backtrack_cached",
+        }
+        if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_cached, atom_half_split, atom_backtrack_exact."
+                "Supported strategies: baseline, baseline_cached, atom_half_split, "
+                "atom_backtrack_exact, atom_backtrack_cached."
             )
         return value
 
@@ -828,6 +909,185 @@ class TemporalProbabilisticRPGHeuristic:
             cache_hit=False,
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
+        )
+
+    def _heuristic_propagate_atom_backtrack_cached(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        formula_cache: Optional[FormulaCache],
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """atom_backtrack_exact with persistent cross-call memoization.
+
+        On the first call (formula_cache is None) the computation is identical
+        to atom_backtrack_exact.  On subsequent calls only memo entries that
+        transitively depended on the facts that changed between states are
+        evicted; all other entries survive and serve as cache hits.
+
+        Dependency tracking uses Option A (transitive base-fact sets): each
+        memo entry accumulates the full set of state-level base facts it reads
+        so that a single invalidation pass is sufficient.
+        """
+        del start_time
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+
+        achievers_by_fact: Dict[Fact, List[TemporalRelaxedActionModel]] = {}
+        for action_model in self._action_models:
+            for fact in action_model.add_probabilities.keys():
+                achievers_by_fact.setdefault(fact, []).append(action_model)
+
+        # Set up or reuse FormulaCache.
+        if formula_cache is None or formula_cache.state_facts is None:
+            fc = FormulaCache(
+                fact_memo={},
+                action_term_memo={},
+                reverse_deps_fact={},
+                reverse_deps_action={},
+                state_facts=frozenset(state_facts),
+            )
+        else:
+            fc = formula_cache
+            changed_facts = set(fc.state_facts.symmetric_difference(state_facts))
+            if changed_facts:
+                fc.invalidate(changed_facts)
+            fc.state_facts = frozenset(state_facts)
+
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        recursion_stack: Set[Tuple[Fact, int]] = set()
+
+        def is_atom_action(action_model: TemporalRelaxedActionModel) -> bool:
+            return (
+                len(action_model.preconditions) == 0
+                or action_model.preconditions.issubset(state_facts)
+            )
+
+        def fact_probability(fact: Fact, horizon: int) -> Tuple[float, Set[Fact]]:
+            """Return (probability, base_fact_deps) for (fact, horizon).
+
+            base_fact_deps is the transitive set of state facts read as base
+            cases during this computation.  Propagated upward so every ancestor
+            memo entry records the complete dependency set.
+            """
+            nonlocal fact_cache_hits, action_cache_hits
+            horizon = int(horizon)
+            if horizon < 0:
+                return 0.0, {fact}
+            key = (fact, horizon)
+            if key in fc.fact_memo:
+                fact_cache_hits += 1
+                deps: Set[Fact] = set()
+                for base_fact, keys_set in fc.reverse_deps_fact.items():
+                    if key in keys_set:
+                        deps.add(base_fact)
+                return fc.fact_memo[key], deps
+            if key in recursion_stack:
+                return 0.0, set()
+
+            all_base_deps: Set[Fact] = set()
+
+            if fact in state_facts:
+                value = 1.0
+                all_base_deps.add(fact)
+            elif horizon == 0:
+                value = 0.0
+                all_base_deps.add(fact)
+            else:
+                recursion_stack.add(key)
+                failure = 1.0
+                for action_model in achievers_by_fact.get(fact, []):
+                    action_key = (action_model.name, fact, horizon)
+                    if action_key in fc.action_term_memo:
+                        action_cache_hits += 1
+                        achiever_failure = fc.action_term_memo[action_key]
+                        for base_fact, keys_set in fc.reverse_deps_action.items():
+                            if action_key in keys_set:
+                                all_base_deps.add(base_fact)
+                    else:
+                        delay = max(0, int(action_model.effect_delay_steps))
+                        add_probability = _clamp_probability(
+                            action_model.add_probabilities.get(fact, 0.0)
+                        )
+                        action_base_deps: Set[Fact] = set()
+                        if add_probability <= 0.0 or horizon < delay:
+                            achiever_failure = 1.0
+                        else:
+                            first_completion = max(1, delay)
+                            attempts = horizon - first_completion + 1
+                            if attempts <= 0:
+                                achiever_failure = 1.0
+                            elif is_atom_action(action_model):
+                                achiever_failure = _clamp_probability(
+                                    (1.0 - add_probability) ** attempts
+                                )
+                                action_base_deps.update(action_model.preconditions)
+                            else:
+                                achiever_failure = 1.0
+                                for completion_time in range(first_completion, horizon + 1):
+                                    available_horizon = completion_time - delay
+                                    precondition_support = 1.0
+                                    for precondition in action_model.preconditions:
+                                        pre_val, pre_deps = fact_probability(
+                                            precondition,
+                                            available_horizon,
+                                        )
+                                        precondition_support *= pre_val
+                                        action_base_deps.update(pre_deps)
+                                    step_success = _clamp_probability(
+                                        add_probability * precondition_support
+                                    )
+                                    achiever_failure *= 1.0 - step_success
+                                achiever_failure = _clamp_probability(achiever_failure)
+
+                        fc.action_term_memo[action_key] = achiever_failure
+                        for base_fact in action_base_deps:
+                            fc.reverse_deps_action.setdefault(base_fact, set()).add(action_key)
+                        all_base_deps.update(action_base_deps)
+
+                    failure *= achiever_failure
+                recursion_stack.remove(key)
+                value = _clamp_probability(1.0 - failure)
+
+            fc.fact_memo[key] = value
+            for base_fact in all_base_deps:
+                fc.reverse_deps_fact.setdefault(base_fact, set()).add(key)
+            return value, all_base_deps
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            0: {fact: (1.0 if fact in state_facts else 0.0) for fact in facts},
+            depth: {},
+        }
+        for fact in facts:
+            prob, _ = fact_probability(fact, depth)
+            probabilities_by_layer[depth][fact] = prob
+
+        traces: List[TemporalLayerTrace] = []
+        if debug:
+            traces.append(
+                TemporalLayerTrace(
+                    layer=0,
+                    fact_probabilities=dict(probabilities_by_layer[0]),
+                )
+            )
+            traces.append(
+                TemporalLayerTrace(
+                    layer=depth,
+                    fact_probabilities=dict(probabilities_by_layer[depth]),
+                )
+            )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+            formula_cache=fc,
         )
 
     def _build_action_models(self) -> List[TemporalRelaxedActionModel]:
