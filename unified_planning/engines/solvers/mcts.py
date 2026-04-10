@@ -25,6 +25,8 @@ def _temporal_heuristic(
     current_time: float,
     temporal_heuristic_depth: int,
     temporal_heuristic_strategy: str = "baseline",
+    cached_table=None,
+    return_cache_table: bool = False,
 ):
     from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
         TemporalProbabilisticRPGHeuristic,
@@ -47,6 +49,8 @@ def _temporal_heuristic(
         fixed_depth=effective_depth,
         start_time=current_time,
         strategy=temporal_heuristic_strategy,
+        cached_table=cached_table,
+        return_cache_table=return_cache_table,
     )
 
 

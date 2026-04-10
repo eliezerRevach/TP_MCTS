@@ -44,6 +44,28 @@ class TemporalPropagationResult:
     cache_hit: bool
     fact_cache_hits: int
     action_cache_hits: int
+    cached_table: Optional["CachedPTRPGTable"] = None
+
+
+@dataclass
+class CachedPTRPGTable:
+    """Mutable cache container for incremental baseline propagation."""
+
+    probabilities_by_layer: Dict[int, Dict[Fact, float]]
+    state_facts: frozenset[Fact]
+    depth_used: int
+    start_layer: int
+
+    def clone(self) -> "CachedPTRPGTable":
+        return CachedPTRPGTable(
+            probabilities_by_layer={
+                layer: dict(probabilities)
+                for layer, probabilities in self.probabilities_by_layer.items()
+            },
+            state_facts=frozenset(self.state_facts),
+            depth_used=self.depth_used,
+            start_layer=self.start_layer,
+        )
 
 
 def _clamp_probability(value: float) -> float:
@@ -69,6 +91,8 @@ class TemporalProbabilisticRPGHeuristic:
         self._actions = list(actions)
         self._facts: Set[Fact] = set(facts or [])
         self._action_models = self._build_action_models()
+        self._fact_dependency_graph = self._build_fact_dependency_graph()
+        self._actions_by_effect_fact = self._build_actions_by_effect_fact()
         # Cross-query memoization to reuse the same fixed-depth computation.
         self._query_cache: Dict[Tuple[frozenset[Fact], int, int, str], TemporalPropagationResult] = {}
         # Dedicated memoization for the atom strategy recurrence.
@@ -86,6 +110,7 @@ class TemporalProbabilisticRPGHeuristic:
         fixed_depth: int = 25,
         start_time: float = 0.0,
         strategy: str = "baseline",
+        cached_table: Optional[CachedPTRPGTable] = None,
         debug: bool = False,
     ) -> TemporalPropagationResult:
         state_facts = _extract_state_facts(state)
@@ -117,6 +142,16 @@ class TemporalProbabilisticRPGHeuristic:
                 state=state,
                 fixed_depth=fixed_depth,
                 start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_cached":
+            result = self._heuristic_propagate_baseline_cached(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                cached_table=cached_table,
                 debug=debug,
             )
             self._query_cache[query_key] = result
@@ -226,6 +261,14 @@ class TemporalProbabilisticRPGHeuristic:
             cache_hit=False,
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values) for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=start_layer,
+            ),
         )
         self._query_cache[query_key] = result
         return result
@@ -238,6 +281,8 @@ class TemporalProbabilisticRPGHeuristic:
         fixed_depth: int = 25,
         start_time: float = 0.0,
         strategy: str = "baseline",
+        cached_table: Optional[CachedPTRPGTable] = None,
+        return_cache_table: bool = False,
         debug: bool = False,
     ):
         result = self.heuristic_propagate(
@@ -245,6 +290,7 @@ class TemporalProbabilisticRPGHeuristic:
             fixed_depth=fixed_depth,
             start_time=start_time,
             strategy=strategy,
+            cached_table=cached_table,
             debug=debug,
         )
         final_probabilities = result.probabilities_by_layer[result.depth_used]
@@ -264,17 +310,217 @@ class TemporalProbabilisticRPGHeuristic:
         score = _clamp_probability(score)
         if debug:
             return score, result
+        if return_cache_table:
+            return score, result.cached_table
         return score
 
     @staticmethod
     def _normalize_strategy(strategy: str) -> str:
         value = (strategy or "baseline").strip().lower()
-        if value not in {"baseline", "atom_half_split", "atom_backtrack_exact"}:
+        if value not in {"baseline", "baseline_cached", "atom_half_split", "atom_backtrack_exact"}:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, atom_half_split, atom_backtrack_exact."
+                "Supported strategies: baseline, baseline_cached, atom_half_split, atom_backtrack_exact."
             )
         return value
+
+    def _build_fact_dependency_graph(self) -> Dict[Fact, Set[Fact]]:
+        graph: Dict[Fact, Set[Fact]] = {}
+        for action_model in self._action_models:
+            for precondition in action_model.preconditions:
+                graph.setdefault(precondition, set())
+                for effect_fact in action_model.add_probabilities.keys():
+                    graph[precondition].add(effect_fact)
+        for fact in self._facts:
+            graph.setdefault(fact, set())
+        return graph
+
+    def _build_actions_by_effect_fact(self) -> Dict[Fact, List[TemporalRelaxedActionModel]]:
+        actions_by_effect: Dict[Fact, List[TemporalRelaxedActionModel]] = {}
+        for action_model in self._action_models:
+            for effect_fact in action_model.add_probabilities.keys():
+                actions_by_effect.setdefault(effect_fact, []).append(action_model)
+        return actions_by_effect
+
+    def _expand_dirty_facts(self, changed_facts: Set[Fact]) -> Set[Fact]:
+        if not changed_facts:
+            return set()
+        dirty: Set[Fact] = set(changed_facts)
+        queue = list(changed_facts)
+        while queue:
+            source = queue.pop()
+            for dependent in self._fact_dependency_graph.get(source, set()):
+                if dependent in dirty:
+                    continue
+                dirty.add(dependent)
+                queue.append(dependent)
+        return dirty
+
+    def _heuristic_propagate_baseline_cached(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        cached_table: Optional[CachedPTRPGTable],
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        start_layer = max(0, int(math.floor(start_time)))
+
+        # Fallback to full baseline when there is no compatible cache yet.
+        if (
+            cached_table is None
+            or cached_table.depth_used != depth
+            or cached_table.start_layer != start_layer
+        ):
+            return self.heuristic_propagate(
+                state=state,
+                fixed_depth=depth,
+                start_time=start_time,
+                strategy="baseline",
+                cached_table=None,
+                debug=debug,
+            )
+
+        facts = self._facts.union(state_facts).union(cached_table.state_facts)
+        reused = cached_table.clone()
+        probabilities_by_layer = reused.probabilities_by_layer
+        for layer in range(depth + 1):
+            probabilities_by_layer.setdefault(layer, {})
+            for fact in facts:
+                probabilities_by_layer[layer].setdefault(fact, 0.0)
+
+        changed_facts = set(cached_table.state_facts.symmetric_difference(state_facts))
+        if not changed_facts:
+            reused.state_facts = frozenset(state_facts)
+            return TemporalPropagationResult(
+                probabilities_by_layer=probabilities_by_layer,
+                depth_used=depth,
+                traces=[],
+                cache_hit=True,
+                fact_cache_hits=0,
+                action_cache_hits=0,
+                cached_table=reused,
+            )
+
+        dirty_facts = self._expand_dirty_facts(changed_facts)
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        traces: List[TemporalLayerTrace] = []
+
+        # Reset dirty columns to recompute them exactly.
+        for fact in dirty_facts:
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer][fact] = 0.0
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+        for fact in facts:
+            if fact not in dirty_facts:
+                probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        # Recompute only dirty effects using the current table values.
+        pending_successes: Dict[Tuple[int, Fact], List[float]] = {}
+        action_support_cache: Dict[Tuple[str, int], float] = {}
+        fact_support_cache: Dict[Tuple[Fact, int], float] = {}
+
+        relevant_actions: Set[TemporalRelaxedActionModel] = set()
+        for fact in dirty_facts:
+            relevant_actions.update(self._actions_by_effect_fact.get(fact, []))
+
+        def fact_support(fact: Fact, layer: int) -> float:
+            nonlocal fact_cache_hits
+            key = (fact, layer)
+            if key in fact_support_cache:
+                fact_cache_hits += 1
+                return fact_support_cache[key]
+            value = _clamp_probability(probabilities_by_layer[layer].get(fact, 0.0))
+            fact_support_cache[key] = value
+            return value
+
+        for layer in range(depth + 1):
+            arrivals: Dict[Fact, float] = {}
+            if layer > 0:
+                for fact in dirty_facts:
+                    probabilities_by_layer[layer][fact] = _clamp_probability(
+                        max(
+                            probabilities_by_layer[layer][fact],
+                            probabilities_by_layer[layer - 1][fact],
+                        )
+                    )
+
+            for fact in dirty_facts:
+                successes = pending_successes.get((layer, fact), [])
+                if not successes:
+                    continue
+                arrival_hazard = _clamp_probability(1.0 - prod(1.0 - s for s in successes))
+                current = probabilities_by_layer[layer][fact]
+                updated = _clamp_probability(current + (1.0 - current) * arrival_hazard)
+                probabilities_by_layer[layer][fact] = max(current, updated)
+                arrivals[fact] = arrival_hazard
+                fact_support_cache[(fact, layer)] = probabilities_by_layer[layer][fact]
+
+            if layer == depth:
+                if debug:
+                    traces.append(
+                        TemporalLayerTrace(
+                            layer=layer,
+                            fact_probabilities=dict(probabilities_by_layer[layer]),
+                            arrivals=arrivals,
+                        )
+                    )
+                break
+
+            action_support: Dict[str, float] = {}
+            for action_model in relevant_actions:
+                support_key = (action_model.name, layer)
+                if support_key in action_support_cache:
+                    action_support_value = action_support_cache[support_key]
+                    action_cache_hits += 1
+                else:
+                    probs_for_preconditions = {
+                        fact: fact_support(fact, layer)
+                        for fact in action_model.preconditions
+                    }
+                    action_support_value = compute_precondition_support(
+                        action_model.preconditions,
+                        probs_for_preconditions,
+                        strict=True,
+                    )
+                    action_support_cache[support_key] = action_support_value
+
+                action_support[action_model.name] = action_support_value
+                if action_support_value <= 0.0:
+                    continue
+                arrival_layer = layer + action_model.effect_delay_steps
+                if arrival_layer > depth:
+                    continue
+                for fact, add_prob in action_model.add_probabilities.items():
+                    if fact not in dirty_facts:
+                        continue
+                    success = _clamp_probability(action_support_value * add_prob)
+                    pending_successes.setdefault((arrival_layer, fact), []).append(success)
+
+            if debug:
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=layer,
+                        fact_probabilities=dict(probabilities_by_layer[layer]),
+                        action_support=action_support,
+                        arrivals=arrivals,
+                    )
+                )
+
+        reused.state_facts = frozenset(state_facts)
+        reused.probabilities_by_layer = probabilities_by_layer
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+            cached_table=reused,
+        )
 
     @staticmethod
     def _is_single_fact_precondition(action_model: TemporalRelaxedActionModel) -> bool:

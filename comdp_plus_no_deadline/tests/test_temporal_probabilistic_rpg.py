@@ -153,6 +153,55 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         )
         self.assertAlmostEqual(default_score, baseline_score)
 
+    def test_baseline_cached_matches_baseline_across_state_diffs(self):
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="seed_to_a",
+                    pos_preconditions=frozenset({"SEED"}),
+                    add_effects=frozenset({"A"}),
+                    duration_steps=1,
+                ),
+                SyntheticAction(
+                    name="a_to_b",
+                    pos_preconditions=frozenset({"A"}),
+                    add_effects=frozenset({"B"}),
+                    duration_steps=1,
+                ),
+                SyntheticAction(
+                    name="b_to_goal",
+                    pos_preconditions=frozenset({"B"}),
+                    add_effects=frozenset({"GOAL"}),
+                    duration_steps=1,
+                ),
+            ],
+            facts={"SEED", "A", "B", "GOAL"},
+        )
+
+        states = [
+            {"SEED"},
+            {"SEED", "A"},
+            {"SEED", "A", "B"},
+            {"SEED", "B"},
+        ]
+        cached_table = None
+        for state in states:
+            baseline_score = heuristic.heuristic_score(
+                state,
+                {"GOAL"},
+                fixed_depth=4,
+                strategy="baseline",
+            )
+            cached_score, cached_table = heuristic.heuristic_score(
+                state,
+                {"GOAL"},
+                fixed_depth=4,
+                strategy="baseline_cached",
+                cached_table=cached_table,
+                return_cache_table=True,
+            )
+            self.assertAlmostEqual(cached_score, baseline_score)
+
     def test_atom_half_split_eligibility_single_precondition_only(self):
         heuristic = TemporalProbabilisticRPGHeuristic(
             actions=[

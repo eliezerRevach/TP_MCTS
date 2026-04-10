@@ -7,14 +7,16 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "1": "baseline",
         "2": "atom_half_split",
         "3": "atom_backtrack_exact",
+        "4": "baseline_cached",
         "baseline": "baseline",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
+        "baseline_cached": "baseline_cached",
     }
     if normalized not in aliases:
         raise argparse.ArgumentTypeError(
             "temporal_heuristic_strategy must be one of: "
-            "1|baseline, 2|atom_half_split, 3|atom_backtrack_exact"
+            "1|baseline, 2|atom_half_split, 3|atom_backtrack_exact, 4|baseline_cached"
         )
     return aliases[normalized]
 
@@ -59,7 +61,8 @@ parser.add_argument(
         'strategy for temporal_probabilistic_rpg: '
         '1|baseline (layered), '
         '2|atom_half_split (approximate half-interval on eligible atoms), '
-        '3|atom_backtrack_exact (memoized exact atom backtrack vs horizon)'
+        '3|atom_backtrack_exact (memoized exact atom backtrack vs horizon), '
+        '4|baseline_cached (incremental dirty-fact table updates)'
     ),
     nargs='?',
     default='baseline',

@@ -1,4 +1,5 @@
 import math
+from typing import Dict
 
 import unified_planning as up
 from unified_planning.engines.solvers.mcts import _temporal_heuristic
@@ -12,7 +13,9 @@ def _heuristic_value(
     heuristic_name: str,
     temporal_heuristic_depth: int,
     temporal_heuristic_strategy: str,
-) -> float:
+    temporal_cache_table=None,
+    return_cache_table: bool = False,
+):
     if heuristic_name == "temporal_probabilistic_rpg":
         return _temporal_heuristic(
             mdp,
@@ -20,9 +23,14 @@ def _heuristic_value(
             current_time,
             temporal_heuristic_depth,
             temporal_heuristic_strategy,
+            cached_table=temporal_cache_table,
+            return_cache_table=return_cache_table,
         )
     heuristic = up.engines.heuristics.TRPG(mdp, state, current_time)
-    return heuristic.get_heuristic()
+    value = heuristic.get_heuristic()
+    if return_cache_table:
+        return value, None
+    return value
 
 
 def _score_action(
@@ -35,6 +43,7 @@ def _score_action(
     temporal_heuristic_depth: int,
     temporal_heuristic_strategy: str,
     heuristic_weight: float,
+    temporal_cache_table=None,
 ):
     candidate_stn = stn.clone()
     candidate_prev = previous_action_node
@@ -46,39 +55,57 @@ def _score_action(
             type="SetTime",
         )
     except Exception:
-        return -math.inf, None, None, None, False
+        return -math.inf, None, None, None, False, {}
 
     if not candidate_stn.is_consistent():
-        return -math.inf, None, None, None, False
+        return -math.inf, None, None, None, False, {}
     if candidate_stn.get_current_end_time() > mdp.deadline():
-        return -math.inf, None, None, None, False
+        return -math.inf, None, None, None, False, {}
 
     current_time = candidate_stn.get_current_end_time()
     # Expected-value scoring over probabilistic outcomes.
     transitions = mdp.transition_function(state, action)
     if not transitions:
-        return -math.inf, None, None, None, False
+        return -math.inf, None, None, None, False, {}
 
     step_penalty = -0.01
     expected_reward = 0.0
     expected_h = 0.0
     any_terminal = False
+    transition_cache_by_state: Dict["up.engines.State", object] = {}
     for next_state, prob in transitions:
         terminal = mdp.is_terminal(next_state)
         any_terminal = any_terminal or terminal
         expected_reward += prob * (mdp.terminal_reward(terminal, next_state) + step_penalty)
-        expected_h += prob * _heuristic_value(
-            mdp=mdp,
-            state=next_state,
-            current_time=current_time,
-            heuristic_name=heuristic_name,
-            temporal_heuristic_depth=temporal_heuristic_depth,
-            temporal_heuristic_strategy=temporal_heuristic_strategy,
-        )
+        if (
+            heuristic_name == "temporal_probabilistic_rpg"
+            and temporal_heuristic_strategy == "baseline_cached"
+        ):
+            h_value, candidate_cache = _heuristic_value(
+                mdp=mdp,
+                state=next_state,
+                current_time=current_time,
+                heuristic_name=heuristic_name,
+                temporal_heuristic_depth=temporal_heuristic_depth,
+                temporal_heuristic_strategy=temporal_heuristic_strategy,
+                temporal_cache_table=temporal_cache_table,
+                return_cache_table=True,
+            )
+            transition_cache_by_state[next_state] = candidate_cache
+            expected_h += prob * h_value
+        else:
+            expected_h += prob * _heuristic_value(
+                mdp=mdp,
+                state=next_state,
+                current_time=current_time,
+                heuristic_name=heuristic_name,
+                temporal_heuristic_depth=temporal_heuristic_depth,
+                temporal_heuristic_strategy=temporal_heuristic_strategy,
+            )
 
     score = expected_reward + heuristic_weight * expected_h - 0.001 * current_time
     # Do not return a sampled next_state here; sampling must only happen for the chosen action.
-    return score, None, candidate_stn, candidate_prev, any_terminal
+    return score, None, candidate_stn, candidate_prev, any_terminal, transition_cache_by_state
 
 
 def plan(
@@ -107,6 +134,7 @@ def plan(
     max_parallel_set_size = 32
     heuristic_weight = 0.2
     step = 0
+    temporal_cache_table = None
 
     while stn.get_current_end_time() <= mdp.deadline() and step < steps:
         print(f"started step {step}")
@@ -131,6 +159,7 @@ def plan(
                     temporal_heuristic_depth=temporal_heuristic_depth,
                     temporal_heuristic_strategy=temporal_heuristic_strategy,
                     heuristic_weight=heuristic_weight,
+                    temporal_cache_table=temporal_cache_table,
                 )
                 if candidate[0] > best_score:
                     best_score = candidate[0]
@@ -139,11 +168,16 @@ def plan(
             if best is None or not math.isfinite(best_score):
                 break
 
-            action, (_, _, next_stn, next_prev, _) = best
+            action, (_, _, next_stn, next_prev, _, transition_cache_by_state) = best
             print(f"Current state is {root_state}")
             print(f"The chosen action is {action.name}")
 
             terminal, next_state, _ = mdp.step(root_state, action)
+            if (
+                heuristic_name == "temporal_probabilistic_rpg"
+                and temporal_heuristic_strategy == "baseline_cached"
+            ):
+                temporal_cache_table = transition_cache_by_state.get(next_state)
             root_state = next_state
             stn = next_stn
             previous_action_node = next_prev
