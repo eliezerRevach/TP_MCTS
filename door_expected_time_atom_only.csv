@@ -1,0 +1,11 @@
+item,value,excel_formula,notes
+p_direct,0.02,,direct branch success prob (atom-level)
+p_key_found,0.60,,prob key atom is true when choosing open-with-key branch
+s_key,1.00,,prob key opens given key atom true
+p_lock_found,0.70,,prob lockpick atom is true when choosing lockpick branch
+s_lock,0.50,,prob lockpick opens given lockpick atom true
+p_key_branch,,=B3*B4,effective success via key branch
+p_lock_branch,,=B5*B6,effective success via lockpick branch
+x_open,,=1-(1-B2)*(1-B7)*(1-B8),atom-only combined success (1 - product of branch failures)
+E_open_exact,,=1/B9,expected attempts with no deadline/horizon/time
+Bellman_rhs_check,,=1+(1-B9)*B10,should equal E_open_exact if formula is consistent
