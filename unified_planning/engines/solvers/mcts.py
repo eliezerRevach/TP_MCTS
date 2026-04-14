@@ -31,6 +31,7 @@ def _temporal_heuristic(
     from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
         TemporalProbabilisticRPGHeuristic,
     )
+    from unified_planning.engines.heuristic_timing import WorkerTimer, is_active
 
     heuristic = getattr(heuristic_mdp, "_temporal_probabilistic_rpg_heuristic", None)
     if heuristic is None:
@@ -42,6 +43,24 @@ def _temporal_heuristic(
         current_time,
         heuristic_mdp.deadline(),
     )
+
+    if is_active():
+        cache_size_before = len(heuristic._query_cache)
+        with WorkerTimer() as wt:
+            result = heuristic.heuristic_score(
+                state,
+                heuristic_mdp.problem.goals,
+                aggregation="product",
+                fixed_depth=effective_depth,
+                start_time=current_time,
+                strategy=temporal_heuristic_strategy,
+                cached_table=cached_table,
+                return_cache_table=return_cache_table,
+            )
+            # Cache hit: key already existed, so cache size did not grow.
+            wt.hit = len(heuristic._query_cache) == cache_size_before
+        return result
+
     return heuristic.heuristic_score(
         state,
         heuristic_mdp.problem.goals,

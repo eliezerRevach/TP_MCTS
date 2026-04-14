@@ -4,6 +4,7 @@ from typing import Dict
 import unified_planning as up
 from unified_planning.engines.solvers.mcts import _temporal_heuristic
 from unified_planning.engines.utils import create_init_stn, update_stn
+from unified_planning.engines.heuristic_timing import WrapperTimer, is_active
 
 
 def _heuristic_value(
@@ -16,21 +17,28 @@ def _heuristic_value(
     temporal_cache_table=None,
     return_cache_table: bool = False,
 ):
-    if heuristic_name == "temporal_probabilistic_rpg":
-        return _temporal_heuristic(
-            mdp,
-            state,
-            current_time,
-            temporal_heuristic_depth,
-            temporal_heuristic_strategy,
-            cached_table=temporal_cache_table,
-            return_cache_table=return_cache_table,
-        )
-    heuristic = up.engines.heuristics.TRPG(mdp, state, current_time)
-    value = heuristic.get_heuristic()
-    if return_cache_table:
-        return value, None
-    return value
+    with WrapperTimer() if is_active() else _null_ctx():
+        if heuristic_name == "temporal_probabilistic_rpg":
+            return _temporal_heuristic(
+                mdp,
+                state,
+                current_time,
+                temporal_heuristic_depth,
+                temporal_heuristic_strategy,
+                cached_table=temporal_cache_table,
+                return_cache_table=return_cache_table,
+            )
+        heuristic = up.engines.heuristics.TRPG(mdp, state, current_time)
+        value = heuristic.get_heuristic()
+        if return_cache_table:
+            return value, None
+        return value
+
+
+class _null_ctx:
+    """No-op context manager used when metrics are disabled."""
+    def __enter__(self): return self
+    def __exit__(self, *_): pass
 
 
 def _score_action(
