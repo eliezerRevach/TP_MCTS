@@ -19,6 +19,43 @@ def _effective_temporal_depth(configured_depth: int, current_time: float, deadli
     return min(configured_depth, remaining)
 
 
+def _tprpg_heuristic_value(
+    heuristic_mdp,
+    state,
+    current_time: float,
+    temporal_heuristic_depth: int,
+    temporal_heuristic_strategy: str,
+    cached_table=None,
+):
+    """
+    Evaluate the temporal_probabilistic_rpg heuristic, threading the baseline_cached
+    table when applicable.  Returns (score_with_time_penalty, updated_cache_or_None).
+
+    - For strategy == "baseline_cached": calls _temporal_heuristic with
+      return_cache_table=True so the incremental propagation table can be
+      forwarded to the next evaluation (matching the greedy_parallel pattern).
+    - For all other strategies: calls _temporal_heuristic normally and returns
+      None as the cache output (no table to forward).
+    """
+    if temporal_heuristic_strategy == "baseline_cached":
+        raw = _temporal_heuristic(
+            heuristic_mdp, state, current_time,
+            temporal_heuristic_depth, temporal_heuristic_strategy,
+            cached_table=cached_table, return_cache_table=True,
+        )
+        if isinstance(raw, tuple):
+            score, cache_out = raw
+        else:
+            score, cache_out = raw, None
+    else:
+        score = _temporal_heuristic(
+            heuristic_mdp, state, current_time,
+            temporal_heuristic_depth, temporal_heuristic_strategy,
+        )
+        cache_out = None
+    return score - 0.001 * current_time, cache_out
+
+
 def _temporal_heuristic(
     heuristic_mdp,
     state,
@@ -190,12 +227,14 @@ class MCTS(Base_MCTS):
                  root_state: "up.engines.state.State", search_depth: int,
                  exploration_constant: float, selection_type, k: int,
                  heuristic_name: str = 'trpg', temporal_heuristic_depth: int = 25,
-                 temporal_heuristic_strategy: str = "baseline"):
+                 temporal_heuristic_strategy: str = "baseline",
+                 root_baseline_cache=None):
         super().__init__(mdp, search_depth, exploration_constant, k)
         self.split_mdp = split_mdp
         self.heuristic_name = heuristic_name
         self.temporal_heuristic_depth = temporal_heuristic_depth
         self.temporal_heuristic_strategy = temporal_heuristic_strategy
+        self._root_baseline_cache = root_baseline_cache
         create_snode = self.create_Snode_max if selection_type == 'max' else self.create_Snode
         snode, _ = create_snode(root_state, 0)
         self.set_root_node(root_node if root_node is not None else snode)
@@ -239,14 +278,15 @@ class MCTS(Base_MCTS):
         if isinstance(state, up.engines.CombinationState):
             current_time = state.current_time
         if self.heuristic_name == 'temporal_probabilistic_rpg':
-            h_val = _temporal_heuristic(
+            score, _ = _tprpg_heuristic_value(
                 self.split_mdp,
                 state,
                 current_time,
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
+                cached_table=self._root_baseline_cache,
             )
-            return h_val - 0.001 * current_time
+            return score
         h = up.engines.heuristics.TRPG(self.split_mdp, state, current_time)
         return h.get_heuristic()
 
@@ -346,12 +386,14 @@ class C_MCTS(Base_MCTS):
                  exploration_constant: float, stn: "up.plans.stn.STNPlan", selection_type, k: int,
                  previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None,
                  heuristic_name: str = 'trpg', temporal_heuristic_depth: int = 25,
-                 temporal_heuristic_strategy: str = "baseline"):
+                 temporal_heuristic_strategy: str = "baseline",
+                 root_baseline_cache=None):
         super().__init__(mdp, search_depth, exploration_constant, k)
         self._previous_chosen_action_node = previous_chosen_action_node
         self.heuristic_name = heuristic_name
         self.temporal_heuristic_depth = temporal_heuristic_depth
         self.temporal_heuristic_strategy = temporal_heuristic_strategy
+        self._root_baseline_cache = root_baseline_cache
 
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
         snode, _ = create_snode(root_state, 0, stn,
@@ -570,28 +612,30 @@ class C_MCTS(Base_MCTS):
             current_time = snode.parent.stn.get_current_end_time()
             lower_bounds = snode.parent.stn.get_lower_bound_potential_end_action()
         if self.heuristic_name == 'temporal_probabilistic_rpg':
-            h_val = _temporal_heuristic(
+            score, _ = _tprpg_heuristic_value(
                 self.mdp,
                 snode.state,
                 current_time,
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
+                cached_table=self._root_baseline_cache,
             )
-            return h_val - 0.001 * current_time
+            return score
         h = up.engines.heuristics.TRPG(self.mdp, snode.state, current_time)
         return h.get_heuristic(lower_bounds)
 
     def heuristic_init(self, state, stn):
         current_time = stn.get_current_end_time()
         if self.heuristic_name == 'temporal_probabilistic_rpg':
-            h_val = _temporal_heuristic(
+            score, _ = _tprpg_heuristic_value(
                 self.mdp,
                 state,
                 current_time,
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
+                cached_table=self._root_baseline_cache,
             )
-            return h_val - 0.001 * current_time
+            return score
         h = up.engines.heuristics.TRPG(self.mdp, state, current_time)
         return h.get_heuristic()
 
@@ -607,6 +651,11 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
     previous_action_node = None
     step = 0
     root_node = None
+    _use_baseline_cache = (
+        heuristic_name == "temporal_probabilistic_rpg"
+        and temporal_heuristic_strategy == "baseline_cached"
+    )
+    baseline_cache_table = None
 
     while stn.get_current_end_time() <= mdp.deadline():
         print(f"started step {step}")
@@ -623,6 +672,7 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
             heuristic_name=heuristic_name,
             temporal_heuristic_depth=temporal_heuristic_depth,
             temporal_heuristic_strategy=temporal_heuristic_strategy,
+            root_baseline_cache=baseline_cache_table,
         )
         action = mcts.search(search_time, selection_type)
 
@@ -654,6 +704,19 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
             print(f"The amount of time the plan took: {stn.get_current_end_time()}")
             return 1, stn.get_current_end_time()
 
+        # Advance the incremental PTRPG cache to the real successor state so the
+        # next MCTS round starts with a warm baseline_cached table.
+        if _use_baseline_cache:
+            current_time = stn.get_current_end_time()
+            _, baseline_cache_table = _tprpg_heuristic_value(
+                mdp,
+                root_state,
+                current_time,
+                temporal_heuristic_depth,
+                temporal_heuristic_strategy,
+                cached_table=baseline_cache_table,
+            )
+
         step += 1
 
     print("A valid plan is not found")
@@ -668,6 +731,11 @@ def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: 
     history = []
     step = 0
     root_node = None
+    _use_baseline_cache = (
+        heuristic_name == "temporal_probabilistic_rpg"
+        and temporal_heuristic_strategy == "baseline_cached"
+    )
+    baseline_cache_table = None
 
     while root_state.current_time < mdp.deadline():
         print(f"started step {step}")
@@ -684,6 +752,7 @@ def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: 
             heuristic_name=heuristic_name,
             temporal_heuristic_depth=temporal_heuristic_depth,
             temporal_heuristic_strategy=temporal_heuristic_strategy,
+            root_baseline_cache=baseline_cache_table,
         )
         action = mcts.search(search_time, selection_type)
 
@@ -699,6 +768,19 @@ def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: 
             print(f"Current state is {root_state}")
             print(f"The amount of time the plan took: {root_state.current_time}")
             return 1, root_state.current_time
+
+        # Advance the incremental PTRPG cache to the real successor state so the
+        # next MCTS round starts with a warm baseline_cached table.
+        if _use_baseline_cache:
+            current_time = root_state.current_time
+            _, baseline_cache_table = _tprpg_heuristic_value(
+                split_mdp,
+                root_state,
+                current_time,
+                temporal_heuristic_depth,
+                temporal_heuristic_strategy,
+                cached_table=baseline_cache_table,
+            )
 
         step += 1
 
