@@ -85,6 +85,7 @@ DEFAULT_DOMAIN = "nasa_rover"
 DEFAULT_RUNS = 20
 DEFAULT_SEED = 123
 DEFAULT_SEARCH_TIME = 1
+DEFAULT_EXPLORATION_CONSTANT = 10.0
 DEFAULT_REWARD_MODE = "deadline"
 DEFAULT_OUTPUT = str(REPO_ROOT / "results" / "mcts_heuristic_comparison.csv")
 
@@ -101,6 +102,7 @@ CSV_FIELDNAMES = [
     "std_success_time",
     "seed",
     "search_time",
+    "exploration_constant",
     "reward_mode",
     "heuristic_depth",
     "returncode",
@@ -185,6 +187,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="MCTS search depth. Default: 40",
     )
     p.add_argument(
+        "--exploration_constant",
+        type=float,
+        default=DEFAULT_EXPLORATION_CONSTANT,
+        help=f"MCTS exploration constant (UCT C parameter). Default: {DEFAULT_EXPLORATION_CONSTANT}",
+    )
+    p.add_argument(
         "--heuristic_depth",
         type=int,
         default=None,
@@ -226,6 +234,7 @@ def run_experiment(
     seed: int,
     search_time: int,
     search_depth: int,
+    exploration_constant: float,
     heuristic_depth: int | None,
     reward_mode: str,
     verbose: bool,
@@ -236,7 +245,7 @@ def run_experiment(
     label = f"[{domain} obj={object_amount} dl={deadline}] heuristic={heuristic_key}"
     print(f"\n{'─'*60}", flush=True)
     print(f"  {label}", flush=True)
-    print(f"  depth={depth}  runs={runs}  seed={seed}  reward_mode={reward_mode}", flush=True)
+    print(f"  depth={depth}  runs={runs}  seed={seed}  C={exploration_constant}  reward_mode={reward_mode}", flush=True)
     print(f"{'─'*60}", flush=True)
 
     t0 = time.perf_counter()
@@ -252,6 +261,7 @@ def run_experiment(
         temporal_heuristic_depth=depth,
         search_time=search_time,
         search_depth=search_depth,
+        exploration_constant=exploration_constant,
         reward_mode=reward_mode,
         verbose=verbose,
     )
@@ -285,6 +295,7 @@ def run_experiment(
         "heuristic_label": alias["label"],
         "seed": seed,
         "search_time": search_time,
+        "exploration_constant": exploration_constant,
         "reward_mode": reward_mode,
         "heuristic_depth": depth,
         "returncode": returncode,
@@ -314,7 +325,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Domain    : {args.domain}", flush=True)
     print(f"  Scenarios : {scenarios}", flush=True)
     print(f"  Heuristics: {args.heuristics}", flush=True)
-    print(f"  Runs/exp  : {args.runs}  seed={args.seed}  reward_mode={args.reward_mode}", flush=True)
+    print(f"  Runs/exp  : {args.runs}  seed={args.seed}  C={args.exploration_constant}  reward_mode={args.reward_mode}", flush=True)
     print(f"  Total     : {total} experiments", flush=True)
     print(f"  Output    : {args.output}", flush=True)
     print(f"{'='*60}", flush=True)
@@ -335,6 +346,7 @@ def main(argv: list[str] | None = None) -> None:
                 seed=args.seed,
                 search_time=args.search_time,
                 search_depth=args.search_depth,
+                exploration_constant=args.exploration_constant,
                 heuristic_depth=args.heuristic_depth,
                 reward_mode=args.reward_mode,
                 verbose=args.verbose,
