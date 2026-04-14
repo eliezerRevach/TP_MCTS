@@ -1,0 +1,6 @@
+heuristic,heuristic_label,heuristic_name_internal,strategy_internal,domain,object_amount,deadline,seed,heuristic_depth,max_steps,plan_success,plan_makespan,wrapper_total_calls,wrapper_total_time_sec,wrapper_first_call_sec,wrapper_avg_call_sec,worker_total_calls,worker_total_time_sec,worker_first_call_sec,worker_avg_call_sec,worker_cache_hits,worker_cache_misses,worker_cache_hit_avg_sec,worker_cache_miss_avg_sec
+ptrpg_old,ptrpg_old (trpg),trpg,n/a,nasa_rover,2,25,42,25,90,False,-inf,632,10.825179,0.02336,0.017128,0,,,,0,0,,
+baseline,baseline,temporal_probabilistic_rpg,baseline,nasa_rover,2,25,42,25,90,True,18,706,19.011583,0.111065,0.026929,706,18.946109,0.055157,0.026836,93,613,2.1e-05,0.030904
+baseline_cached,baseline_cached,temporal_probabilistic_rpg,baseline_cached,nasa_rover,2,25,42,25,90,True,18,706,10.705559,0.081501,0.015164,706,10.664845,0.048941,0.015106,93,613,1.6e-05,0.017395
+atomic_exact,atomic_exact,temporal_probabilistic_rpg,atom_backtrack_exact,nasa_rover,2,25,42,25,90,True,18,718,5.579277,0.046785,0.007771,718,5.546651,0.02046,0.007725,105,613,1.5e-05,0.009046
+atomic_exact_cached,atomic_exact_cached,temporal_probabilistic_rpg,atom_backtrack_cached,nasa_rover,2,25,42,25,90,True,18,718,5.37048,0.044642,0.00748,718,5.338784,0.020029,0.007436,105,613,1.4e-05,0.008707
