@@ -220,13 +220,14 @@ class MCTS(Base_MCTS):
         if isinstance(state, up.engines.CombinationState):
             current_time = state.current_time
         if self.heuristic_name == 'temporal_probabilistic_rpg':
-            return _temporal_heuristic(
+            h_val = _temporal_heuristic(
                 self.split_mdp,
                 state,
                 current_time,
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
             )
+            return h_val - 0.001 * current_time
         h = up.engines.heuristics.TRPG(self.split_mdp, state, current_time)
         return h.get_heuristic()
 
@@ -550,26 +551,28 @@ class C_MCTS(Base_MCTS):
             current_time = snode.parent.stn.get_current_end_time()
             lower_bounds = snode.parent.stn.get_lower_bound_potential_end_action()
         if self.heuristic_name == 'temporal_probabilistic_rpg':
-            return _temporal_heuristic(
+            h_val = _temporal_heuristic(
                 self.mdp,
                 snode.state,
                 current_time,
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
             )
+            return h_val - 0.001 * current_time
         h = up.engines.heuristics.TRPG(self.mdp, snode.state, current_time)
         return h.get_heuristic(lower_bounds)
 
     def heuristic_init(self, state, stn):
         current_time = stn.get_current_end_time()
         if self.heuristic_name == 'temporal_probabilistic_rpg':
-            return _temporal_heuristic(
+            h_val = _temporal_heuristic(
                 self.mdp,
                 state,
                 current_time,
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
             )
+            return h_val - 0.001 * current_time
         h = up.engines.heuristics.TRPG(self.mdp, state, current_time)
         return h.get_heuristic()
 
