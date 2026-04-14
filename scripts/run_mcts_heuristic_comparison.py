@@ -319,14 +319,16 @@ def main(argv: list[str] | None = None) -> None:
         for dl in args.deadlines
     ]
 
-    total = len(scenarios) * len(args.heuristics)
+    n_heur = len(args.heuristics)
+    total = len(scenarios) * n_heur
     print(f"\n{'='*60}", flush=True)
     print(f"  TP-MCTS Heuristic Comparison", flush=True)
     print(f"  Domain    : {args.domain}", flush=True)
     print(f"  Scenarios : {scenarios}", flush=True)
     print(f"  Heuristics: {args.heuristics}", flush=True)
-    print(f"  Runs/exp  : {args.runs}  seed={args.seed}  C={args.exploration_constant}  reward_mode={args.reward_mode}", flush=True)
-    print(f"  Total     : {total} experiments", flush=True)
+    print(f"  Per block : --runs {args.runs} (MCTS episodes inside run_domain for ONE row)", flush=True)
+    print(f"  Outer grid: {len(scenarios)} scenarios x {n_heur} heuristics = {total} rows in CSV", flush=True)
+    print(f"  Seed / C / reward : seed={args.seed}  C={args.exploration_constant}  reward_mode={args.reward_mode}", flush=True)
     print(f"  Output    : {args.output}", flush=True)
     print(f"{'='*60}", flush=True)
 
@@ -336,7 +338,11 @@ def main(argv: list[str] | None = None) -> None:
     for obj, dl in scenarios:
         for h in args.heuristics:
             completed += 1
-            print(f"\n[{completed}/{total}]", flush=True)
+            print(
+                f"\n[CSV row {completed}/{total}: obj={obj} deadline={dl} heuristic={h} | "
+                f"inner loop = {args.runs} MCTS runs]",
+                flush=True,
+            )
             row = run_experiment(
                 domain=args.domain,
                 object_amount=obj,
