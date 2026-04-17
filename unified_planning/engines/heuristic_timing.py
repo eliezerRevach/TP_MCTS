@@ -18,9 +18,11 @@ Two measurement levels are tracked independently:
 Cache semantics
 ---------------
 The `TemporalProbabilisticRPGHeuristic._query_cache` is keyed by
-(state_facts, depth, start_layer, strategy).  A hit means the full
-propagation graph was skipped; only a dict copy was returned.  First call
-for any (state, depth, time, strategy) tuple is always a miss.
+(state_facts, depth, start_layer, strategy), and for goal-sliced strategies
+(atom_backtrack_exact, atom_backtrack_cached, fast_atom_cache) also by a
+goal-key disambiguating ``goal_facts``.  A hit means the full propagation
+graph was skipped; only a dict copy was returned.  First call for any key
+is always a miss.
 """
 
 from __future__ import annotations

@@ -105,11 +105,15 @@ class TemporalProbabilisticRPGHeuristic:
         self._fact_dependency_graph = self._build_fact_dependency_graph()
         self._actions_by_effect_fact = self._build_actions_by_effect_fact()
         # Cross-query memoization to reuse the same fixed-depth computation.
-        self._query_cache: Dict[Tuple[frozenset[Fact], int, int, str], TemporalPropagationResult] = {}
+        # Keys may include a goal-key suffix for strategies that slice target_facts.
+        self._query_cache: Dict[Tuple, TemporalPropagationResult] = {}
         # Dedicated memoization for the atom strategy recurrence.
         self._atom_split_cache: Dict[Tuple[frozenset[Fact], Fact, int, str], float] = {}
         # Structural cache for atom_backtrack_exact (goal_facts, fixed_depth) -> ordered list
         self._schedule_cache: Dict[Tuple[frozenset[Fact], int], List[Tuple[Fact, int]]] = {}
+        # Cross-call lazy memos for fast_atom_cache (keyed by root state_facts signature).
+        self._fast_atom_fact_memo: Dict[Tuple[frozenset[Fact], Fact, int], float] = {}
+        self._fast_atom_action_memo: Dict[Tuple[frozenset[Fact], str, Fact, int], float] = {}
         # Precomputed availability tables for heuristic_expected_time.
         # Built once at construction; each query just reads from these tables.
         self._et_table_depth: int = 200
@@ -120,6 +124,16 @@ class TemporalProbabilisticRPGHeuristic:
         initial = set(getattr(problem, "initial_values", {}).keys())
         facts = initial | set(getattr(problem, "goals", set()))
         return cls(getattr(problem, "actions", []), facts=facts, initial_facts=initial)
+
+    def _query_cache_goal_key(
+        self,
+        goal_facts: Optional[Iterable[Fact]],
+        state_facts: Set[Fact],
+    ) -> Tuple[str, frozenset[Fact]]:
+        """Disambiguate cache entries when target_facts depend on goal_facts."""
+        if goal_facts is not None:
+            return ("explicit_goals", frozenset(goal_facts))
+        return ("default_targets", frozenset(self._facts.union(state_facts)))
 
     def heuristic_propagate(
         self,
@@ -132,9 +146,16 @@ class TemporalProbabilisticRPGHeuristic:
         debug: bool = False,
     ) -> TemporalPropagationResult:
         state_facts = _extract_state_facts(state)
+        state_sig = frozenset(state_facts)
         start_layer = max(0, int(math.floor(start_time)))
         chosen_strategy = self._normalize_strategy(strategy)
-        query_key = (frozenset(state_facts), int(fixed_depth), start_layer, chosen_strategy)
+        query_key: Tuple = (state_sig, int(fixed_depth), start_layer, chosen_strategy)
+        if chosen_strategy in (
+            "atom_backtrack_exact",
+            "atom_backtrack_cached",
+            "fast_atom_cache",
+        ):
+            query_key = query_key + (self._query_cache_goal_key(goal_facts, state_facts),)
         if query_key in self._query_cache:
             cached = self._query_cache[query_key]
             return TemporalPropagationResult(
@@ -167,6 +188,16 @@ class TemporalProbabilisticRPGHeuristic:
             return result
         if chosen_strategy == "atom_backtrack_cached":
             result = self._heuristic_propagate_atom_backtrack_cached(
+                state=state,
+                goal_facts=goal_facts,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "fast_atom_cache":
+            result = self._heuristic_propagate_fast_atom_cache(
                 state=state,
                 goal_facts=goal_facts,
                 fixed_depth=fixed_depth,
@@ -368,12 +399,13 @@ class TemporalProbabilisticRPGHeuristic:
             "atom_half_split",
             "atom_backtrack_exact",
             "atom_backtrack_cached",
+            "fast_atom_cache",
         }
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
                 "Supported strategies: baseline, baseline_cached, atom_half_split, "
-                "atom_backtrack_exact, atom_backtrack_cached."
+                "atom_backtrack_exact, atom_backtrack_cached, fast_atom_cache."
             )
         return value
 
@@ -994,6 +1026,123 @@ class TemporalProbabilisticRPGHeuristic:
 
                 failure *= achiever_failure
             fact_memo[(fact, horizon)] = _clamp_probability(1.0 - failure)
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            0: {fact: (1.0 if fact in state_facts else 0.0) for fact in target_facts},
+            depth: {fact: fact_memo.get((fact, depth), 0.0) for fact in target_facts},
+        }
+
+        traces: List[TemporalLayerTrace] = []
+        if debug:
+            traces.append(
+                TemporalLayerTrace(
+                    layer=0,
+                    fact_probabilities=dict(probabilities_by_layer[0]),
+                )
+            )
+            traces.append(
+                TemporalLayerTrace(
+                    layer=depth,
+                    fact_probabilities=dict(probabilities_by_layer[depth]),
+                )
+            )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+        )
+
+    def _heuristic_propagate_fast_atom_cache(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """
+        Same schedule-ordered semantics as ``atom_backtrack_cached``, but:
+        - always uses the per-timestep completion loop for achievers (no closed-form
+          ``(1-p)^attempts`` shortcut), and
+        - persists fact/action term values on the heuristic instance for reuse across calls.
+        """
+        del start_time
+        state_facts = _extract_state_facts(state)
+        state_sig = frozenset(state_facts)
+        depth = max(0, int(fixed_depth))
+        target_facts: Set[Fact] = set(goal_facts) if goal_facts is not None else self._facts.union(state_facts)
+
+        schedule_key = (frozenset(target_facts), depth)
+        schedule = self._schedule_cache.get(schedule_key)
+        if schedule is None:
+            schedule = self._build_evaluation_schedule(target_facts, depth)
+            self._schedule_cache[schedule_key] = schedule
+
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        fact_memo: Dict[Tuple[Fact, int], float] = {}
+        action_term_memo: Dict[Tuple[str, Fact, int], float] = {}
+
+        for fact, horizon in schedule:
+            fact_sig = (state_sig, fact, horizon)
+            if fact in state_facts:
+                v = 1.0
+                fact_memo[(fact, horizon)] = v
+                self._fast_atom_fact_memo[fact_sig] = v
+                continue
+            if horizon == 0:
+                v = 0.0
+                fact_memo[(fact, horizon)] = v
+                self._fast_atom_fact_memo[fact_sig] = v
+                continue
+
+            if fact_sig in self._fast_atom_fact_memo:
+                fact_cache_hits += 1
+                v = self._fast_atom_fact_memo[fact_sig]
+                fact_memo[(fact, horizon)] = v
+                continue
+
+            failure = 1.0
+            for action_model in self._actions_by_effect_fact.get(fact, []):
+                action_sig = (state_sig, action_model.name, fact, horizon)
+                action_key = (action_model.name, fact, horizon)
+                if action_sig in self._fast_atom_action_memo:
+                    action_cache_hits += 1
+                    achiever_failure = self._fast_atom_action_memo[action_sig]
+                elif action_key in action_term_memo:
+                    action_cache_hits += 1
+                    achiever_failure = action_term_memo[action_key]
+                else:
+                    delay = max(0, int(action_model.effect_delay_steps))
+                    add_probability = _clamp_probability(
+                        action_model.add_probabilities.get(fact, 0.0)
+                    )
+                    if add_probability <= 0.0 or horizon < delay:
+                        achiever_failure = 1.0
+                    else:
+                        first_completion = max(1, delay)
+                        achiever_failure = 1.0
+                        for completion_time in range(first_completion, horizon + 1):
+                            available_horizon = completion_time - delay
+                            precondition_support = 1.0
+                            for precondition in action_model.preconditions:
+                                precondition_support *= fact_memo.get((precondition, available_horizon), 0.0)
+                            step_success = _clamp_probability(
+                                add_probability * precondition_support
+                            )
+                            achiever_failure *= 1.0 - step_success
+                        achiever_failure = _clamp_probability(achiever_failure)
+                    action_term_memo[action_key] = achiever_failure
+                    self._fast_atom_action_memo[action_sig] = achiever_failure
+
+                failure *= achiever_failure
+            v = _clamp_probability(1.0 - failure)
+            fact_memo[(fact, horizon)] = v
+            self._fast_atom_fact_memo[fact_sig] = v
 
         probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
             0: {fact: (1.0 if fact in state_facts else 0.0) for fact in target_facts},

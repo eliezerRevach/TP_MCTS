@@ -443,6 +443,168 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         expected = 1.0 - expected_failure
         self.assertAlmostEqual(score, expected)
 
+    def test_fast_atom_cache_matches_atom_backtrack_cached(self):
+        p_key = 0.4
+        p_open_with_key = 0.6
+        get_key_effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_key: {"KEY": True},
+                1.0 - p_key: {},
+            }
+        )
+        open_effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_open_with_key: {"DOOR": True},
+                1.0 - p_open_with_key: {},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="search_key",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(get_key_effect,),
+                ),
+                SyntheticAction(
+                    name="open_with_key",
+                    pos_preconditions=frozenset({"KEY"}),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(open_effect,),
+                ),
+            ],
+            facts={"KEY", "DOOR"},
+        )
+
+        depth = 5
+        score_fast = heuristic.heuristic_score(
+            set(),
+            {"DOOR"},
+            fixed_depth=depth,
+            strategy="fast_atom_cache",
+        )
+        score_cached = heuristic.heuristic_score(
+            set(),
+            {"DOOR"},
+            fixed_depth=depth,
+            strategy="atom_backtrack_cached",
+        )
+        self.assertAlmostEqual(score_fast, score_cached, places=10)
+
+    def test_fast_atom_cache_cross_call_submemo_hits(self):
+        """Depth 7 schedule revisits (KEY,h)/(DOOR,h) pairs already filled at depth 5."""
+        p_key = 0.4
+        p_open_with_key = 0.6
+        get_key_effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_key: {"KEY": True},
+                1.0 - p_key: {},
+            }
+        )
+        open_effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_open_with_key: {"DOOR": True},
+                1.0 - p_open_with_key: {},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="search_key",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(get_key_effect,),
+                ),
+                SyntheticAction(
+                    name="open_with_key",
+                    pos_preconditions=frozenset({"KEY"}),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(open_effect,),
+                ),
+            ],
+            facts={"KEY", "DOOR"},
+        )
+        state = set()
+        goals = {"DOOR"}
+        r5 = heuristic.heuristic_propagate(
+            state,
+            goal_facts=goals,
+            fixed_depth=5,
+            strategy="fast_atom_cache",
+        )
+        self.assertFalse(r5.cache_hit)
+        r7 = heuristic.heuristic_propagate(
+            state,
+            goal_facts=goals,
+            fixed_depth=7,
+            strategy="fast_atom_cache",
+        )
+        self.assertFalse(r7.cache_hit)
+        self.assertGreater(r7.fact_cache_hits + r7.action_cache_hits, 0)
+
+    def test_query_cache_includes_goal_facts_for_atom_strategies(self):
+        p_key = 0.4
+        p_open_with_key = 0.6
+        get_key_effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_key: {"KEY": True},
+                1.0 - p_key: {},
+            }
+        )
+        open_effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_open_with_key: {"DOOR": True},
+                1.0 - p_open_with_key: {},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="search_key",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(get_key_effect,),
+                ),
+                SyntheticAction(
+                    name="open_with_key",
+                    pos_preconditions=frozenset({"KEY"}),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(open_effect,),
+                ),
+            ],
+            facts={"KEY", "DOOR"},
+        )
+        state = set()
+        depth = 3
+        strat = "atom_backtrack_exact"
+        r_door = heuristic.heuristic_propagate(
+            state,
+            goal_facts={"DOOR"},
+            fixed_depth=depth,
+            strategy=strat,
+        )
+        self.assertFalse(r_door.cache_hit)
+        r_key = heuristic.heuristic_propagate(
+            state,
+            goal_facts={"KEY"},
+            fixed_depth=depth,
+            strategy=strat,
+        )
+        self.assertFalse(r_key.cache_hit)
+        r_key_again = heuristic.heuristic_propagate(
+            state,
+            goal_facts={"KEY"},
+            fixed_depth=depth,
+            strategy=strat,
+        )
+        self.assertTrue(r_key_again.cache_hit)
+
 
 class TestExpectedTime(unittest.TestCase):
     """Tests for TemporalProbabilisticRPGHeuristic.heuristic_expected_time."""

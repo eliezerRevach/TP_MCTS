@@ -43,6 +43,11 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "atom_backtrack_cached",
         "label": "atomic_exact_cached",
     },
+    "fast_atom_cache": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "fast_atom_cache",
+        "label": "fast_atom_cache",
+    },
     "ptrpg_old": {
         "heuristic_name": "trpg",
         "temporal_heuristic_strategy": "baseline",  # unused for trpg
@@ -58,6 +63,7 @@ DEFAULT_HEURISTICS_MCTS = [
     "baseline_cached",
     "atomic_exact",
     "atomic_exact_cached",
+    "fast_atom_cache",
 ]
 
 DEFAULT_HEURISTICS_RUNTIME = [
@@ -66,6 +72,7 @@ DEFAULT_HEURISTICS_RUNTIME = [
     "baseline_cached",
     "atomic_exact",
     "atomic_exact_cached",
+    "fast_atom_cache",
 ]
 
 # ---------------------------------------------------------------------------
