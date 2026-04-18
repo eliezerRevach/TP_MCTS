@@ -240,6 +240,20 @@ def uct_score(root: Any, anode: Any, exploration_constant: float) -> float | Non
     return anode.value + exploration_constant * math.sqrt(math.log(root.count) / anode.count)
 
 
+def next_uct_action_name(root: Any, exploration_constant: float) -> str:
+    best_action = None
+    best_score = -math.inf
+    for action in root.possible_actions:
+        anode = root.children[action]
+        if anode.count == 0:
+            return action.name
+        score = uct_score(root, anode, exploration_constant)
+        if score is not None and score > best_score:
+            best_score = score
+            best_action = action
+    return "<none>" if best_action is None else best_action.name
+
+
 def root_rows(mcts: C_MCTS, args: argparse.Namespace) -> list[dict[str, Any]]:
     root = mcts.root_node
     rows = []
@@ -300,18 +314,25 @@ def print_snapshot(mcts: C_MCTS, args: argparse.Namespace, milestone: int) -> No
     expanded = sum(1 for anode in all_anodes if anode.children)
     stats = subtree_stats_from_snode(root)
     best = best_action_name(mcts)
+    next_uct = next_uct_action_name(root, args.exploration_constant)
+    visited_values = [anode.value for anode in all_anodes if anode.count > 0]
+    value_spread = (
+        max(visited_values) - min(visited_values)
+        if visited_values
+        else 0.0
+    )
 
     print()
     print("=" * 110)
     print(
         f"after_iterations={milestone}  root_visits={int(root.count)}  "
-        f"best_action={best}"
+        f"best_action={best}  next_uct_action={next_uct}"
     )
     print(
         f"root_actions={len(all_anodes)}  unvisited={unvisited}  "
         f"heuristic_only={heuristic_only}  expanded={expanded}  "
         f"tree_state_nodes={stats['state_nodes']}  tree_action_nodes={stats['action_nodes']}  "
-        f"max_depth={stats['max_depth']}"
+        f"max_depth={stats['max_depth']}  visited_value_spread={value_spread:.6f}"
     )
     print("-" * 110)
 
