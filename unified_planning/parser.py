@@ -106,5 +106,12 @@ parser.add_argument(
     default=3,
     type=int,
 )
+parser.add_argument(
+    '--value_mode',
+    help='MCTS leaf/backup target mode: tp_mcts (default) or greedy_matched',
+    nargs='?',
+    default='tp_mcts',
+    choices=('tp_mcts', 'greedy_matched'),
+)
 
 args = parser.parse_args()

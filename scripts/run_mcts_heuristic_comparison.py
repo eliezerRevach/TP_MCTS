@@ -90,6 +90,7 @@ DEFAULT_EXPLORATION_CONSTANT = 10.0
 DEFAULT_REWARD_MODE = "deadline"
 DEFAULT_DISCOUNT_FACTOR = 0.95
 DEFAULT_STEP_PENALTY = -0.05
+DEFAULT_VALUE_MODE = "tp_mcts"
 DEFAULT_OUTPUT = str(REPO_ROOT / "results" / "mcts_heuristic_comparison.csv")
 
 CSV_FIELDNAMES = [
@@ -109,6 +110,7 @@ CSV_FIELDNAMES = [
     "discount_factor",
     "step_penalty",
     "reward_mode",
+    "value_mode",
     "heuristic_depth",
     "returncode",
 ]
@@ -227,6 +229,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Per-step MDP reward penalty (each transition). Default: {DEFAULT_STEP_PENALTY}",
     )
     p.add_argument(
+        "--value_mode",
+        choices=["tp_mcts", "greedy_matched"],
+        default=DEFAULT_VALUE_MODE,
+        help=f"MCTS backup target mode. Default: {DEFAULT_VALUE_MODE}",
+    )
+    p.add_argument(
         "--output",
         default=DEFAULT_OUTPUT,
         help=f"Output CSV path. Default: {DEFAULT_OUTPUT}",
@@ -258,6 +266,7 @@ def run_experiment(
     reward_mode: str,
     discount_factor: float,
     step_penalty: float,
+    value_mode: str,
     verbose: bool,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
@@ -268,7 +277,7 @@ def run_experiment(
     print(f"  {label}", flush=True)
     print(
         f"  depth={depth}  runs={runs}  seed={seed}  C={exploration_constant}  "
-        f"gamma={discount_factor}  step_penalty={step_penalty}  reward_mode={reward_mode}",
+        f"gamma={discount_factor}  step_penalty={step_penalty}  reward_mode={reward_mode}  value_mode={value_mode}",
         flush=True,
     )
     print(f"{'─'*60}", flush=True)
@@ -290,6 +299,7 @@ def run_experiment(
         reward_mode=reward_mode,
         discount_factor=discount_factor,
         step_penalty=step_penalty,
+        value_mode=value_mode,
         verbose=verbose,
     )
     elapsed = time.perf_counter() - t0
@@ -326,6 +336,7 @@ def run_experiment(
         "discount_factor": discount_factor,
         "step_penalty": step_penalty,
         "reward_mode": reward_mode,
+        "value_mode": value_mode,
         "heuristic_depth": depth,
         "returncode": returncode,
         **metrics,
@@ -359,7 +370,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Outer grid: {len(scenarios)} scenarios x {n_heur} heuristics = {total} rows in CSV", flush=True)
     print(
         f"  Seed / C / gamma / reward : seed={args.seed}  C={args.exploration_constant}  "
-        f"gamma={args.discount_factor}  step_penalty={args.step_penalty}  reward_mode={args.reward_mode}",
+        f"gamma={args.discount_factor}  step_penalty={args.step_penalty}  reward_mode={args.reward_mode}  "
+        f"value_mode={args.value_mode}",
         flush=True,
     )
     print(f"  Output    : {args.output}", flush=True)
@@ -390,6 +402,7 @@ def main(argv: list[str] | None = None) -> None:
                 reward_mode=args.reward_mode,
                 discount_factor=args.discount_factor,
                 step_penalty=args.step_penalty,
+                value_mode=args.value_mode,
                 verbose=args.verbose,
             )
             rows.append(row)

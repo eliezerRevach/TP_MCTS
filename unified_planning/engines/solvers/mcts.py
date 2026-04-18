@@ -422,13 +422,14 @@ class C_MCTS(Base_MCTS):
                  previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None,
                  heuristic_name: str = 'trpg', temporal_heuristic_depth: int = 25,
                  temporal_heuristic_strategy: str = "baseline",
-                 root_baseline_cache=None):
+                 root_baseline_cache=None, value_mode: str = "tp_mcts"):
         super().__init__(mdp, search_depth, exploration_constant, k)
         self._previous_chosen_action_node = previous_chosen_action_node
         self.heuristic_name = heuristic_name
         self.temporal_heuristic_depth = temporal_heuristic_depth
         self.temporal_heuristic_strategy = temporal_heuristic_strategy
         self._root_baseline_cache = root_baseline_cache
+        self.value_mode = value_mode
 
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
         snode, _ = create_snode(root_state, 0, stn,
@@ -443,6 +444,36 @@ class C_MCTS(Base_MCTS):
     @property
     def stn(self):
         return self._stn
+
+    def _terminal_backup_reward(self, terminal: bool, next_state: "up.engines.State", sampled_reward: float) -> float:
+        if self.value_mode == "greedy_matched" and terminal:
+            return self.mdp.terminal_reward(True, next_state)
+        return sampled_reward
+
+    def _greedy_matched_action_target(self, snode: "up.engines.C_Snode", action: "up.engines.Action") -> float:
+        from unified_planning.engines.solvers.greedy_parallel import greedy_matched_value_target
+
+        current_time = snode.children[action].stn.get_current_end_time()
+        return greedy_matched_value_target(
+            mdp=self.mdp,
+            state=snode.state,
+            action=action,
+            current_time=current_time,
+            heuristic_name=self.heuristic_name,
+            temporal_heuristic_depth=self.temporal_heuristic_depth,
+            temporal_heuristic_strategy=self.temporal_heuristic_strategy,
+        )
+
+    def _depth_cutoff_value(self, snode: "up.engines.C_Snode"):
+        if self.value_mode != "greedy_matched":
+            return self.heuristic(snode)
+
+        best = -math.inf
+        for action in snode.possible_actions:
+            target = self._greedy_matched_action_target(snode, action)
+            if target > best:
+                best = target
+        return self.heuristic(snode) if best == -math.inf else best
 
     def create_Snode(self, state: "up.engines.State", depth: int, stn: "up.plans.stn.STNPlan",
                      parent: "up.engines.C_ANode" = None,
@@ -475,12 +506,17 @@ class C_MCTS(Base_MCTS):
         for action_idx in actions_idx:
             action = list(snode.children.keys())[action_idx]
             terminal, next_state, reward = self.mdp.step(snode.state, action)
-            reward += self.mdp.discount_factor * self.heuristic_init(next_state, snode.children[action].stn)
+            reward = self._terminal_backup_reward(terminal, next_state, reward)
+            if self.value_mode == "greedy_matched":
+                if not terminal:
+                    reward = self._greedy_matched_action_target(snode, action)
+            else:
+                reward += self.mdp.discount_factor * self.heuristic_init(next_state, snode.children[action].stn)
             snode.children[action].update(reward)
             if reward > best:
                 best = reward
         if best == -math.inf:
-            best = self.heuristic(snode)
+            best = self._depth_cutoff_value(snode)
 
         snode.update(best)
         return snode, best
@@ -497,13 +533,14 @@ class C_MCTS(Base_MCTS):
         if snode.depth > self.search_depth:
             # Stop if the search depth is reached
             # return 0
-            return self.heuristic(snode)
+            return self._depth_cutoff_value(snode)
 
         explore_constant = self.exploration_constant
 
         # Choose a consistent action
         action = self.uct(snode, explore_constant)
         terminal, next_state, reward = self.mdp.step(snode.state, action)
+        reward = self._terminal_backup_reward(terminal, next_state, reward)
         anode = snode.children[action]
         if not terminal:
             snodes = anode.children
@@ -512,7 +549,10 @@ class C_MCTS(Base_MCTS):
 
             else: # leaf
                 next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
-                reward += self.mdp.discount_factor * self.heuristic(next_snode)
+                if self.value_mode == "greedy_matched":
+                    reward = self._greedy_matched_action_target(snode, action)
+                else:
+                    reward += self.mdp.discount_factor * self.heuristic(next_snode)
                 anode.add_child(next_snode)
                 next_snode.update(reward)
 
@@ -533,12 +573,13 @@ class C_MCTS(Base_MCTS):
 
         if snode.depth > self.search_depth:
             # Stop if the search depth is reached
-            return self.heuristic(snode)
+            return self._depth_cutoff_value(snode)
         explore_constant = self.exploration_constant
 
         # Choose a consistent action
         action = self.uct(snode, explore_constant)
         terminal, next_state, reward = self.mdp.step(snode.state, action)
+        reward = self._terminal_backup_reward(terminal, next_state, reward)
         anode = snode.children[action]
         if not terminal:
             snodes = anode.children
@@ -546,8 +587,12 @@ class C_MCTS(Base_MCTS):
                 reward += self.mdp.discount_factor * self.selection_max(snodes[next_state])
 
             else: #leaf
-                next_snode, snode_reward = self.create_Snode_max(next_state, snode.depth + 1, anode.stn, anode)
-                reward += snode_reward
+                if self.value_mode == "greedy_matched":
+                    next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
+                    reward = self._greedy_matched_action_target(snode, action)
+                else:
+                    next_snode, snode_reward = self.create_Snode_max(next_state, snode.depth + 1, anode.stn, anode)
+                    reward += snode_reward
                 anode.add_child(next_snode)
 
         anode.update(reward)
@@ -570,12 +615,13 @@ class C_MCTS(Base_MCTS):
 
         if snode.depth > self.search_depth:
             # Stop if the search depth is reached
-            return self.heuristic(snode), *snode.parent.stn.get_legal_interval(root_STNnode)
+            return self._depth_cutoff_value(snode), *snode.parent.stn.get_legal_interval(root_STNnode)
 
         explore_constant = self.exploration_constant
         # Choose a consistent action
         action = self.uct(snode, explore_constant)
         terminal, next_state, reward = self.mdp.step(snode.state, action)
+        reward = self._terminal_backup_reward(terminal, next_state, reward)
 
         anode = snode.children[action]
         if root_STNnode is None:
@@ -591,7 +637,10 @@ class C_MCTS(Base_MCTS):
                 next_snode, _ = self.create_Snode_root_interval(next_state, snode.depth + 1, anode.stn, anode)
                 # legal interval of the root action node in the leaf node
                 lower, upper = anode.stn.get_legal_interval(root_STNnode)
-                reward += self.heuristic(next_snode) * self.mdp.discount_factor
+                if self.value_mode == "greedy_matched":
+                    reward = self._greedy_matched_action_target(snode, action)
+                else:
+                    reward += self.heuristic(next_snode) * self.mdp.discount_factor
                 anode.add_child(next_snode)
                 next_snode.update(reward, lower, upper)
 
@@ -679,7 +728,7 @@ class C_MCTS(Base_MCTS):
 
 def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int, exploration_constant: float,
          selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
-         temporal_heuristic_strategy: str = "baseline"):
+         temporal_heuristic_strategy: str = "baseline", value_mode: str = "tp_mcts"):
     stn = create_init_stn(mdp)
     root_state = mdp.initial_state()
 
@@ -710,6 +759,7 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
             temporal_heuristic_depth=temporal_heuristic_depth,
             temporal_heuristic_strategy=temporal_heuristic_strategy,
             root_baseline_cache=baseline_cache_table,
+            value_mode=value_mode,
         )
         action = mcts.search(search_time, selection_type)
 
@@ -764,7 +814,8 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
 def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: int, search_time: int,
                      search_depth: int, exploration_constant: float,
                      selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
-                     temporal_heuristic_strategy: str = "baseline"):
+                     temporal_heuristic_strategy: str = "baseline", value_mode: str = "tp_mcts"):
+    del value_mode
     root_state = mdp.initial_state()
     history = []
     step = 0

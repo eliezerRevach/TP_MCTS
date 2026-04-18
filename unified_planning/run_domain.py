@@ -72,6 +72,7 @@ def print_stats():
         )
     )
     print(f'Temporal Heuristic Strategy = {up.args.temporal_heuristic_strategy}')
+    print(f'Value Mode = {up.args.value_mode}')
 
 
 def set_seed():
@@ -83,7 +84,7 @@ def set_seed():
 
 def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
                 selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
-                temporal_heuristic_strategy='baseline', tree_depth=3):
+                temporal_heuristic_strategy='baseline', tree_depth=3, value_mode='tp_mcts'):
     """
     Run split action to start and end actions logic - TP-MCTS approach
     """
@@ -141,7 +142,8 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
         tree_params = params + (tree_depth,)
         up.engines.solvers.evaluate.evaluation_loop(runs, heuristic_tree_solver.plan, tree_params)
     else:
-        up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.plan, params)
+        mcts_params = params + (value_mode,)
+        up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.plan, mcts_params)
 
 
 def create_combination_domain(domain, deadline, object_amount, garbage_amount):
@@ -167,7 +169,7 @@ def create_combination_domain(domain, deadline, object_amount, garbage_amount):
 
 def run_combination(domain, runs, solver, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
                     selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
-                    temporal_heuristic_strategy='baseline'):
+                    temporal_heuristic_strategy='baseline', value_mode='tp_mcts'):
     """
     Run the combination logic - Mausem and Weld approach
     """
@@ -243,7 +245,8 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
             temporal_heuristic_depth,
             temporal_heuristic_strategy,
         )
-        up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.combination_plan, params)
+        mcts_params = params + (value_mode,)
+        up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.combination_plan, mcts_params)
 
 
 
@@ -256,7 +259,8 @@ if up.args.domain_type == 'combination':
                     garbage_amount=up.args.garbage_amount, k=up.args.k,
                     heuristic_name=up.args.heuristic_name,
                     temporal_heuristic_depth=_resolved_temporal_heuristic_depth(),
-                    temporal_heuristic_strategy=up.args.temporal_heuristic_strategy)
+                    temporal_heuristic_strategy=up.args.temporal_heuristic_strategy,
+                    value_mode=up.args.value_mode)
 else:
     run_regular(domain=up.args.domain, domain_type=up.args.domain_type, runs=up.args.runs, deadline=up.args.deadline,
                 search_time=up.args.search_time,
@@ -266,4 +270,5 @@ else:
                 heuristic_name=up.args.heuristic_name,
                 temporal_heuristic_depth=_resolved_temporal_heuristic_depth(),
                 temporal_heuristic_strategy=up.args.temporal_heuristic_strategy,
-                tree_depth=up.args.tree_depth)
+                tree_depth=up.args.tree_depth,
+                value_mode=up.args.value_mode)

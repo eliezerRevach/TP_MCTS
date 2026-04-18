@@ -6,6 +6,8 @@ from unified_planning.engines.solvers.mcts import _temporal_heuristic, _uses_tpr
 from unified_planning.engines.utils import create_init_stn, update_stn
 from unified_planning.engines.heuristic_timing import WrapperTimer, is_active
 
+GREEDY_HEURISTIC_WEIGHT = 0.2
+
 
 def _heuristic_value(
     mdp: "up.engines.MDP",
@@ -117,6 +119,49 @@ def _score_action(
     return score, None, candidate_stn, candidate_prev, any_terminal, transition_cache_by_state
 
 
+def greedy_matched_value_target(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    action: "up.engines.Action",
+    current_time: float,
+    heuristic_name: str,
+    temporal_heuristic_depth: int,
+    temporal_heuristic_strategy: str,
+    heuristic_weight: float = GREEDY_HEURISTIC_WEIGHT,
+):
+    """
+    Expected one-step greedy score for a fixed (state, action), reusing the
+    same shaping form as the greedy wrapper.
+
+    Terminal successors contribute terminal reward only (no step penalty and no
+    heuristic bonus) for TP-MCTS greedy_matched backups.
+    """
+    transitions = mdp.transition_function(state, action)
+    if not transitions:
+        return -math.inf
+
+    step_penalty = getattr(mdp, "step_penalty", -0.01)
+    expected_reward = 0.0
+    expected_h = 0.0
+    for next_state, prob in transitions:
+        terminal = mdp.is_terminal(next_state)
+        if terminal:
+            expected_reward += prob * mdp.terminal_reward(True, next_state)
+            continue
+
+        expected_reward += prob * (mdp.terminal_reward(False, next_state) + step_penalty)
+        expected_h += prob * _heuristic_value(
+            mdp=mdp,
+            state=next_state,
+            current_time=current_time,
+            heuristic_name=heuristic_name,
+            temporal_heuristic_depth=temporal_heuristic_depth,
+            temporal_heuristic_strategy=temporal_heuristic_strategy,
+        )
+
+    return expected_reward + heuristic_weight * expected_h - 0.001 * current_time
+
+
 def plan(
     mdp: "up.engines.MDP",
     steps: int,
@@ -141,7 +186,7 @@ def plan(
     root_state = mdp.initial_state()
     previous_action_node = None
     max_parallel_set_size = 32
-    heuristic_weight = 0.2
+    heuristic_weight = GREEDY_HEURISTIC_WEIGHT
     step = 0
     temporal_cache_table = None
 
