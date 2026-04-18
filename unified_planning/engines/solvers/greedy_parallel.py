@@ -77,7 +77,7 @@ def _score_action(
     if not transitions:
         return -math.inf, None, None, None, False, {}
 
-    step_penalty = -0.01
+    step_penalty = getattr(mdp, "step_penalty", -0.01)
     expected_reward = 0.0
     expected_h = 0.0
     any_terminal = False

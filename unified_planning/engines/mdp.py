@@ -7,10 +7,17 @@ from itertools import product
 
 
 class MDP:
-    def __init__(self, problem: "up.model.problem.Preoblem", discount_factor: float, reward_mode: str = "deadline"):
+    def __init__(
+        self,
+        problem: "up.model.problem.Preoblem",
+        discount_factor: float,
+        reward_mode: str = "deadline",
+        step_penalty: float = -0.05,
+    ):
         self._problem = problem
         self._discount_factor = discount_factor
         self._reward_mode = reward_mode
+        self._step_penalty = float(step_penalty)
 
     @property
     def problem(self):
@@ -23,6 +30,10 @@ class MDP:
     @property
     def reward_mode(self):
         return self._reward_mode
+
+    @property
+    def step_penalty(self):
+        return self._step_penalty
 
     def deadline(self):
         return self.problem.deadline
@@ -99,7 +110,7 @@ class MDP:
         next_state = up.engines.State(new_preds)
 
         terminal = self.is_terminal(next_state)
-        relevant_reward = -0.01  # Small step penalty to discourage unnecessary actions/loops
+        relevant_reward = self.step_penalty  # Discourage unnecessary actions/loops
         # relevant_reward = self.check_action_relevant(state, action)
 
         # common = len(self.problem.goals.intersection(state.predicates))
@@ -301,8 +312,7 @@ class combinationMDP(MDP):
         # reward = 100 if terminal else 2 ** (common - len(self.problem.goals))
 
         # reward = 10 if terminal else -1
-        step_penalty = -0.01  # Small step penalty to discourage unnecessary actions/loops
-        reward = self.terminal_reward(terminal, next_state) + step_penalty
+        reward = self.terminal_reward(terminal, next_state) + self.step_penalty
 
         return terminal, next_state, reward
 

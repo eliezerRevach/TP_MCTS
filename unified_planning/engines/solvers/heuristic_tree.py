@@ -142,7 +142,7 @@ def _tree_search(
         next_state, _ = _most_likely_outcome(transitions)
         terminal = mdp.is_terminal(next_state)
 
-        step_penalty = -0.01
+        step_penalty = getattr(mdp, "step_penalty", -0.01)
         immediate_reward = mdp.terminal_reward(terminal, next_state) + step_penalty
 
         if terminal:
