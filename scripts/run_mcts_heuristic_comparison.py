@@ -39,6 +39,8 @@ Usage (Colab or local)
       --objects 2 3 \\
       --deadlines 25 35 \\
       --search_time 1 \\
+      --search_depth 0 \\
+      --k 9999 \\
       --output results/my_run.csv \\
       --verbose
 
@@ -86,6 +88,8 @@ DEFAULT_DOMAIN = "nasa_rover"
 DEFAULT_RUNS = 20
 DEFAULT_SEED = 123
 DEFAULT_SEARCH_TIME = 1
+DEFAULT_SEARCH_DEPTH = 40  # Matches run_domain.py default.
+DEFAULT_K = 10  # Matches run_domain.py default for selection_type=max child sampling.
 DEFAULT_EXPLORATION_CONSTANT = 10.0
 DEFAULT_SELECTION_TYPE = "avg"
 DEFAULT_REWARD_MODE = "deadline"
@@ -107,6 +111,8 @@ CSV_FIELDNAMES = [
     "std_success_time",
     "seed",
     "search_time",
+    "search_depth",
+    "k",
     "selection_type",
     "exploration_constant",
     "discount_factor",
@@ -192,8 +198,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--search_depth",
         type=int,
-        default=40,
-        help="MCTS search depth. Default: 40",
+        default=DEFAULT_SEARCH_DEPTH,
+        help=f"MCTS search depth. Default: {DEFAULT_SEARCH_DEPTH}",
+    )
+    p.add_argument(
+        "--k",
+        type=int,
+        default=DEFAULT_K,
+        help=(
+            "Number of random child actions sampled by selection_type=max. "
+            f"Use a large value to evaluate all actions. Default: {DEFAULT_K}"
+        ),
     )
     p.add_argument(
         "--exploration_constant",
@@ -269,6 +284,7 @@ def run_experiment(
     seed: int,
     search_time: int,
     search_depth: int,
+    k: int,
     selection_type: str,
     exploration_constant: float,
     heuristic_depth: int | None,
@@ -285,7 +301,8 @@ def run_experiment(
     print(f"\n{'─'*60}", flush=True)
     print(f"  {label}", flush=True)
     print(
-        f"  depth={depth}  runs={runs}  seed={seed}  C={exploration_constant}  "
+        f"  heuristic_depth={depth}  search_time={search_time}  search_depth={search_depth}  "
+        f"k={k}  runs={runs}  seed={seed}  C={exploration_constant}  "
         f"selection={selection_type}  gamma={discount_factor}  step_penalty={step_penalty}  "
         f"reward_mode={reward_mode}  value_mode={value_mode}",
         flush=True,
@@ -305,6 +322,7 @@ def run_experiment(
         temporal_heuristic_depth=depth,
         search_time=search_time,
         search_depth=search_depth,
+        k=k,
         selection_type=selection_type,
         exploration_constant=exploration_constant,
         reward_mode=reward_mode,
@@ -343,6 +361,8 @@ def run_experiment(
         "heuristic_label": alias["label"],
         "seed": seed,
         "search_time": search_time,
+        "search_depth": search_depth,
+        "k": k,
         "selection_type": selection_type,
         "exploration_constant": exploration_constant,
         "discount_factor": discount_factor,
@@ -381,8 +401,12 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Per block : --runs {args.runs} (MCTS episodes inside run_domain for ONE row)", flush=True)
     print(f"  Outer grid: {len(scenarios)} scenarios x {n_heur} heuristics = {total} rows in CSV", flush=True)
     print(
-        f"  Seed / C / gamma / reward : seed={args.seed}  C={args.exploration_constant}  "
-        f"selection={args.selection_type}  gamma={args.discount_factor}  "
+        f"  MCTS args : search_time={args.search_time}  search_depth={args.search_depth}  "
+        f"k={args.k}  C={args.exploration_constant}  selection={args.selection_type}",
+        flush=True,
+    )
+    print(
+        f"  Seed / gamma / reward : seed={args.seed}  gamma={args.discount_factor}  "
         f"step_penalty={args.step_penalty}  reward_mode={args.reward_mode}  "
         f"value_mode={args.value_mode}",
         flush=True,
@@ -410,6 +434,7 @@ def main(argv: list[str] | None = None) -> None:
                 seed=args.seed,
                 search_time=args.search_time,
                 search_depth=args.search_depth,
+                k=args.k,
                 selection_type=args.selection_type,
                 exploration_constant=args.exploration_constant,
                 heuristic_depth=args.heuristic_depth,
