@@ -230,7 +230,12 @@ class Base_MCTS:
         start_time = time.time()
         current_time = time.time()
         i = 0
-        selection = self.selection if selection_type == 'avg' else (self.selection_root_interval if selection_type == 'rootInterval' else self.selection_max)
+        avg_variants = {'avg', 'avg_topk', 'avg_pw'}
+        selection = (
+            self.selection
+            if selection_type in avg_variants
+            else (self.selection_root_interval if selection_type == 'rootInterval' else self.selection_max)
+        )
         while current_time < start_time + timeout:
             selection(self.root_node)
             current_time = time.time()
@@ -422,7 +427,8 @@ class C_MCTS(Base_MCTS):
                  previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None,
                  heuristic_name: str = 'trpg', temporal_heuristic_depth: int = 25,
                  temporal_heuristic_strategy: str = "baseline",
-                 root_baseline_cache=None, value_mode: str = "tp_mcts"):
+                 root_baseline_cache=None, value_mode: str = "tp_mcts",
+                 uct_initial_k: int = 3):
         super().__init__(mdp, search_depth, exploration_constant, k)
         self._previous_chosen_action_node = previous_chosen_action_node
         self.heuristic_name = heuristic_name
@@ -430,6 +436,11 @@ class C_MCTS(Base_MCTS):
         self.temporal_heuristic_strategy = temporal_heuristic_strategy
         self._root_baseline_cache = root_baseline_cache
         self.value_mode = value_mode
+        self._uct_initial_k = max(1, int(uct_initial_k))
+        self._uct_filter_mode = {
+            'avg_topk': 'topk',
+            'avg_pw': 'pw',
+        }.get(selection_type)
 
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
         snode, _ = create_snode(root_state, 0, stn,
@@ -474,6 +485,54 @@ class C_MCTS(Base_MCTS):
             if target > best:
                 best = target
         return self.heuristic(snode) if best == -math.inf else best
+
+    def _action_rank_key(self, action):
+        action_name = getattr(action, "name", None)
+        return action_name if action_name is not None else str(action)
+
+    def _rank_actions_by_expected_target(self, snode: "up.engines.C_Snode"):
+        ranked = []
+        for action in snode.possible_actions:
+            ranked.append((self._greedy_matched_action_target(snode, action), action))
+        ranked.sort(key=lambda item: (-item[0], self._action_rank_key(item[1])))
+        return [action for _, action in ranked]
+
+    def _allowed_actions_for_uct(self, snode: "up.engines.C_Snode"):
+        ranked_actions = self._rank_actions_by_expected_target(snode)
+        if not ranked_actions:
+            return ranked_actions
+
+        if self._uct_filter_mode == 'topk':
+            allowed = min(len(ranked_actions), self._uct_initial_k)
+        else:
+            allowed = min(len(ranked_actions), self._uct_initial_k + int(math.sqrt(snode.count)))
+
+        return ranked_actions[:allowed]
+
+    def uct(self, snode: "up.engines.Snode", explore_constant: float):
+        if self._uct_filter_mode is None:
+            return super().uct(snode, explore_constant)
+
+        anodes = snode.children
+        candidate_actions = self._allowed_actions_for_uct(snode)
+        if not candidate_actions:
+            return super().uct(snode, explore_constant)
+
+        best_ub = -float('inf')
+        best_action = None
+        for action in candidate_actions:
+            if anodes[action].count == 0:
+                return action
+
+            ub = anodes[action].value + (
+                    explore_constant * math.sqrt(math.log(snode.count) / anodes[action].count))
+            if ub > best_ub:
+                best_ub = ub
+                best_action = action
+
+        if best_action is not None:
+            return best_action
+        return super().uct(snode, explore_constant)
 
     def create_Snode(self, state: "up.engines.State", depth: int, stn: "up.plans.stn.STNPlan",
                      parent: "up.engines.C_ANode" = None,

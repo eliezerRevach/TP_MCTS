@@ -12,6 +12,10 @@ Example:
     --search_depth 0 --k 9999 --exploration_constant 0 ^
     --discount_factor 1 --step_penalty -0.01 ^
     --milestones 0 1 2 5 10 --top_n 12
+
+Compare baseline avg against top-K UCT:
+  python scripts/inspect_mcts_tree.py --selection_type avg --seed 123 --milestones 0 1 2 5 10
+  python scripts/inspect_mcts_tree.py --selection_type avg_topk --uct_initial_k 3 --seed 123 --milestones 0 1 2 5 10
 """
 
 from __future__ import annotations
@@ -73,7 +77,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--deadline", type=int, default=25)
     p.add_argument("--seed", type=int, default=123)
     p.add_argument("--search_depth", type=int, default=0)
-    p.add_argument("--selection_type", choices=["avg", "max", "rootInterval"], default="max")
+    p.add_argument(
+        "--selection_type",
+        choices=["avg", "avg_topk", "avg_pw", "max", "rootInterval"],
+        default="max",
+    )
+    p.add_argument(
+        "--uct_initial_k",
+        type=int,
+        default=3,
+        help="Top-K window used by avg_topk and as the initial width for avg_pw.",
+    )
     p.add_argument("--k", type=int, default=9999)
     p.add_argument("--exploration_constant", "--C", type=float, default=0.0)
     p.add_argument("--discount_factor", "--gamma", type=float, default=1.0)
@@ -148,6 +162,7 @@ def build_mcts(args: argparse.Namespace) -> C_MCTS:
         stn=create_init_stn(mdp),
         selection_type=args.selection_type,
         k=args.k,
+        uct_initial_k=args.uct_initial_k,
         heuristic_name=alias["heuristic_name"],
         temporal_heuristic_depth=depth,
         temporal_heuristic_strategy=alias["temporal_heuristic_strategy"],
@@ -156,7 +171,7 @@ def build_mcts(args: argparse.Namespace) -> C_MCTS:
 
 
 def run_one_iteration(mcts: C_MCTS, selection_type: str) -> float:
-    if selection_type == "avg":
+    if selection_type in {"avg", "avg_topk", "avg_pw"}:
         return mcts.selection(mcts.root_node)
     if selection_type == "max":
         return mcts.selection_max(mcts.root_node)
@@ -240,18 +255,11 @@ def uct_score(root: Any, anode: Any, exploration_constant: float) -> float | Non
     return anode.value + exploration_constant * math.sqrt(math.log(root.count) / anode.count)
 
 
-def next_uct_action_name(root: Any, exploration_constant: float) -> str:
-    best_action = None
-    best_score = -math.inf
-    for action in root.possible_actions:
-        anode = root.children[action]
-        if anode.count == 0:
-            return action.name
-        score = uct_score(root, anode, exploration_constant)
-        if score is not None and score > best_score:
-            best_score = score
-            best_action = action
-    return "<none>" if best_action is None else best_action.name
+def next_uct_action_name(mcts: C_MCTS, exploration_constant: float) -> str:
+    root = mcts.root_node
+    if len(root.possible_actions) == 0:
+        return "<none>"
+    return mcts.uct(root, exploration_constant).name
 
 
 def root_rows(mcts: C_MCTS, args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -314,7 +322,7 @@ def print_snapshot(mcts: C_MCTS, args: argparse.Namespace, milestone: int) -> No
     expanded = sum(1 for anode in all_anodes if anode.children)
     stats = subtree_stats_from_snode(root)
     best = best_action_name(mcts)
-    next_uct = next_uct_action_name(root, args.exploration_constant)
+    next_uct = next_uct_action_name(mcts, args.exploration_constant)
     visited_values = [anode.value for anode in all_anodes if anode.count > 0]
     value_spread = (
         max(visited_values) - min(visited_values)
@@ -373,7 +381,7 @@ def main(argv: list[str] | None = None) -> None:
         f"domain={args.domain} obj={args.object_amount} deadline={args.deadline} "
         f"heuristic={args.heuristic} selection={args.selection_type} "
         f"value_mode={args.value_mode} depth={args.search_depth} "
-        f"k={args.k} C={args.exploration_constant} seed={args.seed}"
+        f"k={args.k} uct_initial_k={args.uct_initial_k} C={args.exploration_constant} seed={args.seed}"
     )
     print(
         f"Milestones (cumulative selection iterations): {milestones}  top_n={args.top_n}"
