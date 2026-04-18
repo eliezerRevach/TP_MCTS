@@ -192,7 +192,7 @@ class Base_MCTS:
             if anodes[action].count == 0:
                 return action
 
-            ub = (anodes[action].value / anodes[action].count) + (
+            ub = anodes[action].value + (
                     explore_constant * math.sqrt(math.log(snode.count) / anodes[action].count))
             # ub = anodes[action].value + (
             #         explore_constant * math.sqrt(math.log(snode.count + 1) / anodes[action].count))

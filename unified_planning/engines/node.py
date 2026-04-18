@@ -47,9 +47,10 @@ class Node:
             return self._linkList.max_interval
 
     def update(self, reward, lower = None, upper = None):
+        old_count = self._count
         self._count += 1
         if lower is None:
-            self._value = (self._value * self._count + reward) / (self._count + 1)
+            self._value = (self._value * old_count + reward) / self._count
         else:
             self._linkList.update(lower, upper, reward)
 
