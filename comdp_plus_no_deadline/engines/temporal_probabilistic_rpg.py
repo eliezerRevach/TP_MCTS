@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from math import prod
 from types import SimpleNamespace
 import math
+import time
 from typing import Dict, Hashable, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple
 
 from comdp_plus_no_deadline.engines.probabilistic_rpg import (
@@ -108,6 +109,8 @@ class TemporalProbabilisticRPGHeuristic:
         # Distinct from self._facts which includes goals and other known facts.
         self._initial_facts: frozenset = frozenset(initial_facts or [])
         self._goal_facts: frozenset[Fact] = frozenset(goal_facts or [])
+        # Wall time for compute_correlation_preplanning only (excludes ET tables, graphs, build_action_specs).
+        self.correlation_preplanning_time_sec: Optional[float] = None
         self._action_models = self._build_action_models()
         self._fact_dependency_graph = self._build_fact_dependency_graph()
         self._actions_by_effect_fact = self._build_actions_by_effect_fact()
@@ -134,11 +137,13 @@ class TemporalProbabilisticRPGHeuristic:
             for o in spec.joint_adds:
                 all_f |= set(o)
         if self._goal_facts:
+            t_corr = time.perf_counter()
             ct, jp, ach, _ = compute_correlation_preplanning(
                 self._corr_specs,
                 set(self._goal_facts),
                 all_f,
             )
+            self.correlation_preplanning_time_sec = time.perf_counter() - t_corr
             self._correlation_table: Dict[frozenset, str] = ct
             self._joint_pairs: Set[frozenset] = jp
             self._achievers_by_fact_corr: Dict[Fact, Set[str]] = ach
