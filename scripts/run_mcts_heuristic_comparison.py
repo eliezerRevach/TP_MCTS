@@ -87,6 +87,7 @@ DEFAULT_RUNS = 20
 DEFAULT_SEED = 123
 DEFAULT_SEARCH_TIME = 1
 DEFAULT_EXPLORATION_CONSTANT = 10.0
+DEFAULT_SELECTION_TYPE = "avg"
 DEFAULT_REWARD_MODE = "deadline"
 DEFAULT_DISCOUNT_FACTOR = 0.95
 DEFAULT_STEP_PENALTY = -0.05
@@ -106,6 +107,7 @@ CSV_FIELDNAMES = [
     "std_success_time",
     "seed",
     "search_time",
+    "selection_type",
     "exploration_constant",
     "discount_factor",
     "step_penalty",
@@ -200,6 +202,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"MCTS exploration constant (UCT C parameter). Default: {DEFAULT_EXPLORATION_CONSTANT}",
     )
     p.add_argument(
+        "--selection_type",
+        choices=["avg", "rootInterval", "max"],
+        default=DEFAULT_SELECTION_TYPE,
+        help=f"MCTS selection/scheduling variant. Default: {DEFAULT_SELECTION_TYPE}",
+    )
+    p.add_argument(
         "--heuristic_depth",
         type=int,
         default=None,
@@ -261,6 +269,7 @@ def run_experiment(
     seed: int,
     search_time: int,
     search_depth: int,
+    selection_type: str,
     exploration_constant: float,
     heuristic_depth: int | None,
     reward_mode: str,
@@ -277,7 +286,8 @@ def run_experiment(
     print(f"  {label}", flush=True)
     print(
         f"  depth={depth}  runs={runs}  seed={seed}  C={exploration_constant}  "
-        f"gamma={discount_factor}  step_penalty={step_penalty}  reward_mode={reward_mode}  value_mode={value_mode}",
+        f"selection={selection_type}  gamma={discount_factor}  step_penalty={step_penalty}  "
+        f"reward_mode={reward_mode}  value_mode={value_mode}",
         flush=True,
     )
     print(f"{'─'*60}", flush=True)
@@ -295,6 +305,7 @@ def run_experiment(
         temporal_heuristic_depth=depth,
         search_time=search_time,
         search_depth=search_depth,
+        selection_type=selection_type,
         exploration_constant=exploration_constant,
         reward_mode=reward_mode,
         discount_factor=discount_factor,
@@ -332,6 +343,7 @@ def run_experiment(
         "heuristic_label": alias["label"],
         "seed": seed,
         "search_time": search_time,
+        "selection_type": selection_type,
         "exploration_constant": exploration_constant,
         "discount_factor": discount_factor,
         "step_penalty": step_penalty,
@@ -370,7 +382,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Outer grid: {len(scenarios)} scenarios x {n_heur} heuristics = {total} rows in CSV", flush=True)
     print(
         f"  Seed / C / gamma / reward : seed={args.seed}  C={args.exploration_constant}  "
-        f"gamma={args.discount_factor}  step_penalty={args.step_penalty}  reward_mode={args.reward_mode}  "
+        f"selection={args.selection_type}  gamma={args.discount_factor}  "
+        f"step_penalty={args.step_penalty}  reward_mode={args.reward_mode}  "
         f"value_mode={args.value_mode}",
         flush=True,
     )
@@ -397,6 +410,7 @@ def main(argv: list[str] | None = None) -> None:
                 seed=args.seed,
                 search_time=args.search_time,
                 search_depth=args.search_depth,
+                selection_type=args.selection_type,
                 exploration_constant=args.exploration_constant,
                 heuristic_depth=args.heuristic_depth,
                 reward_mode=args.reward_mode,
