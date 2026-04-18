@@ -375,6 +375,9 @@ def main(argv: list[str] | None = None) -> None:
         f"value_mode={args.value_mode} depth={args.search_depth} "
         f"k={args.k} C={args.exploration_constant} seed={args.seed}"
     )
+    print(
+        f"Milestones (cumulative selection iterations): {milestones}  top_n={args.top_n}"
+    )
 
     completed = 0
     for milestone in milestones:
