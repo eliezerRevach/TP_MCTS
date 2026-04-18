@@ -32,6 +32,16 @@ domains_files = dict(machine_shop="machine_shop_domain_comb", nasa_rover="nasa_r
                      simple="simple_domain_comb", hosting="hosting_domain_comb", prob_match_cellar="prob_match_cellar_comb")
 
 
+def _resolved_temporal_heuristic_depth() -> int:
+    """CLI depth if set; otherwise match problem deadline; last resort 25."""
+    d = up.args.temporal_heuristic_depth
+    if d is not None:
+        return int(d)
+    if up.args.deadline is not None:
+        return int(up.args.deadline)
+    return 25
+
+
 def print_stats():
     """
     Prints parameters values
@@ -48,9 +58,19 @@ def print_stats():
     print(f'Garbage Action Amount = {up.args.garbage_amount}')
     print(f'K Random Actions = {up.args.k}')
     print(f'Reward Mode = {up.args.reward_mode}')
+    print(f'Discount Factor (gamma) = {up.args.discount_factor}')
+    print(f'Step Penalty = {up.args.step_penalty}')
     print(f'Seed = {up.args.seed}')
     print(f'Heuristic = {up.args.heuristic_name}')
-    print(f'Temporal Heuristic Depth = {up.args.temporal_heuristic_depth}')
+    _eff_td = _resolved_temporal_heuristic_depth()
+    print(
+        f'Temporal Heuristic Depth = {_eff_td}'
+        + (
+            ''
+            if up.args.temporal_heuristic_depth is not None
+            else ' (default: same as deadline)'
+        )
+    )
     print(f'Temporal Heuristic Strategy = {up.args.temporal_heuristic_strategy}')
 
 
@@ -96,7 +116,12 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
     print(f"Action amount= {len(ground_problem.actions)}, Proposition amount= {len(ground_problem.explicit_initial_values)}")
 
 
-    mdp = MDP(converted_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
+    mdp = MDP(
+        converted_problem,
+        discount_factor=up.args.discount_factor,
+        reward_mode=up.args.reward_mode,
+        step_penalty=up.args.step_penalty,
+    )
 
     params = (
         mdp,
@@ -178,8 +203,18 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
         converted_problem = convert_combination_problem._converted_problem
         split_problem = convert_combination_problem._split_problem
 
-    mdp = combinationMDP(converted_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
-    split_mdp = MDP(split_problem, discount_factor=0.95, reward_mode=up.args.reward_mode)
+    mdp = combinationMDP(
+        converted_problem,
+        discount_factor=up.args.discount_factor,
+        reward_mode=up.args.reward_mode,
+        step_penalty=up.args.step_penalty,
+    )
+    split_mdp = MDP(
+        split_problem,
+        discount_factor=up.args.discount_factor,
+        reward_mode=up.args.reward_mode,
+        step_penalty=up.args.step_penalty,
+    )
 
     if solver == 'rtdp':
         params = (
@@ -220,7 +255,7 @@ if up.args.domain_type == 'combination':
                     selection_type=up.args.selection_type, object_amount=up.args.object_amount,
                     garbage_amount=up.args.garbage_amount, k=up.args.k,
                     heuristic_name=up.args.heuristic_name,
-                    temporal_heuristic_depth=up.args.temporal_heuristic_depth,
+                    temporal_heuristic_depth=_resolved_temporal_heuristic_depth(),
                     temporal_heuristic_strategy=up.args.temporal_heuristic_strategy)
 else:
     run_regular(domain=up.args.domain, domain_type=up.args.domain_type, runs=up.args.runs, deadline=up.args.deadline,
@@ -229,6 +264,6 @@ else:
                 selection_type=up.args.selection_type, object_amount=up.args.object_amount,
                 garbage_amount=up.args.garbage_amount, k=up.args.k,
                 heuristic_name=up.args.heuristic_name,
-                temporal_heuristic_depth=up.args.temporal_heuristic_depth,
+                temporal_heuristic_depth=_resolved_temporal_heuristic_depth(),
                 temporal_heuristic_strategy=up.args.temporal_heuristic_strategy,
                 tree_depth=up.args.tree_depth)

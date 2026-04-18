@@ -10,6 +10,7 @@ Provides:
 from __future__ import annotations
 
 import csv
+import os
 import re
 import subprocess
 import sys
@@ -111,6 +112,8 @@ def run_domain_subprocess(
     selection_type: str = "avg",
     exploration_constant: float = 10.0,
     reward_mode: str = "deadline",
+    discount_factor: float = 0.95,
+    step_penalty: float = -0.05,
     garbage_amount: int = 0,
     extra_args: list[str] | None = None,
     verbose: bool = False,
@@ -133,6 +136,8 @@ def run_domain_subprocess(
         "--selection_type", selection_type,
         "--exploration_constant", str(exploration_constant),
         "--reward_mode", reward_mode,
+        "--discount_factor", str(discount_factor),
+        "--step_penalty", str(step_penalty),
         "--seed", str(seed),
         "--solver", solver,
         "--heuristic_name", heuristic_name,
@@ -145,11 +150,18 @@ def run_domain_subprocess(
     if verbose:
         print(f"  CMD: {' '.join(cmd)}", flush=True)
 
+    # Prefer the repo's `unified_planning` over any same-named site-packages install.
+    env = os.environ.copy()
+    repo = str(REPO_ROOT)
+    prev_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = repo + os.pathsep + prev_pp if prev_pp else repo
+
     proc = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
+        env=env,
     )
     output = proc.stdout + proc.stderr
     return output, proc.returncode

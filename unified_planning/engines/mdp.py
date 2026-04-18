@@ -234,8 +234,14 @@ class MDP:
 
 
 class combinationMDP(MDP):
-    def __init__(self, problem: "up.model.problem.Problem", discount_factor: float):
-        super().__init__(problem, discount_factor)
+    def __init__(
+        self,
+        problem: "up.model.problem.Problem",
+        discount_factor: float,
+        reward_mode: str = "deadline",
+        step_penalty: float = -0.05,
+    ):
+        super().__init__(problem, discount_factor, reward_mode=reward_mode, step_penalty=step_penalty)
 
     def initial_state(self):
         """

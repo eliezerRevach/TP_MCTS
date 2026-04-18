@@ -46,6 +46,23 @@ parser.add_argument('-ge', '--garbage_amount', help='how many garbage actions to
 parser.add_argument('-oe', '--object_amount', help='how many different objects in the domain', nargs='?', default=1, type=int)
 parser.add_argument('-k', '--k', help='K random actions in the max planner', nargs='?', default=10, type=int)
 parser.add_argument('-rm', '--reward_mode', help='reward mode: deadline or terminal', nargs='?', default='deadline')
+parser.add_argument(
+    '--discount_factor',
+    '--gamma',
+    dest='discount_factor',
+    help='MDP discount factor (gamma) for MCTS discounted backups',
+    nargs='?',
+    default=0.95,
+    type=float,
+)
+parser.add_argument(
+    '--step_penalty',
+    dest='step_penalty',
+    help='Per-step reward shaping penalty added on each MDP transition',
+    nargs='?',
+    default=-0.05,
+    type=float,
+)
 parser.add_argument('--seed', help='random seed for reproducibility', nargs='?', default=None, type=int)
 parser.add_argument(
     '--heuristic_name',
@@ -58,9 +75,12 @@ parser.add_argument(
 )
 parser.add_argument(
     '--temporal_heuristic_depth',
-    help='fixed temporal lookahead depth for temporal_probabilistic_rpg',
+    help=(
+        'Temporal lookahead depth for temporal_probabilistic_rpg / TP-MCTS. '
+        'Default: same as --deadline (or 25 if deadline is unset).'
+    ),
     nargs='?',
-    default=25,
+    default=None,
     type=int,
 )
 parser.add_argument(

@@ -31,6 +31,7 @@ Default scenario
   Domain  : nasa_rover
   Objects : 2
   Deadline: 25
+  Heuristic depth: same as deadline when ``--heuristic_depth`` is omitted
   Max steps: 90
 
 Output
@@ -112,7 +113,11 @@ DEFAULT_OBJECT_AMOUNT = 2
 DEFAULT_DEADLINE = 25
 DEFAULT_SEED = 42
 DEFAULT_MAX_STEPS = 90
-DEFAULT_HEURISTIC_DEPTH = 25
+# When --heuristic_depth is omitted, use the same value as --deadline (see main()).
+DEFAULT_HEURISTIC_DEPTH_FALLBACK = 25
+DEFAULT_REWARD_MODE = "deadline"
+DEFAULT_DISCOUNT_FACTOR = 0.95
+DEFAULT_STEP_PENALTY = -0.05
 DEFAULT_OUTPUT = str(REPO_ROOT / "results" / "heuristic_runtime_per_call.csv")
 
 CSV_FIELDNAMES = [
@@ -123,6 +128,9 @@ CSV_FIELDNAMES = [
     "domain",
     "object_amount",
     "deadline",
+    "reward_mode",
+    "discount_factor",
+    "step_penalty",
     "seed",
     "heuristic_depth",
     "max_steps",
@@ -194,8 +202,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--heuristic_depth",
         type=int,
-        default=DEFAULT_HEURISTIC_DEPTH,
-        help=f"Temporal heuristic lookahead depth. Default: {DEFAULT_HEURISTIC_DEPTH}",
+        default=None,
+        help=(
+            "Temporal heuristic lookahead depth. "
+            "Default: same as --deadline (or "
+            f"{DEFAULT_HEURISTIC_DEPTH_FALLBACK} if deadline is unset)."
+        ),
     )
     p.add_argument(
         "--max_steps",
@@ -208,6 +220,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_SEED,
         help=f"Random seed. Default: {DEFAULT_SEED}",
+    )
+    p.add_argument(
+        "--reward_mode",
+        choices=["deadline", "terminal"],
+        default=DEFAULT_REWARD_MODE,
+        help=f"MDP reward mode. Default: {DEFAULT_REWARD_MODE}",
+    )
+    p.add_argument(
+        "--discount_factor",
+        "--gamma",
+        type=float,
+        default=DEFAULT_DISCOUNT_FACTOR,
+        dest="discount_factor",
+        help=f"MDP discount factor. Default: {DEFAULT_DISCOUNT_FACTOR}",
+    )
+    p.add_argument(
+        "--step_penalty",
+        type=float,
+        default=DEFAULT_STEP_PENALTY,
+        help=f"Per-step MDP reward penalty. Default: {DEFAULT_STEP_PENALTY}",
     )
     p.add_argument(
         "--output",
@@ -237,6 +269,8 @@ def build_mdp(
     deadline: int,
     seed: int,
     reward_mode: str = "deadline",
+    discount_factor: float = 0.95,
+    step_penalty: float = -0.05,
 ) -> "up.engines.MDP":
     """Build and compile an MDP from scratch (fresh caches on each call)."""
     random.seed(seed)
@@ -260,7 +294,12 @@ def build_mdp(
     ground_problem = grounding_result.problem
     convert_problem = Convert_problem(ground_problem)
     converted_problem = convert_problem._converted_problem
-    return MDP(converted_problem, discount_factor=0.95, reward_mode=reward_mode)
+    return MDP(
+        converted_problem,
+        discount_factor=discount_factor,
+        reward_mode=reward_mode,
+        step_penalty=step_penalty,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +315,9 @@ def run_timing(
     heuristic_depth: int,
     max_steps: int,
     seed: int,
+    reward_mode: str,
+    discount_factor: float,
+    step_penalty: float,
 ) -> dict[str, Any]:
     alias = HEURISTIC_ALIASES[heuristic_key]
     h_name = alias["heuristic_name"]
@@ -287,7 +329,15 @@ def run_timing(
     print(f"  Scenario  : {domain} obj={object_amount}  deadline={deadline}  depth={heuristic_depth}", flush=True)
     print(f"{'='*60}", flush=True)
 
-    mdp = build_mdp(domain, object_amount, deadline, seed)
+    mdp = build_mdp(
+        domain,
+        object_amount,
+        deadline,
+        seed,
+        reward_mode=reward_mode,
+        discount_factor=discount_factor,
+        step_penalty=step_penalty,
+    )
     reset_metrics()
 
     result = gp_solver.plan(
@@ -323,6 +373,9 @@ def run_timing(
         "domain": domain,
         "object_amount": object_amount,
         "deadline": deadline,
+        "reward_mode": reward_mode,
+        "discount_factor": discount_factor,
+        "step_penalty": step_penalty,
         "seed": seed,
         "heuristic_depth": heuristic_depth,
         "max_steps": max_steps,
@@ -351,7 +404,22 @@ def main(argv: list[str] | None = None) -> None:
     print(f"\n{'='*60}", flush=True)
     print(f"  Heuristic Per-Call Runtime Benchmark", flush=True)
     print(f"  Scenario  : {args.domain}  obj={args.object_amount}  deadline={args.deadline}", flush=True)
-    print(f"  H-depth   : {args.heuristic_depth}  max_steps={args.max_steps}  seed={args.seed}", flush=True)
+    heuristic_depth = (
+        args.heuristic_depth
+        if args.heuristic_depth is not None
+        else (args.deadline if args.deadline is not None else DEFAULT_HEURISTIC_DEPTH_FALLBACK)
+    )
+    print(
+        f"  H-depth   : {heuristic_depth}"
+        + (
+            ""
+            if args.heuristic_depth is not None
+            else " (default: same as deadline)"
+        )
+        + f"  max_steps={args.max_steps}  seed={args.seed}  "
+        f"reward={args.reward_mode}  gamma={args.discount_factor}  step_penalty={args.step_penalty}",
+        flush=True,
+    )
     print(f"  Heuristics: {args.heuristics}", flush=True)
     print(f"  Output    : {args.output}", flush=True)
     print(f"{'='*60}", flush=True)
@@ -364,9 +432,12 @@ def main(argv: list[str] | None = None) -> None:
             domain=args.domain,
             object_amount=args.object_amount,
             deadline=args.deadline,
-            heuristic_depth=args.heuristic_depth,
+            heuristic_depth=heuristic_depth,
             max_steps=args.max_steps,
             seed=args.seed,
+            reward_mode=args.reward_mode,
+            discount_factor=args.discount_factor,
+            step_penalty=args.step_penalty,
         )
         rows.append(row)
         write_csv(rows, Path(args.output), fieldnames=CSV_FIELDNAMES)
