@@ -19,6 +19,19 @@ def _effective_temporal_depth(configured_depth: int, current_time: float, deadli
     return min(configured_depth, remaining)
 
 
+# User-requested names include typos; aliases map to the same implementation.
+_CORR_PESSIMISTIC = frozenset({"baseline_pessimistic", "baseline_passmistic"})
+_CORR_OPTIMISTIC = frozenset({"baseline_optimistic", "baseline_optimstic"})
+
+
+def _uses_tprpg_family(heuristic_name: str) -> bool:
+    return (
+        heuristic_name == "temporal_probabilistic_rpg"
+        or heuristic_name in _CORR_PESSIMISTIC
+        or heuristic_name in _CORR_OPTIMISTIC
+    )
+
+
 def _tprpg_heuristic_value(
     heuristic_mdp,
     state,
@@ -26,6 +39,7 @@ def _tprpg_heuristic_value(
     temporal_heuristic_depth: int,
     temporal_heuristic_strategy: str,
     cached_table=None,
+    leaf_heuristic_name: str = "temporal_probabilistic_rpg",
 ):
     """
     Evaluate the temporal_probabilistic_rpg heuristic, threading the baseline_cached
@@ -37,11 +51,12 @@ def _tprpg_heuristic_value(
     - For all other strategies: calls _temporal_heuristic normally and returns
       None as the cache output (no table to forward).
     """
-    if temporal_heuristic_strategy == "baseline_cached":
+    if temporal_heuristic_strategy == "baseline_cached" and leaf_heuristic_name == "temporal_probabilistic_rpg":
         raw = _temporal_heuristic(
             heuristic_mdp, state, current_time,
             temporal_heuristic_depth, temporal_heuristic_strategy,
             cached_table=cached_table, return_cache_table=True,
+            leaf_heuristic_name=leaf_heuristic_name,
         )
         if isinstance(raw, tuple):
             score, cache_out = raw
@@ -51,6 +66,7 @@ def _tprpg_heuristic_value(
         score = _temporal_heuristic(
             heuristic_mdp, state, current_time,
             temporal_heuristic_depth, temporal_heuristic_strategy,
+            leaf_heuristic_name=leaf_heuristic_name,
         )
         cache_out = None
     return score - 0.001 * current_time, cache_out
@@ -64,6 +80,7 @@ def _temporal_heuristic(
     temporal_heuristic_strategy: str = "baseline",
     cached_table=None,
     return_cache_table: bool = False,
+    leaf_heuristic_name: str = "temporal_probabilistic_rpg",
 ):
     from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
         TemporalProbabilisticRPGHeuristic,
@@ -80,6 +97,23 @@ def _temporal_heuristic(
         current_time,
         heuristic_mdp.deadline(),
     )
+
+    if leaf_heuristic_name in _CORR_PESSIMISTIC:
+        return heuristic.pessimistic_heuristic(
+            state,
+            goal_facts=heuristic_mdp.problem.goals,
+            fixed_depth=effective_depth,
+            start_time=current_time,
+            problem_deadline=heuristic_mdp.deadline(),
+        )
+    if leaf_heuristic_name in _CORR_OPTIMISTIC:
+        return heuristic.optimistic_heuristic(
+            state,
+            goal_facts=heuristic_mdp.problem.goals,
+            fixed_depth=effective_depth,
+            start_time=current_time,
+            problem_deadline=heuristic_mdp.deadline(),
+        )
 
     if is_active():
         cache_size_before = len(heuristic._query_cache)
@@ -277,7 +311,7 @@ class MCTS(Base_MCTS):
         current_time = 0
         if isinstance(state, up.engines.CombinationState):
             current_time = state.current_time
-        if self.heuristic_name == 'temporal_probabilistic_rpg':
+        if _uses_tprpg_family(self.heuristic_name):
             score, _ = _tprpg_heuristic_value(
                 self.split_mdp,
                 state,
@@ -285,6 +319,7 @@ class MCTS(Base_MCTS):
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
                 cached_table=self._root_baseline_cache,
+                leaf_heuristic_name=self.heuristic_name,
             )
             return score
         h = up.engines.heuristics.TRPG(self.split_mdp, state, current_time)
@@ -611,7 +646,7 @@ class C_MCTS(Base_MCTS):
         if snode.parent:
             current_time = snode.parent.stn.get_current_end_time()
             lower_bounds = snode.parent.stn.get_lower_bound_potential_end_action()
-        if self.heuristic_name == 'temporal_probabilistic_rpg':
+        if _uses_tprpg_family(self.heuristic_name):
             score, _ = _tprpg_heuristic_value(
                 self.mdp,
                 snode.state,
@@ -619,6 +654,7 @@ class C_MCTS(Base_MCTS):
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
                 cached_table=self._root_baseline_cache,
+                leaf_heuristic_name=self.heuristic_name,
             )
             return score
         h = up.engines.heuristics.TRPG(self.mdp, snode.state, current_time)
@@ -626,7 +662,7 @@ class C_MCTS(Base_MCTS):
 
     def heuristic_init(self, state, stn):
         current_time = stn.get_current_end_time()
-        if self.heuristic_name == 'temporal_probabilistic_rpg':
+        if _uses_tprpg_family(self.heuristic_name):
             score, _ = _tprpg_heuristic_value(
                 self.mdp,
                 state,
@@ -634,6 +670,7 @@ class C_MCTS(Base_MCTS):
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
                 cached_table=self._root_baseline_cache,
+                leaf_heuristic_name=self.heuristic_name,
             )
             return score
         h = up.engines.heuristics.TRPG(self.mdp, state, current_time)
@@ -715,6 +752,7 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
                 temporal_heuristic_depth,
                 temporal_heuristic_strategy,
                 cached_table=baseline_cache_table,
+                leaf_heuristic_name=heuristic_name,
             )
 
         step += 1
@@ -780,6 +818,7 @@ def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: 
                 temporal_heuristic_depth,
                 temporal_heuristic_strategy,
                 cached_table=baseline_cache_table,
+                leaf_heuristic_name=heuristic_name,
             )
 
         step += 1

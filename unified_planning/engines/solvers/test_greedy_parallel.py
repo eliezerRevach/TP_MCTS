@@ -72,6 +72,52 @@ class TestGreedyParallel(unittest.TestCase):
         self.assertEqual(success, 0)
         self.assertEqual(makespan, -float("inf"))
 
+    def test_greedy_parallel_correlation_pessimistic_runs(self):
+        converted_problem = _build_split_problem(duration=2)
+        converted_problem.set_deadline(
+            up.model.timing.Timing(
+                delay=3,
+                timepoint=up.model.timing.Timepoint(up.model.timing.TimepointKind.START),
+            )
+        )
+        mdp = MDP(converted_problem, discount_factor=0.95, reward_mode="terminal")
+
+        success, makespan = greedy_parallel_plan(
+            mdp,
+            steps=20,
+            search_time=1,
+            search_depth=5,
+            exploration_constant=10,
+            heuristic_name="baseline_passmistic",
+            temporal_heuristic_depth=10,
+            temporal_heuristic_strategy="baseline",
+        )
+        self.assertEqual(success, 1)
+        self.assertLessEqual(makespan, 3)
+
+    def test_greedy_parallel_correlation_optimistic_runs(self):
+        converted_problem = _build_split_problem(duration=2)
+        converted_problem.set_deadline(
+            up.model.timing.Timing(
+                delay=3,
+                timepoint=up.model.timing.Timepoint(up.model.timing.TimepointKind.START),
+            )
+        )
+        mdp = MDP(converted_problem, discount_factor=0.95, reward_mode="terminal")
+
+        success, makespan = greedy_parallel_plan(
+            mdp,
+            steps=20,
+            search_time=1,
+            search_depth=5,
+            exploration_constant=10,
+            heuristic_name="baseline_optimstic",
+            temporal_heuristic_depth=10,
+            temporal_heuristic_strategy="baseline",
+        )
+        self.assertEqual(success, 1)
+        self.assertLessEqual(makespan, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

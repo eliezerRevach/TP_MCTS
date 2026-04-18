@@ -9,6 +9,11 @@ from typing import Dict, Hashable, Iterable, List, Mapping, MutableMapping, Opti
 from comdp_plus_no_deadline.engines.probabilistic_rpg import (
     compute_precondition_support,
 )
+from comdp_plus_no_deadline.engines.correlation_heuristic import (
+    build_action_specs,
+    compute_correlation_preplanning,
+    run_correlation_dp,
+)
 
 
 Fact = Hashable
@@ -95,12 +100,14 @@ class TemporalProbabilisticRPGHeuristic:
         actions: Sequence[object],
         facts: Optional[Iterable[Fact]] = None,
         initial_facts: Optional[Iterable[Fact]] = None,
+        goal_facts: Optional[Iterable[Fact]] = None,
     ):
         self._actions = list(actions)
         self._facts: Set[Fact] = set(facts or [])
         # Facts that are TRUE in the initial state (used to seed the ET tables).
         # Distinct from self._facts which includes goals and other known facts.
         self._initial_facts: frozenset = frozenset(initial_facts or [])
+        self._goal_facts: frozenset[Fact] = frozenset(goal_facts or [])
         self._action_models = self._build_action_models()
         self._fact_dependency_graph = self._build_fact_dependency_graph()
         self._actions_by_effect_fact = self._build_actions_by_effect_fact()
@@ -118,12 +125,39 @@ class TemporalProbabilisticRPGHeuristic:
         # Built once at construction; each query just reads from these tables.
         self._et_table_depth: int = 200
         self._et_tables: Dict[Fact, List[Tuple["TemporalRelaxedActionModel", float, List[List[float]]]]] = self._build_et_tables()
+        # Correlation-aware pre-planning (fact–fact tags + joint miss-corner pairs).
+        self._corr_specs = build_action_specs(self._actions)
+        self._corr_name_to_spec = {s.name: s for s in self._corr_specs}
+        all_f = set(self._facts)
+        for spec in self._corr_specs:
+            all_f |= set(spec.preconditions)
+            for o in spec.joint_adds:
+                all_f |= set(o)
+        if self._goal_facts:
+            ct, jp, ach, _ = compute_correlation_preplanning(
+                self._corr_specs,
+                set(self._goal_facts),
+                all_f,
+            )
+            self._correlation_table: Dict[frozenset, str] = ct
+            self._joint_pairs: Set[frozenset] = jp
+            self._achievers_by_fact_corr: Dict[Fact, Set[str]] = ach
+        else:
+            self._correlation_table = {}
+            self._joint_pairs = set()
+            self._achievers_by_fact_corr = {}
 
     @classmethod
     def from_problem(cls, problem) -> "TemporalProbabilisticRPGHeuristic":
         initial = set(getattr(problem, "initial_values", {}).keys())
         facts = initial | set(getattr(problem, "goals", set()))
-        return cls(getattr(problem, "actions", []), facts=facts, initial_facts=initial)
+        goals = set(getattr(problem, "goals", set()))
+        return cls(
+            getattr(problem, "actions", []),
+            facts=facts,
+            initial_facts=initial,
+            goal_facts=goals,
+        )
 
     def _query_cache_goal_key(
         self,
@@ -389,6 +423,60 @@ class TemporalProbabilisticRPGHeuristic:
                 )
             return score, None
         return score
+
+    def pessimistic_heuristic(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]] = None,
+        fixed_depth: int = 25,
+        start_time: float = 0.0,
+        problem_deadline: Optional[float] = None,
+    ) -> float:
+        """Lower-bound estimate on P(all goals by deadline) using correlation-aware DP."""
+        gf = list(goal_facts) if goal_facts is not None else list(self._goal_facts)
+        state_facts = _extract_state_facts(state)
+        eff = max(0, int(fixed_depth))
+        if problem_deadline is not None:
+            rem = max(0, int(math.floor(float(problem_deadline) - start_time)))
+            eff = min(eff, rem)
+        return run_correlation_dp(
+            state_facts=set(state_facts),
+            goal_facts=gf,
+            action_specs=self._corr_specs,
+            achievers_by_fact=self._achievers_by_fact_corr,
+            name_to_spec=self._corr_name_to_spec,
+            correlation_table=self._correlation_table,
+            joint_pairs=self._joint_pairs,
+            deadline=eff,
+            pessimistic=True,
+        )
+
+    def optimistic_heuristic(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]] = None,
+        fixed_depth: int = 25,
+        start_time: float = 0.0,
+        problem_deadline: Optional[float] = None,
+    ) -> float:
+        """Upper-bound estimate on P(all goals by deadline) using correlation-aware DP."""
+        gf = list(goal_facts) if goal_facts is not None else list(self._goal_facts)
+        state_facts = _extract_state_facts(state)
+        eff = max(0, int(fixed_depth))
+        if problem_deadline is not None:
+            rem = max(0, int(math.floor(float(problem_deadline) - start_time)))
+            eff = min(eff, rem)
+        return run_correlation_dp(
+            state_facts=set(state_facts),
+            goal_facts=gf,
+            action_specs=self._corr_specs,
+            achievers_by_fact=self._achievers_by_fact_corr,
+            name_to_spec=self._corr_name_to_spec,
+            correlation_table=self._correlation_table,
+            joint_pairs=self._joint_pairs,
+            deadline=eff,
+            pessimistic=False,
+        )
 
     @staticmethod
     def _normalize_strategy(strategy: str) -> str:

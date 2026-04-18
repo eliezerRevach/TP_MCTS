@@ -49,7 +49,10 @@ parser.add_argument('-rm', '--reward_mode', help='reward mode: deadline or termi
 parser.add_argument('--seed', help='random seed for reproducibility', nargs='?', default=None, type=int)
 parser.add_argument(
     '--heuristic_name',
-    help='heuristic to evaluate leaf states: trpg or temporal_probabilistic_rpg',
+    help=(
+        'leaf heuristic: trpg | temporal_probabilistic_rpg | '
+        'baseline_pessimistic | baseline_passmistic | baseline_optimistic | baseline_optimstic'
+    ),
     nargs='?',
     default='trpg',
 )

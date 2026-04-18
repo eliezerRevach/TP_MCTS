@@ -3,7 +3,7 @@ import math
 import time
 import random
 
-from unified_planning.engines.solvers.mcts import _temporal_heuristic
+from unified_planning.engines.solvers.mcts import _temporal_heuristic, _uses_tprpg_family
 
 
 class RTDP:
@@ -126,13 +126,14 @@ class RTDP:
         current_time = 0
         if isinstance(state, up.engines.CombinationState):
             current_time = state.current_time
-        if self.heuristic_name == "temporal_probabilistic_rpg":
+        if _uses_tprpg_family(self.heuristic_name):
             return _temporal_heuristic(
                 self.split_mdp,
                 state,
                 current_time,
                 self.temporal_heuristic_depth,
                 self.temporal_heuristic_strategy,
+                leaf_heuristic_name=self.heuristic_name,
             )
         h = up.engines.heuristics.TRPG(self.split_mdp, state, current_time)
         return h.get_heuristic()
