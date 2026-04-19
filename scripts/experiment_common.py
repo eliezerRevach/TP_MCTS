@@ -49,6 +49,18 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "fast_atom_cache",
         "label": "fast_atom_cache",
     },
+    # Correlation-aware DP leaf; same as --heuristic_name baseline_pessimistic on run_domain.
+    "baseline_pessimistic": {
+        "heuristic_name": "baseline_pessimistic",
+        "temporal_heuristic_strategy": "baseline",
+        "label": "baseline_pessimistic",
+    },
+    # Historical typo alias (parser + MCTS accept it).
+    "baseline_passmistic": {
+        "heuristic_name": "baseline_pessimistic",
+        "temporal_heuristic_strategy": "baseline",
+        "label": "baseline_pessimistic",
+    },
     "ptrpg_old": {
         "heuristic_name": "trpg",
         "temporal_heuristic_strategy": "baseline",  # unused for trpg
