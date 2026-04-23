@@ -39,6 +39,11 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "atom_backtrack_exact",
         "label": "atomic_exact",
     },
+    "atomic_exact_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
+        "label": "atomic_exact_resolution",
+    },
     "atomic_exact_cached": {
         "heuristic_name": "temporal_probabilistic_rpg",
         "temporal_heuristic_strategy": "atom_backtrack_cached",
@@ -75,6 +80,7 @@ DEFAULT_HEURISTICS_MCTS = [
     "baseline",
     "baseline_cached",
     "atomic_exact",
+    "atomic_exact_resolution",
     "atomic_exact_cached",
     "fast_atom_cache",
 ]
@@ -84,6 +90,7 @@ DEFAULT_HEURISTICS_RUNTIME = [
     "baseline",
     "baseline_cached",
     "atomic_exact",
+    "atomic_exact_resolution",
     "atomic_exact_cached",
     "fast_atom_cache",
 ]

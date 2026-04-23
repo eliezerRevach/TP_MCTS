@@ -7,6 +7,9 @@ from unified_planning.shortcuts import BoolType, OverallPreconditionTiming
 
 from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
     TemporalProbabilisticRPGHeuristic,
+    _raw_delta_steps_for_resolution_depth,
+    _resolution_anchors_ascending,
+    _resolution_completion_times,
 )
 
 
@@ -361,6 +364,67 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         self.assertFalse(first.cache_hit)
         self.assertGreaterEqual(second.fact_cache_hits, 1)
 
+    def test_resolution_raw_deltas_and_reorganized_anchors_depth_25(self):
+        self.assertEqual(
+            _raw_delta_steps_for_resolution_depth(25),
+            [1, 1, 2, 2, 4, 4, 8, 3],
+        )
+        self.assertEqual(
+            _resolution_anchors_ascending(25),
+            [0, 1, 2, 4, 6, 9, 13, 17, 25],
+        )
+
+    def test_resolution_completion_times_depth_5(self):
+        anchors = _resolution_anchors_ascending(5)
+        self.assertEqual(anchors, [0, 1, 2, 3, 5])
+        self.assertEqual(_resolution_completion_times(anchors, 1, 5), [1, 2, 3, 5])
+
+    def test_normalize_strategy_atom_backtrack_exact_resolution(self):
+        self.assertEqual(
+            TemporalProbabilisticRPGHeuristic._normalize_strategy(
+                "atom_backtrack_exact_resolution"
+            ),
+            "atom_backtrack_exact_resolution",
+        )
+
+    def test_atom_backtrack_exact_resolution_lower_than_exact_single_atom(self):
+        """Fewer anchor completion trials than unit-step exact → lower success probability."""
+        p_add = 0.3
+        effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_add: {"DOOR": True},
+                1.0 - p_add: {},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="search_and_open",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect,),
+                )
+            ],
+            facts={"DOOR"},
+        )
+        depth = 5
+        score_exact = heuristic.heuristic_score(
+            set(),
+            {"DOOR"},
+            fixed_depth=depth,
+            strategy="atom_backtrack_exact",
+        )
+        score_res = heuristic.heuristic_score(
+            set(),
+            {"DOOR"},
+            fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution",
+        )
+        expected_res = 1.0 - (1.0 - p_add) ** 4
+        self.assertAlmostEqual(score_res, expected_res)
+        self.assertLess(score_res, score_exact)
+
     def test_atom_backtrack_exact_matches_closed_form_single_step_atom(self):
         p_add = 0.3
         effect = SyntheticProbabilisticEffect(
@@ -561,49 +625,51 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
                 1.0 - p_open_with_key: {},
             }
         )
-        heuristic = TemporalProbabilisticRPGHeuristic(
-            actions=[
-                SyntheticAction(
-                    name="search_key",
-                    pos_preconditions=frozenset(),
-                    add_effects=frozenset(),
-                    duration_steps=1,
-                    probabilistic_effects=(get_key_effect,),
-                ),
-                SyntheticAction(
-                    name="open_with_key",
-                    pos_preconditions=frozenset({"KEY"}),
-                    add_effects=frozenset(),
-                    duration_steps=1,
-                    probabilistic_effects=(open_effect,),
-                ),
-            ],
-            facts={"KEY", "DOOR"},
-        )
+        actions = [
+            SyntheticAction(
+                name="search_key",
+                pos_preconditions=frozenset(),
+                add_effects=frozenset(),
+                duration_steps=1,
+                probabilistic_effects=(get_key_effect,),
+            ),
+            SyntheticAction(
+                name="open_with_key",
+                pos_preconditions=frozenset({"KEY"}),
+                add_effects=frozenset(),
+                duration_steps=1,
+                probabilistic_effects=(open_effect,),
+            ),
+        ]
         state = set()
         depth = 3
-        strat = "atom_backtrack_exact"
-        r_door = heuristic.heuristic_propagate(
-            state,
-            goal_facts={"DOOR"},
-            fixed_depth=depth,
-            strategy=strat,
-        )
-        self.assertFalse(r_door.cache_hit)
-        r_key = heuristic.heuristic_propagate(
-            state,
-            goal_facts={"KEY"},
-            fixed_depth=depth,
-            strategy=strat,
-        )
-        self.assertFalse(r_key.cache_hit)
-        r_key_again = heuristic.heuristic_propagate(
-            state,
-            goal_facts={"KEY"},
-            fixed_depth=depth,
-            strategy=strat,
-        )
-        self.assertTrue(r_key_again.cache_hit)
+        for strat in ("atom_backtrack_exact", "atom_backtrack_exact_resolution"):
+            with self.subTest(strategy=strat):
+                heuristic = TemporalProbabilisticRPGHeuristic(
+                    actions=actions,
+                    facts={"KEY", "DOOR"},
+                )
+                r_door = heuristic.heuristic_propagate(
+                    state,
+                    goal_facts={"DOOR"},
+                    fixed_depth=depth,
+                    strategy=strat,
+                )
+                self.assertFalse(r_door.cache_hit)
+                r_key = heuristic.heuristic_propagate(
+                    state,
+                    goal_facts={"KEY"},
+                    fixed_depth=depth,
+                    strategy=strat,
+                )
+                self.assertFalse(r_key.cache_hit)
+                r_key_again = heuristic.heuristic_propagate(
+                    state,
+                    goal_facts={"KEY"},
+                    fixed_depth=depth,
+                    strategy=strat,
+                )
+                self.assertTrue(r_key_again.cache_hit)
 
 
 class TestExpectedTime(unittest.TestCase):

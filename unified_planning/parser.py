@@ -10,18 +10,21 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "4": "baseline_cached",
         "5": "atom_backtrack_cached",
         "6": "fast_atom_cache",
+        "7": "atom_backtrack_exact_resolution",
         "baseline": "baseline",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
         "baseline_cached": "baseline_cached",
         "atom_backtrack_cached": "atom_backtrack_cached",
         "fast_atom_cache": "fast_atom_cache",
+        "atom_backtrack_exact_resolution": "atom_backtrack_exact_resolution",
     }
     if normalized not in aliases:
         raise argparse.ArgumentTypeError(
             "temporal_heuristic_strategy must be one of: "
             "1|baseline, 2|atom_half_split, 3|atom_backtrack_exact, "
-            "4|baseline_cached, 5|atom_backtrack_cached, 6|fast_atom_cache"
+            "4|baseline_cached, 5|atom_backtrack_cached, 6|fast_atom_cache, "
+            "7|atom_backtrack_exact_resolution"
         )
     return aliases[normalized]
 
@@ -92,7 +95,8 @@ parser.add_argument(
         '3|atom_backtrack_exact (memoized exact atom backtrack vs horizon), '
         '4|baseline_cached (incremental dirty-fact table updates), '
         '5|atom_backtrack_cached (persistent formula memos with selective invalidation), '
-        '6|fast_atom_cache (schedule-ordered backtrack + cross-call lazy fact/action memos)'
+        '6|fast_atom_cache (schedule-ordered backtrack + cross-call lazy fact/action memos), '
+        '7|atom_backtrack_exact_resolution (anchor-based backtrack with reorganized deltas)'
     ),
     nargs='?',
     default='baseline',

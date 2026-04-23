@@ -18,6 +18,7 @@ Default heuristics
   baseline            -- temporal_probabilistic_rpg / baseline strategy
   baseline_cached     -- temporal_probabilistic_rpg / baseline_cached
   atomic_exact        -- temporal_probabilistic_rpg / atom_backtrack_exact
+  atomic_exact_resolution -- temporal_probabilistic_rpg / atom_backtrack_exact_resolution
   atomic_exact_cached -- temporal_probabilistic_rpg / atom_backtrack_cached
   fast_atom_cache     -- temporal_probabilistic_rpg / fast_atom_cache
 
