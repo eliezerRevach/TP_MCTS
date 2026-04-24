@@ -7,6 +7,7 @@ from unified_planning.shortcuts import BoolType, OverallPreconditionTiming
 
 from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
     TemporalProbabilisticRPGHeuristic,
+    build_resolution_delta_schedule,
     _raw_delta_steps_for_resolution_depth,
     _resolution_anchors_ascending,
     _resolution_completion_times,
@@ -376,8 +377,76 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
 
     def test_resolution_completion_times_depth_5(self):
         anchors = _resolution_anchors_ascending(5)
-        self.assertEqual(anchors, [0, 1, 2, 3, 5])
-        self.assertEqual(_resolution_completion_times(anchors, 1, 5), [1, 2, 3, 5])
+        self.assertEqual(anchors, [0, 1, 2, 3, 4, 5])
+        self.assertEqual(_resolution_completion_times(anchors, 1, 5), [1, 2, 3, 4, 5])
+
+    def test_build_resolution_forced_minimum_with_reference_t(self):
+        deltas = build_resolution_delta_schedule(
+            10,
+            alpha=2.0,
+            k_target=8,
+            t_ref=25,
+            delta_min=1,
+            forced_minimum=True,
+        )
+        self.assertEqual(len(deltas), 8)
+        self.assertEqual(sum(deltas), 10)
+        self.assertTrue(all(d >= 1 for d in deltas))
+
+    def test_build_resolution_custom_alpha_changes_widths(self):
+        d_default = build_resolution_delta_schedule(25, alpha=2.0, k_target=8)
+        d_alpha3 = build_resolution_delta_schedule(25, alpha=3.0, k_target=8)
+        self.assertEqual(sum(d_default), 25)
+        self.assertEqual(sum(d_alpha3), 25)
+        self.assertNotEqual(d_default, d_alpha3)
+
+    def test_resolution_propagate_cache_distinguishes_alpha(self):
+        p_add = 0.5
+        effect = SyntheticProbabilisticEffect(
+            outcomes={
+                p_add: {"DOOR": True},
+                1.0 - p_add: {},
+            }
+        )
+        heuristic = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    name="search_and_open",
+                    pos_preconditions=frozenset(),
+                    add_effects=frozenset(),
+                    duration_steps=1,
+                    probabilistic_effects=(effect,),
+                )
+            ],
+            facts={"DOOR"},
+        )
+        state: set = set()
+        goals = {"DOOR"}
+        depth = 4
+        r_a2 = heuristic.heuristic_propagate(
+            state,
+            goal_facts=goals,
+            fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution",
+            resolution_alpha=2.0,
+        )
+        r_a3 = heuristic.heuristic_propagate(
+            state,
+            goal_facts=goals,
+            fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution",
+            resolution_alpha=3.0,
+        )
+        self.assertFalse(r_a2.cache_hit)
+        self.assertFalse(r_a3.cache_hit)
+        r_a2_again = heuristic.heuristic_propagate(
+            state,
+            goal_facts=goals,
+            fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution",
+            resolution_alpha=2.0,
+        )
+        self.assertTrue(r_a2_again.cache_hit)
 
     def test_normalize_strategy_atom_backtrack_exact_resolution(self):
         self.assertEqual(
@@ -408,7 +477,7 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
             ],
             facts={"DOOR"},
         )
-        depth = 5
+        depth = 25
         score_exact = heuristic.heuristic_score(
             set(),
             {"DOOR"},
@@ -421,7 +490,9 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
             fixed_depth=depth,
             strategy="atom_backtrack_exact_resolution",
         )
-        expected_res = 1.0 - (1.0 - p_add) ** 4
+        anchors = _resolution_anchors_ascending(depth)
+        trials = len(_resolution_completion_times(anchors, 1, depth))
+        expected_res = 1.0 - (1.0 - p_add) ** trials
         self.assertAlmostEqual(score_res, expected_res)
         self.assertLess(score_res, score_exact)
 

@@ -19,8 +19,19 @@ Default heuristics
   baseline_cached     -- temporal_probabilistic_rpg / baseline_cached
   atomic_exact        -- temporal_probabilistic_rpg / atom_backtrack_exact
   atomic_exact_resolution -- temporal_probabilistic_rpg / atom_backtrack_exact_resolution
+  atom_backtrack_exact_resolution -- same as atomic_exact_resolution (synonym alias key)
+
+Resolution schedule tuning (forwarded to run_domain.py):
+  --resolution-alpha FLOAT
+  --resolution-forced-minimum
+  --resolution-k-target INT
+  --resolution-reference-t T
   atomic_exact_cached -- temporal_probabilistic_rpg / atom_backtrack_cached
   fast_atom_cache     -- temporal_probabilistic_rpg / fast_atom_cache
+
+  --heuristics takes keys from scripts/experiment_common.py HEURISTIC_ALIASES
+  (short names above), not raw --temporal_heuristic_strategy strings, unless
+  a synonym key is registered (e.g. atom_backtrack_exact_resolution).
 
 Output
 ------
@@ -268,6 +279,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print subprocess command lines and full stdout.",
     )
+    p.add_argument(
+        "--resolution-alpha",
+        type=float,
+        default=None,
+        help="Forwarded to run_domain: resolution schedule alpha (default 2 in run_domain).",
+    )
+    p.add_argument(
+        "--resolution-forced-minimum",
+        action="store_true",
+        default=False,
+        help="Forwarded to run_domain: enable resolution forced-minimum K rule.",
+    )
+    p.add_argument(
+        "--resolution-k-target",
+        type=int,
+        default=None,
+        help="Forwarded to run_domain: resolution K_target (default 8 in run_domain).",
+    )
+    p.add_argument(
+        "--resolution-reference-t",
+        type=int,
+        default=None,
+        metavar="T",
+        help="Forwarded to run_domain: resolution reference horizon T (optional).",
+    )
     return p.parse_args(argv)
 
 
@@ -294,6 +330,10 @@ def run_experiment(
     step_penalty: float,
     value_mode: str,
     verbose: bool,
+    resolution_alpha: float | None = None,
+    resolution_forced_minimum: bool = False,
+    resolution_k_target: int | None = None,
+    resolution_reference_t: int | None = None,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     depth = heuristic_depth if heuristic_depth is not None else deadline
@@ -330,6 +370,10 @@ def run_experiment(
         discount_factor=discount_factor,
         step_penalty=step_penalty,
         value_mode=value_mode,
+        resolution_alpha=resolution_alpha,
+        resolution_forced_minimum=resolution_forced_minimum,
+        resolution_k_target=resolution_k_target,
+        resolution_reference_t=resolution_reference_t,
         verbose=verbose,
     )
     elapsed = time.perf_counter() - t0
@@ -444,6 +488,10 @@ def main(argv: list[str] | None = None) -> None:
                 step_penalty=args.step_penalty,
                 value_mode=args.value_mode,
                 verbose=args.verbose,
+                resolution_alpha=args.resolution_alpha,
+                resolution_forced_minimum=args.resolution_forced_minimum,
+                resolution_k_target=args.resolution_k_target,
+                resolution_reference_t=args.resolution_reference_t,
             )
             rows.append(row)
 

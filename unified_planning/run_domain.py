@@ -72,6 +72,11 @@ def print_stats():
         )
     )
     print(f'Temporal Heuristic Strategy = {up.args.temporal_heuristic_strategy}')
+    if up.args.temporal_heuristic_strategy == "atom_backtrack_exact_resolution":
+        print(f'Resolution alpha = {getattr(up.args, "resolution_alpha", 2.0)}')
+        print(f'Resolution forced_minimum = {getattr(up.args, "resolution_forced_minimum", False)}')
+        print(f'Resolution k_target = {getattr(up.args, "resolution_k_target", 8)}')
+        print(f'Resolution reference_t = {getattr(up.args, "resolution_reference_t", None)}')
     print(f'Value Mode = {up.args.value_mode}')
 
 

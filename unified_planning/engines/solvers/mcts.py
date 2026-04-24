@@ -24,6 +24,24 @@ _CORR_PESSIMISTIC = frozenset({"baseline_pessimistic", "baseline_passmistic"})
 _CORR_OPTIMISTIC = frozenset({"baseline_optimistic", "baseline_optimstic"})
 
 
+def _resolution_heuristic_kwargs_from_cli() -> dict:
+    """Optional kwargs for atom_backtrack_exact_resolution (from unified_planning.parser args)."""
+    try:
+        import unified_planning as up
+
+        a = getattr(up, "args", None)
+        if a is None:
+            return {}
+    except Exception:
+        return {}
+    return {
+        "resolution_alpha": float(getattr(a, "resolution_alpha", 2.0)),
+        "resolution_forced_minimum": bool(getattr(a, "resolution_forced_minimum", False)),
+        "resolution_k_target": int(getattr(a, "resolution_k_target", 8)),
+        "resolution_reference_t": getattr(a, "resolution_reference_t", None),
+    }
+
+
 def _uses_tprpg_family(heuristic_name: str) -> bool:
     return (
         heuristic_name == "temporal_probabilistic_rpg"
@@ -127,6 +145,7 @@ def _temporal_heuristic(
                 strategy=temporal_heuristic_strategy,
                 cached_table=cached_table,
                 return_cache_table=return_cache_table,
+                **_resolution_heuristic_kwargs_from_cli(),
             )
             # Cache hit: key already existed, so cache size did not grow.
             wt.hit = len(heuristic._query_cache) == cache_size_before
@@ -141,6 +160,7 @@ def _temporal_heuristic(
         strategy=temporal_heuristic_strategy,
         cached_table=cached_table,
         return_cache_table=return_cache_table,
+        **_resolution_heuristic_kwargs_from_cli(),
     )
 
 

@@ -104,6 +104,42 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    '--resolution-alpha',
+    dest='resolution_alpha',
+    default=2.0,
+    type=float,
+    help='atom_backtrack_exact_resolution: base alpha in raw width alpha^floor(k/2) (default 2).',
+)
+parser.add_argument(
+    '--resolution-forced-minimum',
+    dest='resolution_forced_minimum',
+    action='store_true',
+    default=False,
+    help=(
+        'atom_backtrack_exact_resolution: derive K from min(K_target, reference_T) '
+        'then cap by remaining (see temporal_probabilistic_rpg.build_resolution_delta_schedule).'
+    ),
+)
+parser.add_argument(
+    '--resolution-k-target',
+    dest='resolution_k_target',
+    default=8,
+    type=int,
+    help='atom_backtrack_exact_resolution: target layer count K_target (default 8).',
+)
+parser.add_argument(
+    '--resolution-reference-t',
+    dest='resolution_reference_t',
+    default=None,
+    type=int,
+    metavar='T',
+    help=(
+        'atom_backtrack_exact_resolution: reference horizon T for raw scaling '
+        '(default: same as remaining depth for that evaluation).'
+    ),
+)
+
+parser.add_argument(
     '--tree_depth',
     help='lookahead depth for heuristic_tree solver (separate from temporal_heuristic_depth)',
     nargs='?',
@@ -118,4 +154,6 @@ parser.add_argument(
     choices=('tp_mcts', 'greedy_matched'),
 )
 
-args = parser.parse_args()
+# parse_known_args: importing unified_planning from tests/tools must not fail on
+# unrelated argv tokens (e.g. pytest). run_domain.py is still invoked with known flags only.
+args, __up_unknown_cli_args = parser.parse_known_args()
