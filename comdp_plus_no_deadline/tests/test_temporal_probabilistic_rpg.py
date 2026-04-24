@@ -377,8 +377,8 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
 
     def test_resolution_completion_times_depth_5(self):
         anchors = _resolution_anchors_ascending(5)
-        self.assertEqual(anchors, [0, 1, 2, 3, 4, 5])
-        self.assertEqual(_resolution_completion_times(anchors, 1, 5), [1, 2, 3, 4, 5])
+        self.assertEqual(anchors, [0, 1, 2, 3, 5])
+        self.assertEqual(_resolution_completion_times(anchors, 1, 5), [1, 2, 3, 5])
 
     def test_build_resolution_forced_minimum_with_reference_t(self):
         deltas = build_resolution_delta_schedule(
@@ -399,6 +399,16 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         self.assertEqual(sum(d_default), 25)
         self.assertEqual(sum(d_alpha3), 25)
         self.assertNotEqual(d_default, d_alpha3)
+
+    def test_resolution_alpha_none_same_as_two(self):
+        d_none = build_resolution_delta_schedule(25, alpha=None, forced_minimum=False)
+        d_two = build_resolution_delta_schedule(25, alpha=2.0, forced_minimum=False)
+        self.assertEqual(d_none, d_two)
+
+    def test_legacy_resolution_ignores_k_target_cap(self):
+        """forced_minimum=False must not cap layer count at k_target."""
+        wide = build_resolution_delta_schedule(25, k_target=3, forced_minimum=False)
+        self.assertEqual(wide, [1, 1, 2, 2, 4, 4, 8, 3])
 
     def test_resolution_propagate_cache_distinguishes_alpha(self):
         p_add = 0.5

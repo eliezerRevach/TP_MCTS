@@ -34,8 +34,13 @@ def _resolution_heuristic_kwargs_from_cli() -> dict:
             return {}
     except Exception:
         return {}
+    ra = getattr(a, "resolution_alpha", 2.0)
+    if ra is None:
+        ra = 2.0
+    else:
+        ra = float(ra)
     return {
-        "resolution_alpha": float(getattr(a, "resolution_alpha", 2.0)),
+        "resolution_alpha": ra,
         "resolution_forced_minimum": bool(getattr(a, "resolution_forced_minimum", False)),
         "resolution_k_target": int(getattr(a, "resolution_k_target", 8)),
         "resolution_reference_t": getattr(a, "resolution_reference_t", None),
