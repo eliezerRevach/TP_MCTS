@@ -247,6 +247,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_OUTPUT,
         help=f"Output CSV path. Default: {DEFAULT_OUTPUT}",
     )
+    p.add_argument(
+        "--resolution-alpha",
+        type=float,
+        default=None,
+        help=(
+            "Override unified_planning.args.resolution_alpha for atom_backtrack_exact_resolution "
+            "(omit flag to keep the value from unified_planning import-time defaults)."
+        ),
+    )
+    p.add_argument(
+        "--resolution-forced-minimum",
+        action="store_true",
+        help="Set unified_planning.args.resolution_forced_minimum for atom_backtrack_exact_resolution.",
+    )
     return p.parse_args(argv)
 
 
@@ -401,6 +415,11 @@ def run_timing(
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv if argv is not None else _original_argv[1:])
     validate_heuristics(args.heuristics)
+
+    if args.resolution_alpha is not None:
+        up.args.resolution_alpha = args.resolution_alpha
+    if args.resolution_forced_minimum:
+        up.args.resolution_forced_minimum = True
 
     print(f"\n{'='*60}", flush=True)
     print(f"  Heuristic Per-Call Runtime Benchmark", flush=True)

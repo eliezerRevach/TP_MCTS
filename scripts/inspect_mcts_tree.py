@@ -119,6 +119,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Also print the one-step expected greedy-matched target for visible rows.",
     )
+    p.add_argument(
+        "--resolution-alpha",
+        type=float,
+        default=None,
+        help=(
+            "Override unified_planning.args.resolution_alpha for atom_backtrack_exact_resolution "
+            "(omit flag to keep the value from unified_planning import-time defaults)."
+        ),
+    )
+    p.add_argument(
+        "--resolution-forced-minimum",
+        action="store_true",
+        help="Set unified_planning.args.resolution_forced_minimum for atom_backtrack_exact_resolution.",
+    )
     return p.parse_args(argv)
 
 
@@ -372,6 +386,10 @@ def print_snapshot(mcts: C_MCTS, args: argparse.Namespace, milestone: int) -> No
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.resolution_alpha is not None:
+        up.args.resolution_alpha = args.resolution_alpha
+    if args.resolution_forced_minimum:
+        up.args.resolution_forced_minimum = True
     set_seed(args.seed)
     milestones = sorted(set(max(0, m) for m in args.milestones))
 
