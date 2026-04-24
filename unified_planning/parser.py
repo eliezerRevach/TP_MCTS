@@ -116,16 +116,10 @@ parser.add_argument(
     action='store_true',
     default=False,
     help=(
-        'atom_backtrack_exact_resolution: derive K from min(K_target, reference_T) '
-        'then cap by remaining (see temporal_probabilistic_rpg.build_resolution_delta_schedule).'
+        'atom_backtrack_exact_resolution: use normalized raw widths '
+        '(alpha^floor(k/2) * remaining / T) with T from --resolution-reference-t '
+        'or remaining; layer count is derived from the schedule loop.'
     ),
-)
-parser.add_argument(
-    '--resolution-k-target',
-    dest='resolution_k_target',
-    default=8,
-    type=int,
-    help='atom_backtrack_exact_resolution: target layer count K_target (default 8).',
 )
 parser.add_argument(
     '--resolution-reference-t',

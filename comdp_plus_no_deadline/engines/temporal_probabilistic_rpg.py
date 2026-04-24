@@ -85,7 +85,6 @@ def build_resolution_delta_schedule(
     remaining: int,
     *,
     alpha: Optional[float] = None,
-    k_target: int = 8,
     t_ref: Optional[int] = None,
     delta_min: int = 1,
     forced_minimum: bool = False,
@@ -93,14 +92,16 @@ def build_resolution_delta_schedule(
     """
     Piece widths Δ_k that partition ``remaining`` (sum = ``remaining``).
 
-    - ``forced_minimum=False`` (legacy / default): grow steps until the horizon is
-      covered — same structure as the original ``2**floor(k/2)`` schedule, but with
-      configurable ``alpha`` (``None`` means ``2.0``). Last step truncates to fit.
-      ``k_target`` and ``t_ref`` are ignored.
+    Layer count ``K`` is derived locally: append deltas until the cumulative sum
+    reaches ``remaining`` (last delta truncates). No external ``k_target`` cap.
 
-    - ``forced_minimum=True``: fixed ``K`` from ``k_target`` / reference ``T`` /
-      feasibility, raw ``α^floor(k/2) · remaining / T``, then ``max(Δ_min, round)``
-      plus sum correction (normalized mode).
+    - ``forced_minimum=False``: raw ``α^floor(k/2)`` (``alpha=None`` -> ``2.0``).
+    - ``forced_minimum=True``: raw ``α^floor(k/2) · remaining / T`` with
+      ``T = t_ref`` if set, else ``remaining`` (set ``t_ref`` to deadline for
+      ``remaining/deadline`` scaling).
+
+    Each step uses ``max(Δ_min, round(raw))`` then truncation so widths stay at
+    least ``Δ_min`` and never overshoot ``remaining``.
     """
     remaining = max(0, int(remaining))
     if remaining == 0:
@@ -110,55 +111,25 @@ def build_resolution_delta_schedule(
     alpha = float(alpha)
     if alpha < 1.0:
         raise ValueError(f"resolution alpha must be >= 1, got {alpha}")
-    k_target = max(1, int(k_target))
     delta_min = max(1, int(delta_min))
-
-    # Legacy mode: unbounded K, truncate last width (matches pre-resolution-refactor).
-    if not forced_minimum:
-        deltas: List[int] = []
-        k = 0
-        s = 0
-        while s < remaining:
-            exp_w = alpha ** (k // 2)
-            w = max(delta_min, int(round(float(exp_w))))
-            if s + w > remaining:
-                w = remaining - s
-            deltas.append(w)
-            s += w
-            k += 1
-        assert sum(deltas) == remaining
-        return deltas
-
     T = int(t_ref) if t_ref is not None else remaining
     T = max(1, T)
-    k_from_ref = min(k_target, T // delta_min)
-    k_cap = max(1, remaining // delta_min)
-    K = min(k_from_ref, k_cap)
-    if K <= 0:
-        return []
 
-    deltas = []
-    for k in range(K):
+    deltas: List[int] = []
+    k = 0
+    s = 0
+    while s < remaining:
         exp_w = alpha ** (k // 2)
-        raw = exp_w * (float(remaining) / float(T))
-        deltas.append(max(delta_min, int(round(raw))))
-
-    diff = remaining - sum(deltas)
-    if diff > 0:
-        deltas[-1] += diff
-    elif diff < 0:
-        excess = -diff
-        i = K - 1
-        while excess > 0 and i >= 0:
-            take = min(deltas[i] - delta_min, excess)
-            deltas[i] -= take
-            excess -= take
-            i -= 1
-        if excess > 0:
-            raise ValueError(
-                f"resolution schedule could not absorb excess={excess} "
-                f"(remaining={remaining}, K={K}, delta_min={delta_min})"
-            )
+        if forced_minimum:
+            raw = exp_w * (float(remaining) / float(T))
+        else:
+            raw = float(exp_w)
+        w = max(delta_min, int(round(raw)))
+        if s + w > remaining:
+            w = remaining - s
+        deltas.append(w)
+        s += w
+        k += 1
 
     assert sum(deltas) == remaining
     return deltas
@@ -168,7 +139,6 @@ def _raw_delta_steps_for_resolution_depth(
     depth: int,
     *,
     alpha: Optional[float] = None,
-    k_target: int = 8,
     t_ref: Optional[int] = None,
     delta_min: int = 1,
     forced_minimum: bool = False,
@@ -177,7 +147,6 @@ def _raw_delta_steps_for_resolution_depth(
     return build_resolution_delta_schedule(
         depth,
         alpha=alpha,
-        k_target=k_target,
         t_ref=t_ref,
         delta_min=delta_min,
         forced_minimum=forced_minimum,
@@ -188,7 +157,6 @@ def _resolution_anchors_ascending(
     depth: int,
     *,
     alpha: Optional[float] = None,
-    k_target: int = 8,
     t_ref: Optional[int] = None,
     delta_min: int = 1,
     forced_minimum: bool = False,
@@ -200,7 +168,6 @@ def _resolution_anchors_ascending(
     deltas = _raw_delta_steps_for_resolution_depth(
         depth,
         alpha=alpha,
-        k_target=k_target,
         t_ref=t_ref,
         delta_min=delta_min,
         forced_minimum=forced_minimum,
@@ -333,7 +300,6 @@ class TemporalProbabilisticRPGHeuristic:
         *,
         resolution_alpha: Optional[float] = None,
         resolution_forced_minimum: bool = False,
-        resolution_k_target: int = 8,
         resolution_reference_t: Optional[int] = None,
     ) -> TemporalPropagationResult:
         state_facts = _extract_state_facts(state)
@@ -352,7 +318,6 @@ class TemporalProbabilisticRPGHeuristic:
             query_key = query_key + (
                 float(2.0 if resolution_alpha is None else resolution_alpha),
                 bool(resolution_forced_minimum),
-                int(resolution_k_target),
                 resolution_reference_t,
             )
         if query_key in self._query_cache:
@@ -394,7 +359,6 @@ class TemporalProbabilisticRPGHeuristic:
                 debug=debug,
                 resolution_alpha=resolution_alpha,
                 resolution_forced_minimum=resolution_forced_minimum,
-                resolution_k_target=resolution_k_target,
                 resolution_reference_t=resolution_reference_t,
             )
             self._query_cache[query_key] = result
@@ -560,7 +524,6 @@ class TemporalProbabilisticRPGHeuristic:
         *,
         resolution_alpha: Optional[float] = None,
         resolution_forced_minimum: bool = False,
-        resolution_k_target: int = 8,
         resolution_reference_t: Optional[int] = None,
     ):
         result = self.heuristic_propagate(
@@ -573,7 +536,6 @@ class TemporalProbabilisticRPGHeuristic:
             debug=debug,
             resolution_alpha=resolution_alpha,
             resolution_forced_minimum=resolution_forced_minimum,
-            resolution_k_target=resolution_k_target,
             resolution_reference_t=resolution_reference_t,
         )
         final_probabilities = result.probabilities_by_layer[result.depth_used]
@@ -1233,7 +1195,6 @@ class TemporalProbabilisticRPGHeuristic:
         *,
         resolution_alpha: Optional[float] = None,
         resolution_forced_minimum: bool = False,
-        resolution_k_target: int = 8,
         resolution_reference_t: Optional[int] = None,
     ) -> TemporalPropagationResult:
         del start_time
@@ -1243,7 +1204,6 @@ class TemporalProbabilisticRPGHeuristic:
         anchors_asc = _resolution_anchors_ascending(
             depth,
             alpha=resolution_alpha,
-            k_target=resolution_k_target,
             t_ref=resolution_reference_t,
             delta_min=1,
             forced_minimum=resolution_forced_minimum,

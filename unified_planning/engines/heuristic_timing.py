@@ -23,7 +23,7 @@ The `TemporalProbabilisticRPGHeuristic._query_cache` is keyed by
  fast_atom_cache) also by a
 goal-key disambiguating ``goal_facts``.
 For ``atom_backtrack_exact_resolution`` the key also includes resolution
-schedule parameters (alpha, forced_minimum, k_target, reference_t).
+schedule parameters (alpha, forced_minimum, reference_t).
 A hit means the full propagation
 graph was skipped; only a dict copy was returned.  First call for any key
 is always a miss.

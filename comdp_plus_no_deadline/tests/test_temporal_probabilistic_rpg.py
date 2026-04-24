@@ -384,18 +384,17 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         deltas = build_resolution_delta_schedule(
             10,
             alpha=2.0,
-            k_target=8,
             t_ref=25,
             delta_min=1,
             forced_minimum=True,
         )
-        self.assertEqual(len(deltas), 8)
+        self.assertEqual(deltas, [1, 1, 1, 1, 2, 2, 2])
         self.assertEqual(sum(deltas), 10)
         self.assertTrue(all(d >= 1 for d in deltas))
 
     def test_build_resolution_custom_alpha_changes_widths(self):
-        d_default = build_resolution_delta_schedule(25, alpha=2.0, k_target=8)
-        d_alpha3 = build_resolution_delta_schedule(25, alpha=3.0, k_target=8)
+        d_default = build_resolution_delta_schedule(25, alpha=2.0)
+        d_alpha3 = build_resolution_delta_schedule(25, alpha=3.0)
         self.assertEqual(sum(d_default), 25)
         self.assertEqual(sum(d_alpha3), 25)
         self.assertNotEqual(d_default, d_alpha3)
@@ -405,9 +404,19 @@ class TestTemporalProbabilisticRPG(unittest.TestCase):
         d_two = build_resolution_delta_schedule(25, alpha=2.0, forced_minimum=False)
         self.assertEqual(d_none, d_two)
 
-    def test_legacy_resolution_ignores_k_target_cap(self):
-        """forced_minimum=False must not cap layer count at k_target."""
-        wide = build_resolution_delta_schedule(25, k_target=3, forced_minimum=False)
+    def test_alpha_one_forced_minimum_is_unit_schedule_with_deadline_ref(self):
+        d = build_resolution_delta_schedule(
+            25, alpha=1.0, forced_minimum=True, t_ref=25
+        )
+        self.assertEqual(d, [1] * 25)
+        d15 = build_resolution_delta_schedule(
+            15, alpha=1.0, forced_minimum=True, t_ref=25
+        )
+        self.assertEqual(d15, [1] * 15)
+
+    def test_legacy_resolution_derives_k_locally(self):
+        """Layer count follows the growth loop (no external K cap)."""
+        wide = build_resolution_delta_schedule(25, forced_minimum=False)
         self.assertEqual(wide, [1, 1, 2, 2, 4, 4, 8, 3])
 
     def test_resolution_propagate_cache_distinguishes_alpha(self):

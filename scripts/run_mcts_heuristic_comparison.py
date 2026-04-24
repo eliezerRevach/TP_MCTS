@@ -24,8 +24,8 @@ Default heuristics
 Resolution schedule tuning (forwarded to run_domain.py):
   --resolution-alpha FLOAT
   --resolution-forced-minimum
-  --resolution-k-target INT
   --resolution-reference-t T
+
   atomic_exact_cached -- temporal_probabilistic_rpg / atom_backtrack_cached
   fast_atom_cache     -- temporal_probabilistic_rpg / fast_atom_cache
 
@@ -292,12 +292,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Forwarded to run_domain: enable resolution forced-minimum K rule.",
     )
     p.add_argument(
-        "--resolution-k-target",
-        type=int,
-        default=None,
-        help="Forwarded to run_domain: resolution K_target (default 8 in run_domain).",
-    )
-    p.add_argument(
         "--resolution-reference-t",
         type=int,
         default=None,
@@ -332,7 +326,6 @@ def run_experiment(
     verbose: bool,
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
-    resolution_k_target: int | None = None,
     resolution_reference_t: int | None = None,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
@@ -372,7 +365,6 @@ def run_experiment(
         value_mode=value_mode,
         resolution_alpha=resolution_alpha,
         resolution_forced_minimum=resolution_forced_minimum,
-        resolution_k_target=resolution_k_target,
         resolution_reference_t=resolution_reference_t,
         verbose=verbose,
     )
@@ -490,7 +482,6 @@ def main(argv: list[str] | None = None) -> None:
                 verbose=args.verbose,
                 resolution_alpha=args.resolution_alpha,
                 resolution_forced_minimum=args.resolution_forced_minimum,
-                resolution_k_target=args.resolution_k_target,
                 resolution_reference_t=args.resolution_reference_t,
             )
             rows.append(row)

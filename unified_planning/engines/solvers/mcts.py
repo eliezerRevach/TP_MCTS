@@ -42,7 +42,6 @@ def _resolution_heuristic_kwargs_from_cli() -> dict:
     return {
         "resolution_alpha": ra,
         "resolution_forced_minimum": bool(getattr(a, "resolution_forced_minimum", False)),
-        "resolution_k_target": int(getattr(a, "resolution_k_target", 8)),
         "resolution_reference_t": getattr(a, "resolution_reference_t", None),
     }
 

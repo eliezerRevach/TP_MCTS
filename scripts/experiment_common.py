@@ -7,9 +7,9 @@ Provides:
 - CSV writer helper
 
 Resolution heuristic (`atomic_exact_resolution` / `atom_backtrack_exact_resolution`):
-pass `resolution_alpha`, `resolution_forced_minimum`, `resolution_k_target`,
-`resolution_reference_t` into `run_domain_subprocess`, or append the matching
-`--resolution-*` flags via `extra_args`.
+pass `resolution_alpha`, `resolution_forced_minimum`, `resolution_reference_t`
+into `run_domain_subprocess`, or append the matching `--resolution-*` flags via
+`extra_args`.
 """
 
 from __future__ import annotations
@@ -149,7 +149,6 @@ def run_domain_subprocess(
     garbage_amount: int = 0,
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
-    resolution_k_target: int | None = None,
     resolution_reference_t: int | None = None,
     extra_args: list[str] | None = None,
     verbose: bool = False,
@@ -186,8 +185,6 @@ def run_domain_subprocess(
         cmd.extend(["--resolution-alpha", str(resolution_alpha)])
     if resolution_forced_minimum:
         cmd.append("--resolution-forced-minimum")
-    if resolution_k_target is not None:
-        cmd.extend(["--resolution-k-target", str(resolution_k_target)])
     if resolution_reference_t is not None:
         cmd.extend(["--resolution-reference-t", str(resolution_reference_t)])
     if extra_args:
