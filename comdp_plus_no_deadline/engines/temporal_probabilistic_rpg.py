@@ -1392,7 +1392,22 @@ class TemporalProbabilisticRPGHeuristic:
         self._unbiased_structural_built = True
 
     def _unbiased_actions_are_mutex(self, name_a: str, name_b: str) -> bool:
-        """Action-mutex via delete-interference (Graphplan-style, simplified)."""
+        """
+        Action-mutex extended beyond pure Graphplan delete-interference.
+
+        Two actions are flagged mutex if any of:
+          1. Direct delete-interference: one's delete clobbers the other's
+             precondition or add-effect. (Graphplan classic.)
+          2. Shared "consumable" precondition: both require a fact that is
+             deleted by some action in the domain. The fact is non-monotonic,
+             so two competing achievers of a goal that both need it cannot
+             both reliably succeed in the same plan window — captures
+             resource-mutex without explicit resource modeling.
+          3. Shared add-effect: both achieve the same fact. The OR-bias is
+             real even without delete-interference: at most one of them can
+             "first-achieve" the fact at a given time, so independence
+             over-counts.
+        """
         if name_a == name_b:
             return False
         model_a = self._unbiased_name_to_model.get(name_a)
@@ -1405,9 +1420,21 @@ class TemporalProbabilisticRPGHeuristic:
         pre_b = model_b.preconditions
         add_a = frozenset(model_a.add_probabilities.keys())
         add_b = frozenset(model_b.add_probabilities.keys())
+        # (1) Direct delete-interference.
         if del_a & (pre_b | add_b):
             return True
         if del_b & (pre_a | add_a):
+            return True
+        # (2) Shared "consumable" precondition: a fact that can be deleted
+        # by some action in the domain, required by both. This catches the
+        # resource-style mutex that pure delete-interference misses.
+        shared_pre = pre_a & pre_b
+        if shared_pre:
+            consumables = shared_pre & set(self._unbiased_deleters_by_fact.keys())
+            if consumables:
+                return True
+        # (3) Shared add-effect on the same fact: only one can first-achieve.
+        if add_a & add_b:
             return True
         return False
 
@@ -1621,8 +1648,15 @@ class TemporalProbabilisticRPGHeuristic:
             )
         lambda_and = (sum(and_terms) / len(and_terms)) if and_terms else 0.0
 
+        # λ_DEL averages only over facts that actually have deleters, so the
+        # contribution of delete-prone facts is not diluted by the (often
+        # large) set of goal facts that have no deleters at all. Without this
+        # filter, a domain with one delete-prone fact among 20 goals would see
+        # λ_DEL shrunk by 20× for no principled reason.
         del_terms: List[float] = []
         for f in f_star:
+            if not self._unbiased_deleters_by_fact.get(f):
+                continue  # no deleters → this fact contributes 0 to delete bias
             del_terms.append(+gamma_f.get(f, 0.0) * pi_del_f.get(f, 0.0))
         lambda_del = (sum(del_terms) / len(del_terms)) if del_terms else 0.0
 
@@ -1660,6 +1694,24 @@ class TemporalProbabilisticRPGHeuristic:
                 # Defensive clip: B(t) is in [-1, 1] by construction.
                 B_table.append(max(-1.0, min(1.0, B_t)))
 
+        # Mutex / shared-achiever / delete counts for diagnostic visibility.
+        # These help quickly answer "is λ small because the structure has no
+        # bias to extract, or because the extractor is missing it?"
+        mutex_pair_total = 0
+        mutex_pair_detected = 0
+        for f in f_star:
+            achievers = self._actions_by_effect_fact.get(f, [])
+            n = len(achievers)
+            if n < 2:
+                continue
+            mutex_pair_total += n * (n - 1) // 2
+            mutex_pair_detected += int(round(
+                alpha_f.get(f, 0.0) * (n * (n - 1) // 2)
+            ))
+        deleters_total = sum(
+            1 for f in f_star if self._unbiased_deleters_by_fact.get(f)
+        )
+
         result = {
             "lambda_total": lambda_total,
             "lambda_breakdown": {
@@ -1668,9 +1720,59 @@ class TemporalProbabilisticRPGHeuristic:
                 "DEL": lambda_del,
             },
             "B_table": B_table,
+            "diagnostics": {
+                "n_facts_in_f_star": n_facts,
+                "n_actions_in_a_star": len(a_star),
+                "mutex_pairs_detected": mutex_pair_detected,
+                "mutex_pairs_total": mutex_pair_total,
+                "facts_with_deleters": deleters_total,
+                "B_max": max((abs(b) for b in B_table), default=0.0),
+            },
         }
         self._unbiased_correction_cache[cache_key] = result
         return result
+
+    def diagnose_unbiased(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]] = None,
+        depth: int = 25,
+    ) -> str:
+        """
+        Pretty-print λ breakdown and B(t) summary for a single state.
+
+        Use this when MCTS appears to ignore the unbiased correction — it
+        tells you whether the correction has any magnitude at all. If
+        |λ_total| < 0.001 the correction is mathematically zero; the BFS
+        pattern in MCTS is then *not* a bias-correction problem and chasing
+        further fixes here will not help.
+        """
+        target_facts = (
+            set(goal_facts) if goal_facts is not None
+            else (set(self._goal_facts) if self._goal_facts else set(self._facts))
+        )
+        result = self._compute_unbiased_correction_table(
+            state=state, target_facts=target_facts, depth=depth,
+        )
+        diag = result.get("diagnostics", {})
+        breakdown = result.get("lambda_breakdown", {})
+        B = result.get("B_table", [])
+        sample_t = [0, depth // 4, depth // 2, (3 * depth) // 4, depth]
+        sample_B = [(t, B[t]) for t in sample_t if 0 <= t < len(B)]
+        lines = [
+            f"λ_total = {result.get('lambda_total', 0.0):+.4f}",
+            f"  OR  = {breakdown.get('OR', 0.0):+.4f}  (mutex achievers)",
+            f"  AND = {breakdown.get('AND', 0.0):+.4f}  (shared-achiever preconditions)",
+            f"  DEL = {breakdown.get('DEL', 0.0):+.4f}  (delete-induced bias)",
+            f"|B|_max = {diag.get('B_max', 0.0):.4f}",
+            f"B(t) samples: " + ", ".join(f"B({t})={b:+.4f}" for t, b in sample_B),
+            f"f*: {diag.get('n_facts_in_f_star', 0)} facts, "
+            f"a*: {diag.get('n_actions_in_a_star', 0)} actions",
+            f"mutex pairs: {diag.get('mutex_pairs_detected', 0)} / "
+            f"{diag.get('mutex_pairs_total', 0)} candidate pairs",
+            f"facts with deleters: {diag.get('facts_with_deleters', 0)}",
+        ]
+        return "\n".join(lines)
 
     def _heuristic_propagate_atom_backtrack_exact_unbiased(
         self,
