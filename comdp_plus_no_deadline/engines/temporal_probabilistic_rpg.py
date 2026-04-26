@@ -238,6 +238,13 @@ class TemporalProbabilisticRPGHeuristic:
         # Cross-call lazy memos for fast_atom_cache (keyed by root state_facts signature).
         self._fast_atom_fact_memo: Dict[Tuple[frozenset[Fact], Fact, int], float] = {}
         self._fast_atom_action_memo: Dict[Tuple[frozenset[Fact], str, Fact, int], float] = {}
+        # Precomputed structural data for atom_backtrack_exact_unbiased (lazy).
+        self._unbiased_structural_built: bool = False
+        self._unbiased_action_del_effects: Dict[str, frozenset] = {}
+        self._unbiased_deleters_by_fact: Dict[Fact, List[str]] = {}
+        self._unbiased_name_to_model: Dict[str, TemporalRelaxedActionModel] = {}
+        # Per (state_sig, target_sig, depth) cache of {lambda_total, lambda_breakdown, B_table}.
+        self._unbiased_correction_cache: Dict[Tuple[frozenset[Fact], frozenset[Fact], int], Dict] = {}
         # Precomputed availability tables for heuristic_expected_time.
         # Built once at construction; each query just reads from these tables.
         self._et_table_depth: int = 200
@@ -310,11 +317,15 @@ class TemporalProbabilisticRPGHeuristic:
         if chosen_strategy in (
             "atom_backtrack_exact",
             "atom_backtrack_exact_resolution",
+            "atom_backtrack_exact_unbiased",
             "atom_backtrack_cached",
             "fast_atom_cache",
         ):
             query_key = query_key + (self._query_cache_goal_key(goal_facts, state_facts),)
-        if chosen_strategy == "atom_backtrack_exact_resolution":
+        if chosen_strategy in (
+            "atom_backtrack_exact_resolution",
+            "atom_backtrack_exact_unbiased",
+        ):
             query_key = query_key + (
                 float(2.0 if resolution_alpha is None else resolution_alpha),
                 bool(resolution_forced_minimum),
@@ -352,6 +363,19 @@ class TemporalProbabilisticRPGHeuristic:
             return result
         if chosen_strategy == "atom_backtrack_exact_resolution":
             result = self._heuristic_propagate_atom_backtrack_exact_resolution(
+                state=state,
+                goal_facts=goal_facts,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+                resolution_alpha=resolution_alpha,
+                resolution_forced_minimum=resolution_forced_minimum,
+                resolution_reference_t=resolution_reference_t,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "atom_backtrack_exact_unbiased":
+            result = self._heuristic_propagate_atom_backtrack_exact_unbiased(
                 state=state,
                 goal_facts=goal_facts,
                 fixed_depth=fixed_depth,
@@ -637,6 +661,7 @@ class TemporalProbabilisticRPGHeuristic:
             "atom_half_split",
             "atom_backtrack_exact",
             "atom_backtrack_exact_resolution",
+            "atom_backtrack_exact_unbiased",
             "atom_backtrack_cached",
             "fast_atom_cache",
         }
@@ -645,6 +670,7 @@ class TemporalProbabilisticRPGHeuristic:
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
                 "Supported strategies: baseline, baseline_cached, atom_half_split, "
                 "atom_backtrack_exact, atom_backtrack_exact_resolution, "
+                "atom_backtrack_exact_unbiased, "
                 "atom_backtrack_cached, fast_atom_cache."
             )
         return value
@@ -1312,6 +1338,415 @@ class TemporalProbabilisticRPGHeuristic:
             cache_hit=False,
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
+        )
+
+    # -------------------------------------------------------------------------
+    # atom_backtrack_exact_unbiased: structural layer-bias correction
+    # -------------------------------------------------------------------------
+    #
+    # Subtracts a per-layer scalar bias B(t) from each goal fact's probability
+    # before goal aggregation. B(t) is derived analytically from problem-graph
+    # statistics (no rollouts):
+    #
+    #   lambda = lambda_OR + lambda_AND + lambda_DEL
+    #   B(t)   = B(t-1) * (1 - <H_t>) + (1 - <P_{t-1}>) * lambda * <H_t>
+    #
+    # where <H_t>, <P_t> come from a one-time baseline DP pass and the per-source
+    # lambdas come from action mutex / shared-achiever / delete fractions.
+    #
+    # The pre-planning runs once per (state_sig, target_sig, depth) triple and
+    # is cached on the heuristic instance, matching the user-facing semantics
+    # of "compute lambda + B(t) once, look up B(t) at every leaf evaluation."
+    # -------------------------------------------------------------------------
+
+    def _ensure_unbiased_structural_extracted(self) -> None:
+        """Build name->model and fact->deleters indices once per heuristic object."""
+        if self._unbiased_structural_built:
+            return
+
+        # Map name -> TemporalRelaxedActionModel.
+        self._unbiased_name_to_model = {m.name: m for m in self._action_models}
+
+        # Extract delete effects from the original action objects (they are not
+        # carried in TemporalRelaxedActionModel because the heuristic itself is
+        # delete-relaxed). Match the same filter used in _build_action_models.
+        action_del_effects: Dict[str, frozenset] = {}
+        for action in self._actions:
+            if hasattr(action, "actions") and not hasattr(action, "add_effects"):
+                continue
+            name = getattr(action, "name", repr(action))
+            del_set = set()
+            raw_dels = getattr(action, "del_effects", None)
+            if raw_dels:
+                del_set.update(raw_dels)
+            action_del_effects[name] = frozenset(del_set)
+        self._unbiased_action_del_effects = action_del_effects
+
+        # Invert: fact -> [action names that delete it].
+        deleters: Dict[Fact, List[str]] = {}
+        for name, dels in action_del_effects.items():
+            for f in dels:
+                deleters.setdefault(f, []).append(name)
+        self._unbiased_deleters_by_fact = deleters
+
+        self._unbiased_structural_built = True
+
+    def _unbiased_actions_are_mutex(self, name_a: str, name_b: str) -> bool:
+        """Action-mutex via delete-interference (Graphplan-style, simplified)."""
+        if name_a == name_b:
+            return False
+        model_a = self._unbiased_name_to_model.get(name_a)
+        model_b = self._unbiased_name_to_model.get(name_b)
+        if model_a is None or model_b is None:
+            return False
+        del_a = self._unbiased_action_del_effects.get(name_a, frozenset())
+        del_b = self._unbiased_action_del_effects.get(name_b, frozenset())
+        pre_a = model_a.preconditions
+        pre_b = model_b.preconditions
+        add_a = frozenset(model_a.add_probabilities.keys())
+        add_b = frozenset(model_b.add_probabilities.keys())
+        if del_a & (pre_b | add_b):
+            return True
+        if del_b & (pre_a | add_a):
+            return True
+        return False
+
+    def _compute_unbiased_correction_table(
+        self,
+        state,
+        target_facts: Set[Fact],
+        depth: int,
+    ) -> Dict:
+        """
+        Pre-planning helper: compute lambda + B(t) for the layer-bias correction.
+
+        Caches per (state_sig, target_sig, depth). Returns dict with:
+            'lambda_total', 'lambda_breakdown' ({OR, AND, DEL}), 'B_table'
+            (list of length depth+1, indexed by t).
+        """
+        self._ensure_unbiased_structural_extracted()
+
+        state_facts = _extract_state_facts(state)
+        target_set = set(target_facts) if target_facts else set()
+        cache_key = (frozenset(state_facts), frozenset(target_set), int(depth))
+        cached = self._unbiased_correction_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # ---- Step 1: Run baseline DP once to get per-layer trajectories. -----
+        baseline_result = self.heuristic_propagate(
+            state=state,
+            goal_facts=None,
+            fixed_depth=depth,
+            start_time=0.0,
+            strategy="baseline",
+            cached_table=None,
+            debug=False,
+        )
+        probs_by_layer = baseline_result.probabilities_by_layer
+
+        # Reconstruct action support R_t(a) = product of P_t(f) for f in pre(a).
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
+        for t in range(depth + 1):
+            layer_probs = probs_by_layer.get(t, {})
+            layer_support: Dict[str, float] = {}
+            for model in self._action_models:
+                sup = 1.0
+                for pre in model.preconditions:
+                    sup *= _clamp_probability(layer_probs.get(pre, 0.0))
+                layer_support[model.name] = _clamp_probability(sup)
+            action_support_by_layer[t] = layer_support
+
+        # ---- Step 2: Build F* (target ∪ direct preconditions) and A*. --------
+        if not target_set:
+            target_set = set(self._goal_facts) if self._goal_facts else set(self._facts)
+        f_star: Set[Fact] = set(target_set)
+        a_star: Set[str] = set()
+        for f in list(target_set):
+            for model in self._actions_by_effect_fact.get(f, []):
+                a_star.add(model.name)
+                f_star.update(model.preconditions)
+        if not f_star:
+            f_star = set(self._facts)
+        f_star_list = list(f_star)
+        n_facts = max(1, len(f_star_list))
+
+        # ---- Step 3: Marginal scales (averaged over t in [1, depth]). --------
+        # <p>_f = mean s_t(a, f) across achievers and t
+        p_avg_f: Dict[Fact, float] = {}
+        for f in f_star:
+            achievers = self._actions_by_effect_fact.get(f, [])
+            if not achievers:
+                p_avg_f[f] = 0.0
+                continue
+            sum_val = 0.0
+            count = 0
+            for t in range(1, depth + 1):
+                for model in achievers:
+                    d = max(0, int(model.effect_delay_steps))
+                    if t < d:
+                        continue
+                    r = action_support_by_layer.get(t - d, {}).get(model.name, 0.0)
+                    add_p = _clamp_probability(model.add_probabilities.get(f, 0.0))
+                    sum_val += _clamp_probability(r * add_p)
+                    count += 1
+            p_avg_f[f] = (sum_val / count) if count > 0 else 0.0
+
+        # <p_shared>_a: mean P_{t-d(a)}(f) over t and shared-achiever preconditions S(a)
+        p_shared_a: Dict[str, float] = {}
+        s_set_size_by_action: Dict[str, int] = {}
+        for a_name in a_star:
+            model = self._unbiased_name_to_model.get(a_name)
+            if model is None:
+                p_shared_a[a_name] = 0.0
+                s_set_size_by_action[a_name] = 0
+                continue
+            pres = list(model.preconditions)
+            shared_set: Set[Fact] = set()
+            for i in range(len(pres)):
+                for j in range(i + 1, len(pres)):
+                    ach_i = {m.name for m in self._actions_by_effect_fact.get(pres[i], [])}
+                    ach_j = {m.name for m in self._actions_by_effect_fact.get(pres[j], [])}
+                    if ach_i & ach_j:
+                        shared_set.add(pres[i])
+                        shared_set.add(pres[j])
+            s_set_size_by_action[a_name] = len(shared_set)
+            if not shared_set:
+                p_shared_a[a_name] = 0.0
+                continue
+            d = max(0, int(model.effect_delay_steps))
+            sum_val = 0.0
+            count = 0
+            for t in range(1, depth + 1):
+                t_eff = t - d
+                if t_eff < 0:
+                    continue
+                layer_probs = probs_by_layer.get(t_eff, {})
+                for f in shared_set:
+                    sum_val += _clamp_probability(layer_probs.get(f, 0.0))
+                    count += 1
+            p_shared_a[a_name] = (sum_val / count) if count > 0 else 0.0
+
+        # <pi_del>_f: mean per-step probability that some delete-action of f fires
+        pi_del_f: Dict[Fact, float] = {}
+        for f in f_star:
+            deleters = self._unbiased_deleters_by_fact.get(f, [])
+            if not deleters:
+                pi_del_f[f] = 0.0
+                continue
+            sum_val = 0.0
+            count = 0
+            for t in range(1, depth + 1):
+                step_total = 0.0
+                for a_name in deleters:
+                    model = self._unbiased_name_to_model.get(a_name)
+                    if model is None:
+                        continue
+                    d = max(0, int(model.effect_delay_steps))
+                    if t < d:
+                        continue
+                    step_total += action_support_by_layer.get(t - d, {}).get(a_name, 0.0)
+                sum_val += min(1.0, step_total)
+                count += 1
+            pi_del_f[f] = (sum_val / count) if count > 0 else 0.0
+
+        # ---- Step 4: Structural constants alpha_f, beta_a, gamma_f. ----------
+        alpha_f: Dict[Fact, float] = {}
+        n_f_count: Dict[Fact, int] = {}
+        for f in f_star:
+            achievers = self._actions_by_effect_fact.get(f, [])
+            n = len(achievers)
+            n_f_count[f] = n
+            if n < 2:
+                alpha_f[f] = 0.0
+                continue
+            total_pairs = n * (n - 1) // 2
+            mutex_count = 0
+            for i in range(n):
+                for j in range(i + 1, n):
+                    if self._unbiased_actions_are_mutex(achievers[i].name, achievers[j].name):
+                        mutex_count += 1
+            alpha_f[f] = (mutex_count / total_pairs) if total_pairs > 0 else 0.0
+
+        beta_a: Dict[str, float] = {}
+        m_a_count: Dict[str, int] = {}
+        for a_name in a_star:
+            model = self._unbiased_name_to_model.get(a_name)
+            if model is None:
+                beta_a[a_name] = 0.0
+                m_a_count[a_name] = 0
+                continue
+            pres = list(model.preconditions)
+            m = len(pres)
+            m_a_count[a_name] = m
+            if m < 2:
+                beta_a[a_name] = 0.0
+                continue
+            total_pairs = m * (m - 1) // 2
+            shared_pairs = 0
+            for i in range(m):
+                ach_i = {mod.name for mod in self._actions_by_effect_fact.get(pres[i], [])}
+                for j in range(i + 1, m):
+                    ach_j = {mod.name for mod in self._actions_by_effect_fact.get(pres[j], [])}
+                    if ach_i & ach_j:
+                        shared_pairs += 1
+            beta_a[a_name] = (shared_pairs / total_pairs) if total_pairs > 0 else 0.0
+
+        gamma_f: Dict[Fact, float] = {}
+        for f in f_star:
+            ach_count = len(self._actions_by_effect_fact.get(f, []))
+            del_count = len(self._unbiased_deleters_by_fact.get(f, []))
+            denom = ach_count + del_count
+            gamma_f[f] = (del_count / denom) if denom > 0 else 0.0
+
+        # ---- Step 5: Per-source lambda contributions (avg of per-fact/action). -
+        or_terms: List[float] = []
+        for f in f_star:
+            n = n_f_count.get(f, 0)
+            if n < 2:
+                continue
+            or_terms.append(
+                -alpha_f.get(f, 0.0) * (n - 1) / 2.0 * p_avg_f.get(f, 0.0)
+            )
+        lambda_or = (sum(or_terms) / len(or_terms)) if or_terms else 0.0
+
+        and_terms: List[float] = []
+        for a_name in a_star:
+            m = m_a_count.get(a_name, 0)
+            if m < 2:
+                continue
+            ps = p_shared_a.get(a_name, 0.0)
+            and_terms.append(
+                -beta_a.get(a_name, 0.0) * (m - 1) / 2.0 * ps * (1.0 - ps)
+            )
+        lambda_and = (sum(and_terms) / len(and_terms)) if and_terms else 0.0
+
+        del_terms: List[float] = []
+        for f in f_star:
+            del_terms.append(+gamma_f.get(f, 0.0) * pi_del_f.get(f, 0.0))
+        lambda_del = (sum(del_terms) / len(del_terms)) if del_terms else 0.0
+
+        lambda_total = lambda_or + lambda_and + lambda_del
+
+        # ---- Step 6: B(t) recursion using <P_t>, <H_t> from baseline DP. ------
+        if abs(lambda_total) < 1e-4:
+            B_table: List[float] = [0.0] * (depth + 1)
+        else:
+            avg_P: List[float] = []
+            for t in range(depth + 1):
+                layer_probs = probs_by_layer.get(t, {})
+                s = 0.0
+                for f in f_star_list:
+                    s += _clamp_probability(layer_probs.get(f, 0.0))
+                avg_P.append(s / n_facts)
+
+            # Derive <H_t> from <P_t> via the recursion identity:
+            #   P_t = P_{t-1} + (1 - P_{t-1}) * H_t  =>  H_t = (P_t - P_{t-1}) / (1 - P_{t-1})
+            avg_H: List[float] = [0.0]
+            for t in range(1, depth + 1):
+                p_prev = avg_P[t - 1]
+                p_now = avg_P[t]
+                if p_prev >= 1.0:
+                    avg_H.append(0.0)
+                else:
+                    avg_H.append(_clamp_probability((p_now - p_prev) / (1.0 - p_prev)))
+
+            B_table = [0.0]
+            for t in range(1, depth + 1):
+                B_prev = B_table[t - 1]
+                H_t = avg_H[t]
+                P_prev = avg_P[t - 1]
+                B_t = B_prev * (1.0 - H_t) + (1.0 - P_prev) * lambda_total * H_t
+                # Defensive clip: B(t) is in [-1, 1] by construction.
+                B_table.append(max(-1.0, min(1.0, B_t)))
+
+        result = {
+            "lambda_total": lambda_total,
+            "lambda_breakdown": {
+                "OR": lambda_or,
+                "AND": lambda_and,
+                "DEL": lambda_del,
+            },
+            "B_table": B_table,
+        }
+        self._unbiased_correction_cache[cache_key] = result
+        return result
+
+    def _heuristic_propagate_atom_backtrack_exact_unbiased(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+        *,
+        resolution_alpha: Optional[float] = None,
+        resolution_forced_minimum: bool = False,
+        resolution_reference_t: Optional[int] = None,
+    ) -> TemporalPropagationResult:
+        """
+        Layer-bias-corrected variant of atom_backtrack_exact_resolution.
+
+        Bias-corrected empirical heuristic: NOT admissible by default. The
+        correction subtracts a structural per-layer bias B(t) from each goal
+        fact's probability before goal aggregation. See
+        ``_compute_unbiased_correction_table`` for the math.
+        """
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        target_facts: Set[Fact] = (
+            set(goal_facts) if goal_facts is not None else self._facts.union(state_facts)
+        )
+
+        # Base scoring path: reuse atom_backtrack_exact_resolution unchanged.
+        base_result = self._heuristic_propagate_atom_backtrack_exact_resolution(
+            state=state,
+            goal_facts=goal_facts,
+            fixed_depth=depth,
+            start_time=start_time,
+            debug=debug,
+            resolution_alpha=resolution_alpha,
+            resolution_forced_minimum=resolution_forced_minimum,
+            resolution_reference_t=resolution_reference_t,
+        )
+
+        # Pre-planning: compute lambda + B(t) (cached per state/target/depth).
+        correction = self._compute_unbiased_correction_table(
+            state=state,
+            target_facts=target_facts,
+            depth=depth,
+        )
+        B_table = correction["B_table"]
+        b_at_depth = (
+            B_table[depth]
+            if 0 <= depth < len(B_table)
+            else (B_table[-1] if B_table else 0.0)
+        )
+
+        # Apply the per-layer correction to every fact at the depth layer
+        # before goal aggregation. heuristic_score's aggregation reads from
+        # probabilities_by_layer[depth_used] directly, so subtracting here is
+        # equivalent to "per goal fact, before aggregation".
+        base_layer = base_result.probabilities_by_layer.get(depth, {})
+        corrected_layer: Dict[Fact, float] = {
+            fact: _clamp_probability(prob - b_at_depth)
+            for fact, prob in base_layer.items()
+        }
+
+        new_probs_by_layer: Dict[int, Dict[Fact, float]] = {
+            0: dict(base_result.probabilities_by_layer.get(0, {})),
+            depth: corrected_layer,
+        }
+
+        traces = list(base_result.traces) if base_result.traces else []
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=new_probs_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=base_result.fact_cache_hits,
+            action_cache_hits=base_result.action_cache_hits,
         )
 
     def _heuristic_propagate_atom_backtrack_cached(

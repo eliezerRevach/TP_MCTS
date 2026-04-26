@@ -55,6 +55,18 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
         "label": "atom_backtrack_exact_resolution",
     },
+    # Bias-corrected variant: same base scoring as atomic_exact_resolution + structural
+    # per-layer correction B(t). Pre-planning is amortized; per-call cost is one lookup.
+    "atomic_exact_unbiased": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_unbiased",
+        "label": "atomic_exact_unbiased",
+    },
+    "atom_backtrack_exact_unbiased": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_unbiased",
+        "label": "atom_backtrack_exact_unbiased",
+    },
     "atomic_exact_cached": {
         "heuristic_name": "temporal_probabilistic_rpg",
         "temporal_heuristic_strategy": "atom_backtrack_cached",
