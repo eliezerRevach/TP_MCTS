@@ -146,7 +146,7 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
         tree_params = params + (tree_depth,)
         up.engines.solvers.evaluate.evaluation_loop(runs, heuristic_tree_solver.plan, tree_params)
     else:
-        mcts_params = params + (value_mode,)
+        mcts_params = params + (value_mode, up.args.final_selection)
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.plan, mcts_params)
 
 

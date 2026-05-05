@@ -247,7 +247,18 @@ class Base_MCTS:
 
         return aStar
 
-    def search(self, timeout=1, selection_type='avg'):
+    def best_action_robust(self, root_node: "up.engines.SNode"):
+        """Return the most-visited child (robust child / argmax-N)."""
+        anodes = root_node.children
+        best_count = -1
+        aStar = -1
+        for action in root_node.possible_actions:
+            if anodes[action].count > best_count:
+                best_count = anodes[action].count
+                aStar = action
+        return aStar
+
+    def search(self, timeout=1, selection_type='avg', final_selection='q'):
         """
         Execute the MCTS algorithm from the initial state given, with timeout in seconds
         """
@@ -265,6 +276,8 @@ class Base_MCTS:
             current_time = time.time()
             i += 1
         # print(f'i = {i}')
+        if final_selection == 'robust':
+            return self.best_action_robust(self.root_node)
         return self.best_action(self.root_node)
 
     def selection(self, snode: "up.engines.Snode"):
@@ -811,7 +824,8 @@ class C_MCTS(Base_MCTS):
 
 def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int, exploration_constant: float,
          selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
-         temporal_heuristic_strategy: str = "baseline", value_mode: str = "tp_mcts"):
+         temporal_heuristic_strategy: str = "baseline", value_mode: str = "tp_mcts",
+         final_selection: str = 'q'):
     stn = create_init_stn(mdp)
     root_state = mdp.initial_state()
 
@@ -844,7 +858,7 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
             root_baseline_cache=baseline_cache_table,
             value_mode=value_mode,
         )
-        action = mcts.search(search_time, selection_type)
+        action = mcts.search(search_time, selection_type, final_selection)
 
         if action == -1:
             print("A valid plan is not found")

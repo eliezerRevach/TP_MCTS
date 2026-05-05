@@ -152,6 +152,12 @@ parser.add_argument(
     default='tp_mcts',
     choices=('tp_mcts', 'greedy_matched'),
 )
+parser.add_argument(
+    '--final_selection',
+    choices=('q', 'robust'),
+    default='q',
+    help='Final action selection after MCTS search: q=argmax Q-value (default), robust=most-visited (argmax N)',
+)
 
 # parse_known_args: importing unified_planning from tests/tools must not fail on
 # unrelated argv tokens (e.g. pytest). run_domain.py is still invoked with known flags only.

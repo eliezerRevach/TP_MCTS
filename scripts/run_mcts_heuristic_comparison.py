@@ -108,6 +108,7 @@ DEFAULT_REWARD_MODE = "deadline"
 DEFAULT_DISCOUNT_FACTOR = 0.95
 DEFAULT_STEP_PENALTY = -0.05
 DEFAULT_VALUE_MODE = "tp_mcts"
+DEFAULT_FINAL_SELECTION = "q"
 DEFAULT_OUTPUT = str(REPO_ROOT / "results" / "mcts_heuristic_comparison.csv")
 
 CSV_FIELDNAMES = [
@@ -270,6 +271,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"MCTS backup target mode. Default: {DEFAULT_VALUE_MODE}",
     )
     p.add_argument(
+        "--final_selection",
+        choices=["q", "robust"],
+        default=DEFAULT_FINAL_SELECTION,
+        help="Final MCTS action selection: q=argmax Q-value (default), robust=most-visited (argmax N)",
+    )
+    p.add_argument(
         "--output",
         default=DEFAULT_OUTPUT,
         help=f"Output CSV path. Default: {DEFAULT_OUTPUT}",
@@ -323,7 +330,8 @@ def run_experiment(
     discount_factor: float,
     step_penalty: float,
     value_mode: str,
-    verbose: bool,
+    final_selection: str = "q",
+    verbose: bool = False,
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
     resolution_reference_t: int | None = None,
@@ -338,7 +346,7 @@ def run_experiment(
         f"  heuristic_depth={depth}  search_time={search_time}  search_depth={search_depth}  "
         f"k={k}  runs={runs}  seed={seed}  C={exploration_constant}  "
         f"selection={selection_type}  gamma={discount_factor}  step_penalty={step_penalty}  "
-        f"reward_mode={reward_mode}  value_mode={value_mode}",
+        f"reward_mode={reward_mode}  value_mode={value_mode}  final_selection={final_selection}",
         flush=True,
     )
     print(f"{'─'*60}", flush=True)
@@ -363,6 +371,7 @@ def run_experiment(
         discount_factor=discount_factor,
         step_penalty=step_penalty,
         value_mode=value_mode,
+        final_selection=final_selection,
         resolution_alpha=resolution_alpha,
         resolution_forced_minimum=resolution_forced_minimum,
         resolution_reference_t=resolution_reference_t,
@@ -479,6 +488,7 @@ def main(argv: list[str] | None = None) -> None:
                 discount_factor=args.discount_factor,
                 step_penalty=args.step_penalty,
                 value_mode=args.value_mode,
+                final_selection=args.final_selection,
                 verbose=args.verbose,
                 resolution_alpha=args.resolution_alpha,
                 resolution_forced_minimum=args.resolution_forced_minimum,
