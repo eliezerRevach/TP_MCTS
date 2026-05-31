@@ -47,6 +47,23 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_survival",
         "label": "baseline_survival",
     },
+    # Same survival propagation as baseline_survival, but scored with the
+    # variance-aware "meanvar" goal aggregation (mean - alpha*sqrt(k-1)*std over
+    # per-goal areas). Kept separate so the two can be compared head-to-head.
+    "baseline_survival_meanvar": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_survival_meanvar",
+        "label": "baseline_survival_meanvar",
+    },
+    # Survival propagation with the component-wise AND-layer gamma correction
+    # replacing the flat precondition product R(a). Collapses to baseline_survival
+    # when no static precondition dependency is detected. NOT a calibrated
+    # probability; the goal is better AND-layer ranking direction.
+    "baseline_survival_and_gamma": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_survival_and_gamma",
+        "label": "baseline_survival_and_gamma",
+    },
     "atomic_exact": {
         "heuristic_name": "temporal_probabilistic_rpg",
         "temporal_heuristic_strategy": "atom_backtrack_exact",

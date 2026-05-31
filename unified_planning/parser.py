@@ -13,6 +13,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "7": "atom_backtrack_exact_resolution",
         "8": "atom_backtrack_exact_unbiased",
         "9": "baseline_survival",
+        "10": "baseline_survival_meanvar",
+        "11": "baseline_survival_and_gamma",
         "baseline": "baseline",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -22,6 +24,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "atom_backtrack_exact_resolution": "atom_backtrack_exact_resolution",
         "atom_backtrack_exact_unbiased": "atom_backtrack_exact_unbiased",
         "baseline_survival": "baseline_survival",
+        "baseline_survival_meanvar": "baseline_survival_meanvar",
+        "baseline_survival_and_gamma": "baseline_survival_and_gamma",
     }
     if normalized not in aliases:
         raise argparse.ArgumentTypeError(
@@ -30,7 +34,9 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "4|baseline_cached, 5|atom_backtrack_cached, 6|fast_atom_cache, "
             "7|atom_backtrack_exact_resolution, "
             "8|atom_backtrack_exact_unbiased, "
-            "9|baseline_survival"
+            "9|baseline_survival, "
+            "10|baseline_survival_meanvar, "
+            "11|baseline_survival_and_gamma"
         )
     return aliases[normalized]
 
@@ -106,7 +112,12 @@ parser.add_argument(
         '8|atom_backtrack_exact_unbiased (resolution + structural per-layer bias correction; '
         'NOT admissible), '
         '9|baseline_survival (layered baseline + delete/survival decay so P_t can drop; '
-        'NOT monotone)'
+        'NOT monotone), '
+        '10|baseline_survival_meanvar (baseline_survival + variance-aware goal '
+        'aggregation mean-alpha*sqrt(k-1)*std over per-goal areas), '
+        '11|baseline_survival_and_gamma (baseline_survival + component-wise AND-layer '
+        'gamma correction on the precondition support; reduces to baseline_survival '
+        'when no dependency is detected; NOT calibrated probability)'
     ),
     nargs='?',
     default='baseline',

@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 from math import prod
 from types import SimpleNamespace
 import math
+import random
 import time
-from typing import Dict, Hashable, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, Hashable, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple
 
 from comdp_plus_no_deadline.engines.probabilistic_rpg import (
     compute_precondition_support,
@@ -14,6 +15,14 @@ from comdp_plus_no_deadline.engines.correlation_heuristic import (
     build_action_specs,
     compute_correlation_preplanning,
     run_correlation_dp,
+)
+from comdp_plus_no_deadline.engines.and_gamma import (
+    AndGammaCalibrator,
+    AndGammaConfig,
+    RolloutSimulator,
+    build_candidate_pairs,
+    build_components,
+    build_structural_context,
 )
 
 
@@ -220,6 +229,15 @@ class TemporalProbabilisticRPGHeuristic:
     # achievement (override per-instance before constructing if desired).
     _FALLBACK_PROBABILISTIC_ADD_PROB: float = 1.0
 
+    # Coefficient alpha for the "meanvar" goal aggregation: score = mean - c*std
+    # over per-goal areas, with c = alpha * sqrt(k-1). alpha=1 is the Samuelson
+    # "snap to min when lopsided" extreme, but as a SEARCH GRADIENT that is too
+    # aggressive: completing one goal increases the spread, so alpha>=~0.75 makes
+    # the penalty reverse the progress gradient (finishing a goal lowers the
+    # score). Empirically the score stays monotone in progress for alpha<=~0.5;
+    # 0.35 keeps a safe margin while still steering toward the laggard goal.
+    _MEANVAR_ALPHA: float = 0.35
+
     def __init__(
         self,
         actions: Sequence[object],
@@ -260,6 +278,13 @@ class TemporalProbabilisticRPGHeuristic:
         self._survival_table_built: bool = False
         self._survival_del_prob_by_name: Dict[str, Dict[Fact, float]] = {}
         self._survival_facts_with_deleters: Set[Fact] = set()
+        # AND-layer gamma correction (baseline_survival_and_gamma). Config is
+        # overridable per-instance before the first query; everything else is
+        # built lazily once on first use.
+        self._and_gamma_config: AndGammaConfig = AndGammaConfig()
+        self._and_gamma_built: bool = False
+        self._and_gamma_calibrator: Optional[AndGammaCalibrator] = None
+        self._and_gamma_components_by_name: Dict[str, List] = {}
         # Precomputed availability tables for heuristic_expected_time.
         # Built once at construction; each query just reads from these tables.
         self._et_table_depth: int = 200
@@ -432,8 +457,24 @@ class TemporalProbabilisticRPGHeuristic:
             )
             self._query_cache[query_key] = result
             return result
-        if chosen_strategy == "baseline_survival":
+        if chosen_strategy in ("baseline_survival", "baseline_survival_meanvar"):
+            # Same survival propagation for both; they differ only in the
+            # goal aggregation chosen at scoring time (product vs meanvar),
+            # so they can be compared head-to-head.
             result = self._heuristic_propagate_baseline_survival(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_survival_and_gamma":
+            # Identical survival propagation, but the AND-layer precondition
+            # support R(a) is replaced by the component-wise gamma-corrected
+            # estimate R_gamma(a). Reduces to baseline_survival when no
+            # dependency is detected.
+            result = self._heuristic_propagate_baseline_survival_and_gamma(
                 state=state,
                 fixed_depth=fixed_depth,
                 start_time=start_time,
@@ -624,6 +665,44 @@ class TemporalProbabilisticRPGHeuristic:
                         product_at_layer *= _clamp_probability(probs.get(goal, 0.0))
                     total += product_at_layer
                 score = total / len(layers)
+        elif aggregation == "meanvar":
+            # Variance-aware AND aggregation (shaped search direction, NOT
+            # P(all goals)).
+            #
+            #   per-goal value a_i = AREA = mean over layers of P_t(g_i)
+            #   score = mean_i(a_i) - c * std_i(a_i),   c = alpha * sqrt(k-1)
+            #
+            # By Samuelson's inequality min >= mean - sqrt(k-1)*std, so with
+            # alpha=1 the score equals `mean` when the per-goal areas are
+            # balanced (std=0) and collapses to `min` when one goal is the lone
+            # laggard, interpolating in between. The std term is what exposes
+            # imbalance: a lagging goal pulls the value down toward the
+            # bottleneck, giving greedy a gradient that product/min do not.
+            #
+            # Per-goal AREA (not the final-layer marginal) is used so the values
+            # are graded rather than saturated to 0/1; this requires the full
+            # per-layer profile (forward strategies only, e.g. baseline_survival).
+            layers = sorted(result.probabilities_by_layer.keys())
+            if not layers or not goals_list:
+                score = 0.0 if goals_list else 1.0
+            else:
+                per_goal_area: List[float] = []
+                for goal in goals_list:
+                    s = 0.0
+                    for layer in layers:
+                        s += _clamp_probability(
+                            result.probabilities_by_layer[layer].get(goal, 0.0)
+                        )
+                    per_goal_area.append(s / len(layers))
+                k = len(per_goal_area)
+                mean_area = sum(per_goal_area) / k
+                if k > 1:
+                    var = sum((a - mean_area) ** 2 for a in per_goal_area) / k
+                    std = math.sqrt(var)
+                    c = self._MEANVAR_ALPHA * math.sqrt(k - 1)
+                    score = mean_area - c * std
+                else:
+                    score = mean_area
         else:
             raise ValueError(f"Unknown aggregation: {aggregation}")
 
@@ -710,6 +789,8 @@ class TemporalProbabilisticRPGHeuristic:
             "baseline",
             "baseline_cached",
             "baseline_survival",
+            "baseline_survival_meanvar",
+            "baseline_survival_and_gamma",
             "atom_half_split",
             "atom_backtrack_exact",
             "atom_backtrack_exact_resolution",
@@ -721,6 +802,7 @@ class TemporalProbabilisticRPGHeuristic:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
                 "Supported strategies: baseline, baseline_cached, baseline_survival, "
+                "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "atom_half_split, "
                 "atom_backtrack_exact, atom_backtrack_exact_resolution, "
                 "atom_backtrack_exact_unbiased, "
@@ -1042,7 +1124,13 @@ class TemporalProbabilisticRPGHeuristic:
         fixed_depth: int,
         start_time: float,
         debug: bool,
+        r_estimator: Optional[Callable[["TemporalRelaxedActionModel", Dict[Fact, float]], float]] = None,
     ) -> TemporalPropagationResult:
+        # `r_estimator`, when provided, replaces the flat AND-layer precondition
+        # support R(a) = compute_precondition_support(...) with a custom estimate
+        # (e.g. the component-wise gamma correction). It is used for BOTH the add
+        # side and the survival/delete side so the two stay consistent. Default
+        # None preserves the exact baseline_survival behaviour.
         self._ensure_survival_delete_table()
         state_facts = _extract_state_facts(state)
         depth = max(0, int(fixed_depth))
@@ -1141,11 +1229,16 @@ class TemporalProbabilisticRPGHeuristic:
                         fact: fact_support(fact, layer)
                         for fact in action_model.preconditions
                     }
-                    action_support_value = compute_precondition_support(
-                        action_model.preconditions,
-                        probs_for_preconditions,
-                        strict=True,
-                    )
+                    if r_estimator is None:
+                        action_support_value = compute_precondition_support(
+                            action_model.preconditions,
+                            probs_for_preconditions,
+                            strict=True,
+                        )
+                    else:
+                        action_support_value = r_estimator(
+                            action_model, probs_for_preconditions
+                        )
                     action_support_cache[support_key] = action_support_value
 
                 action_support[action_model.name] = action_support_value
@@ -1195,6 +1288,139 @@ class TemporalProbabilisticRPGHeuristic:
             cache_hit=False,
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
+        )
+
+    # -------------------------------------------------------------------------
+    # baseline_survival_and_gamma: survival DP with AND-layer gamma correction
+    # -------------------------------------------------------------------------
+    #
+    # Identical to baseline_survival except the flat AND-layer precondition
+    # support
+    #
+    #     R(a) = Π_{f in pre(a)} P_{t-1}(f)
+    #
+    # is replaced by the component-wise corrected estimate
+    #
+    #     R_gamma(a) = Π_{C in Components(pre(a))} γ(key(C)) · Π_{f in C} P_{t-1}(f)
+    #                = R(a) · Π_C γ(key(C))
+    #
+    # so the correction is a single multiplicative factor on the existing product
+    # (singleton / independent components contribute γ = 1, leaving R unchanged).
+    # The noisy-OR achiever formula and the survival/delete update are untouched.
+    # See comdp_plus_no_deadline/engines/and_gamma.py for the component detection,
+    # gamma table, and the optional lazy rollout calibration.
+    # -------------------------------------------------------------------------
+
+    def _ensure_and_gamma_built(self) -> None:
+        """Build the structural context, per-action components and calibrator once."""
+        if self._and_gamma_built:
+            return
+        self._ensure_unbiased_structural_extracted()  # name_to_model + del effects
+
+        config = self._and_gamma_config
+        pre_by_name = {m.name: m.preconditions for m in self._action_models}
+        add_by_name = {
+            m.name: frozenset(m.add_probabilities.keys()) for m in self._action_models
+        }
+        del_by_name = {
+            name: dels for name, dels in self._unbiased_action_del_effects.items()
+        }
+
+        ctx = build_structural_context(
+            pre_by_name=pre_by_name,
+            add_by_name=add_by_name,
+            del_by_name=del_by_name,
+            config=config,
+        )
+
+        # Per-action precondition components (static; computed once).
+        components_by_name: Dict[str, List] = {}
+        components_found = 0
+        type_counts: Dict[str, int] = {}
+        for model in self._action_models:
+            comps = build_components(list(model.preconditions), ctx)
+            components_by_name[model.name] = comps
+            for comp in comps:
+                components_found += 1
+                type_counts[comp.comp_type] = type_counts.get(comp.comp_type, 0) + 1
+        self._and_gamma_components_by_name = components_by_name
+
+        candidate_pairs = build_candidate_pairs(pre_by_name, ctx, config)
+
+        simulator = None
+        if config.enable_rollout_calibration:
+            rng = random.Random(config.seed)
+            simulator = RolloutSimulator(
+                self._actions,
+                rng=rng,
+                horizon=config.rollout_horizon,
+                fallback_add_prob=config.fallback_probabilistic_add_prob,
+            )
+
+        calibrator = AndGammaCalibrator(
+            config=config,
+            ctx=ctx,
+            candidate_pairs=candidate_pairs,
+            simulator=simulator,
+        )
+        calibrator.components_found = components_found
+        for ctype, count in type_counts.items():
+            calibrator.type_counts[ctype] = count
+        self._and_gamma_calibrator = calibrator
+        self._and_gamma_built = True
+
+    def _and_gamma_factor(self, action_name: str) -> float:
+        """Product of component gammas for an action's preconditions (≥ 0)."""
+        calibrator = self._and_gamma_calibrator
+        if calibrator is None:
+            return 1.0
+        calibrator.and_calls += 1
+        factor = 1.0
+        for comp in self._and_gamma_components_by_name.get(action_name, []):
+            factor *= calibrator.gamma_for_component(comp)
+        return factor
+
+    def _heuristic_propagate_baseline_survival_and_gamma(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        self._ensure_and_gamma_built()
+        calibrator = self._and_gamma_calibrator
+        state_facts = _extract_state_facts(state)
+
+        # Lazy calibration pre-pass: refine gamma for the keys actually present
+        # in this query before the DP reads them (no-op unless rollout
+        # calibration is enabled and some key is low-confidence with budget left).
+        if calibrator is not None and self._and_gamma_config.enable_rollout_calibration:
+            needed_keys = set()
+            for model in self._action_models:
+                for comp in self._and_gamma_components_by_name.get(model.name, []):
+                    if comp.comp_type != "singleton":
+                        needed_keys.add(comp.key)
+            if needed_keys:
+                calibrator.calibrate(start_facts=state_facts, needed_keys=needed_keys)
+
+        def r_estimator(
+            action_model: TemporalRelaxedActionModel,
+            probs_for_preconditions: Dict[Fact, float],
+        ) -> float:
+            base = compute_precondition_support(
+                action_model.preconditions,
+                probs_for_preconditions,
+                strict=True,
+            )
+            factor = self._and_gamma_factor(action_model.name)
+            return _clamp_probability(base * factor)
+
+        return self._heuristic_propagate_baseline_survival(
+            state=state,
+            fixed_depth=fixed_depth,
+            start_time=start_time,
+            debug=debug,
+            r_estimator=r_estimator,
         )
 
     @staticmethod

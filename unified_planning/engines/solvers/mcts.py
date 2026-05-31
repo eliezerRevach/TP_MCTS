@@ -49,14 +49,16 @@ def _resolution_heuristic_kwargs_from_cli() -> dict:
 def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
     """Pick the goal-aggregation for heuristic_score based on the strategy.
 
-    `baseline_survival` produces a full per-layer probability profile in which
-    deletable facts decay and recover, so it uses the time-aware "area"
-    aggregation (mean of the goal-product over all layers) to expose that
-    signal as a graded value. Every other strategy keeps the final-layer
-    "product" score it was designed around.
+    `baseline_survival_meanvar` uses the variance-aware "meanvar" aggregation
+    (mean - alpha*sqrt(k-1)*std over per-goal areas): a balance-sensitive
+    direction that — unlike the final-layer "product" — is not gated by the
+    slowest goal and gives a usable gradient. `baseline_survival` keeps the
+    standard final-layer "product" score, so the two are directly comparable
+    (identical survival propagation, different goal aggregation). Every other
+    strategy also uses "product".
     """
-    if (temporal_heuristic_strategy or "").strip().lower() == "baseline_survival":
-        return "area"
+    if (temporal_heuristic_strategy or "").strip().lower() == "baseline_survival_meanvar":
+        return "meanvar"
     return "product"
 
 
