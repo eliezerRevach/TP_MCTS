@@ -245,6 +245,11 @@ class TemporalProbabilisticRPGHeuristic:
         self._unbiased_name_to_model: Dict[str, TemporalRelaxedActionModel] = {}
         # Per (state_sig, target_sig, depth) cache of {lambda_total, lambda_breakdown, B_table}.
         self._unbiased_correction_cache: Dict[Tuple[frozenset[Fact], frozenset[Fact], int], Dict] = {}
+        # Lazy delete-probability table for the survival-aware baseline strategy.
+        # name -> {fact: Pr_del(a, f)}; plus the set of facts that any action deletes.
+        self._survival_table_built: bool = False
+        self._survival_del_prob_by_name: Dict[str, Dict[Fact, float]] = {}
+        self._survival_facts_with_deleters: Set[Fact] = set()
         # Precomputed availability tables for heuristic_expected_time.
         # Built once at construction; each query just reads from these tables.
         self._et_table_depth: int = 200
@@ -413,6 +418,15 @@ class TemporalProbabilisticRPGHeuristic:
                 fixed_depth=fixed_depth,
                 start_time=start_time,
                 cached_table=cached_table,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_survival":
+            result = self._heuristic_propagate_baseline_survival(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
                 debug=debug,
             )
             self._query_cache[query_key] = result
@@ -658,6 +672,7 @@ class TemporalProbabilisticRPGHeuristic:
         valid = {
             "baseline",
             "baseline_cached",
+            "baseline_survival",
             "atom_half_split",
             "atom_backtrack_exact",
             "atom_backtrack_exact_resolution",
@@ -668,7 +683,8 @@ class TemporalProbabilisticRPGHeuristic:
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_cached, atom_half_split, "
+                "Supported strategies: baseline, baseline_cached, baseline_survival, "
+                "atom_half_split, "
                 "atom_backtrack_exact, atom_backtrack_exact_resolution, "
                 "atom_backtrack_exact_unbiased, "
                 "atom_backtrack_cached, fast_atom_cache."
@@ -874,6 +890,274 @@ class TemporalProbabilisticRPGHeuristic:
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
             cached_table=reused,
+        )
+
+    # -------------------------------------------------------------------------
+    # baseline_survival: delete/survival-aware forward DP (non-monotone P_t)
+    # -------------------------------------------------------------------------
+    #
+    # The plain baseline recursion is monotone — once a fact is supported its
+    # probability can only rise:
+    #
+    #     P_t(f) = P_{t-1}(f) + (1 - P_{t-1}(f)) * H_t(f)
+    #
+    # baseline_survival adds a per-step survival factor S_t(f) so that a fact
+    # that can be deleted decays back toward 0 when its deleters are reachable:
+    #
+    #     P_t(f) = P_{t-1}(f)*S_t(f) + (1 - P_{t-1}(f)*S_t(f)) * H_t(f)
+    #
+    # with the selective/normalized (Option 2) survival model:
+    #
+    #     h_del(f, t) = sum_{a in Del(f)} R(a, .) * Pr_del(a, f)
+    #                   ----------------------------------------
+    #                   sum_{a in A}      R(a, .)
+    #     S_t(f) = (1 - h_del(f, t)) ** k_t           (k_t = 1 in v1)
+    #
+    # where R(a, .) is the same achiever reachability (precondition support)
+    # already computed for the add side, Pr_del(a, f) is the summed probability
+    # of a's outcomes that set f False, and the numerator/denominator are
+    # accumulated into per-arrival-layer buckets (sum-and-normalize, NOT
+    # 1 - prod(...) — that would be the pessimistic model).
+    #
+    # v1 timing: deletes are treated as AT-START effects (delete event lands one
+    # layer after the deleter fires, R indexed at the firing/start layer). This
+    # matches the note "if the delete is a START effect, index R at the action's
+    # start time, not finish", keeps the numerator and denominator consistent
+    # (both indexed at the firing layer), and is what makes resource facts like
+    # free(m) in machine_shop actually decay below 1.
+    #
+    # Backward compatibility: a fact with no deleters always has S_t(f) = 1, so
+    # the recursion collapses to the plain monotone baseline for delete-free
+    # facts / delete-free domains.
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_del_probabilities(action) -> Dict[Fact, float]:
+        """Pr_del(a, f) per deleted fact: deterministic delete => 1, plus the
+        summed probability of probabilistic outcomes that assign f False.
+
+        Mirrors `_extract_add_probabilities` but collects the negative side of
+        each effect table."""
+        del_probabilities: Dict[Fact, float] = {}
+        for fact in getattr(action, "del_effects", set()):
+            del_probabilities[fact] = 1.0
+
+        for probabilistic_effect in getattr(action, "probabilistic_effects", []):
+            per_effect_probability: MutableMapping[Fact, float] = {}
+            try:
+                outcomes = probabilistic_effect.probability_function(
+                    SimpleNamespace(predicates=set()),
+                    None,
+                )
+            except Exception:
+                outcomes = {}
+            for outcome_probability, assignments in outcomes.items():
+                p = _clamp_probability(outcome_probability)
+                for fact, value in assignments.items():
+                    is_positive = bool(value.bool_constant_value()) if hasattr(
+                        value,
+                        "bool_constant_value",
+                    ) else bool(value)
+                    if not is_positive:
+                        per_effect_probability[fact] = _clamp_probability(
+                            per_effect_probability.get(fact, 0.0) + p
+                        )
+
+            for fact, probability in per_effect_probability.items():
+                existing = del_probabilities.get(fact, 0.0)
+                del_probabilities[fact] = _clamp_probability(
+                    1.0 - (1.0 - existing) * (1.0 - probability)
+                )
+
+        return del_probabilities
+
+    def _ensure_survival_delete_table(self) -> None:
+        """Build name -> {fact: Pr_del} once per heuristic object.
+
+        Keyed by action name to align with `_build_action_models` (which keys
+        reachability/support by the same name). Uses the same action filter so
+        the deleter set matches the actions whose R we have."""
+        if self._survival_table_built:
+            return
+
+        del_prob_by_name: Dict[str, Dict[Fact, float]] = {}
+        facts_with_deleters: Set[Fact] = set()
+        for action in self._actions:
+            if hasattr(action, "actions") and not hasattr(action, "add_effects"):
+                continue
+            name = getattr(action, "name", repr(action))
+            dels = {
+                f: p
+                for f, p in self._extract_del_probabilities(action).items()
+                if p > 0.0
+            }
+            if dels:
+                del_prob_by_name[name] = dels
+                facts_with_deleters.update(dels.keys())
+
+        self._survival_del_prob_by_name = del_prob_by_name
+        self._survival_facts_with_deleters = facts_with_deleters
+        self._survival_table_built = True
+
+    def _heuristic_propagate_baseline_survival(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        self._ensure_survival_delete_table()
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        del start_time
+        facts = self._facts.union(state_facts)
+
+        # v1 constants.
+        DELETE_DELAY = 1  # at-start delete semantics (see method docstring).
+        K_T = 1  # expected # actions finishing at t.
+
+        del_prob_by_name = self._survival_del_prob_by_name
+        facts_with_deleters = self._survival_facts_with_deleters
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        # Add arrivals (achiever successes) and delete arrivals, keyed by the
+        # layer the effect lands on. Delete buckets implement the selective
+        # normalization: numerator over deleters, denominator over all actions.
+        pending_successes: Dict[Tuple[int, Fact], List[float]] = {}
+        delete_numerator: Dict[Tuple[int, Fact], float] = {}
+        delete_denominator: Dict[int, float] = {}
+
+        fact_support_cache: Dict[Tuple[Fact, int], float] = {}
+        action_support_cache: Dict[Tuple[str, int], float] = {}
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        traces: List[TemporalLayerTrace] = []
+
+        def fact_support(fact: Fact, layer: int) -> float:
+            nonlocal fact_cache_hits
+            key = (fact, layer)
+            if key in fact_support_cache:
+                fact_cache_hits += 1
+                return fact_support_cache[key]
+            value = _clamp_probability(probabilities_by_layer[layer].get(fact, 0.0))
+            fact_support_cache[key] = value
+            return value
+
+        for layer in range(depth + 1):
+            arrivals: Dict[Fact, float] = {}
+
+            # Persistence with decay: P_{t-1}(f) * S_t(f), then arrival hazard.
+            if layer > 0:
+                den = delete_denominator.get(layer, 0.0)
+                for fact in facts:
+                    previous = probabilities_by_layer[layer - 1][fact]
+                    if (
+                        fact in facts_with_deleters
+                        and den > 0.0
+                        and previous > 0.0
+                    ):
+                        num = delete_numerator.get((layer, fact), 0.0)
+                        h_del = _clamp_probability(num / den)
+                        survival = _clamp_probability((1.0 - h_del) ** K_T)
+                    else:
+                        survival = 1.0
+                    decayed = _clamp_probability(previous * survival)
+                    successes = pending_successes.get((layer, fact), [])
+                    arrival_hazard = (
+                        _clamp_probability(1.0 - prod(1.0 - s for s in successes))
+                        if successes
+                        else 0.0
+                    )
+                    updated = _clamp_probability(
+                        decayed + (1.0 - decayed) * arrival_hazard
+                    )
+                    probabilities_by_layer[layer][fact] = updated
+                    fact_support_cache[(fact, layer)] = updated
+                    if arrival_hazard > 0.0:
+                        arrivals[fact] = arrival_hazard
+
+            # No outgoing actions from the last layer of fixed depth.
+            if layer == depth:
+                if debug:
+                    traces.append(
+                        TemporalLayerTrace(
+                            layer=layer,
+                            fact_probabilities=dict(probabilities_by_layer[layer]),
+                            arrivals=arrivals,
+                        )
+                    )
+                break
+
+            action_support: Dict[str, float] = {}
+            for action_model in self._action_models:
+                support_key = (action_model.name, layer)
+                if support_key in action_support_cache:
+                    action_support_value = action_support_cache[support_key]
+                    action_cache_hits += 1
+                else:
+                    probs_for_preconditions = {
+                        fact: fact_support(fact, layer)
+                        for fact in action_model.preconditions
+                    }
+                    action_support_value = compute_precondition_support(
+                        action_model.preconditions,
+                        probs_for_preconditions,
+                        strict=True,
+                    )
+                    action_support_cache[support_key] = action_support_value
+
+                action_support[action_model.name] = action_support_value
+                if action_support_value <= 0.0:
+                    continue
+
+                # Add side: schedule achiever successes at the add arrival layer.
+                arrival_layer = layer + action_model.effect_delay_steps
+                if arrival_layer <= depth:
+                    for fact, add_prob in action_model.add_probabilities.items():
+                        success = _clamp_probability(action_support_value * add_prob)
+                        pending_successes.setdefault((arrival_layer, fact), []).append(
+                            success
+                        )
+
+                # Delete side: every reachable action contributes R to the
+                # denominator at the delete-event layer; deleters also add
+                # R * Pr_del to the per-fact numerator.
+                delete_layer = layer + DELETE_DELAY
+                if delete_layer <= depth:
+                    delete_denominator[delete_layer] = (
+                        delete_denominator.get(delete_layer, 0.0)
+                        + action_support_value
+                    )
+                    dels = del_prob_by_name.get(action_model.name)
+                    if dels:
+                        for fact, del_prob in dels.items():
+                            delete_numerator[(delete_layer, fact)] = (
+                                delete_numerator.get((delete_layer, fact), 0.0)
+                                + action_support_value * del_prob
+                            )
+
+            if debug:
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=layer,
+                        fact_probabilities=dict(probabilities_by_layer[layer]),
+                        action_support=action_support,
+                        arrivals=arrivals,
+                    )
+                )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
         )
 
     @staticmethod

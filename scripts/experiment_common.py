@@ -39,6 +39,14 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_cached",
         "label": "baseline_cached",
     },
+    # Delete/survival-aware baseline: forward DP with a per-step survival factor
+    # S_t(f) so deletable facts (e.g. free(m)) decay below 1 instead of being
+    # pinned at 1. NOT monotone, NOT admissible.
+    "baseline_survival": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_survival",
+        "label": "baseline_survival",
+    },
     "atomic_exact": {
         "heuristic_name": "temporal_probabilistic_rpg",
         "temporal_heuristic_strategy": "atom_backtrack_exact",
