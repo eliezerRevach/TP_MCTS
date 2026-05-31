@@ -586,9 +586,10 @@ class TemporalProbabilisticRPGHeuristic:
             resolution_forced_minimum=resolution_forced_minimum,
             resolution_reference_t=resolution_reference_t,
         )
+        goals_list = list(goal_facts)
         final_probabilities = result.probabilities_by_layer[result.depth_used]
         goal_probabilities = [
-            _clamp_probability(final_probabilities.get(goal, 0.0)) for goal in goal_facts
+            _clamp_probability(final_probabilities.get(goal, 0.0)) for goal in goals_list
         ]
 
         if aggregation == "product":
@@ -597,6 +598,32 @@ class TemporalProbabilisticRPGHeuristic:
                 score *= probability
         elif aggregation == "min":
             score = min(goal_probabilities, default=1.0)
+        elif aggregation == "area":
+            # Time-aware graded score: mean over ALL temporal layers of the
+            # goal-product at that layer (an integral / area-under-curve of
+            # P_t(all goals)). Unlike "product" (which reads only the final
+            # layer and saturates to a binary 0->1 step), this:
+            #   * rewards achieving the goals EARLIER (more layers contribute),
+            #   * is LOWERED by survival/deletion decay (a goal deleted and only
+            #     re-achieved later dips the product in the middle layers),
+            #   * never collapses to a flat step, so it gives the search a
+            #     gradient across tree depths.
+            # Requires the full per-layer profile, so it is only meaningful for
+            # forward strategies (baseline / baseline_survival / baseline_cached
+            # / atom_half_split); backward backtrack strategies only fill layers
+            # {0, depth} and should not use this mode.
+            layers = sorted(result.probabilities_by_layer.keys())
+            if not layers:
+                score = 0.0
+            else:
+                total = 0.0
+                for layer in layers:
+                    probs = result.probabilities_by_layer[layer]
+                    product_at_layer = 1.0
+                    for goal in goals_list:
+                        product_at_layer *= _clamp_probability(probs.get(goal, 0.0))
+                    total += product_at_layer
+                score = total / len(layers)
         else:
             raise ValueError(f"Unknown aggregation: {aggregation}")
 

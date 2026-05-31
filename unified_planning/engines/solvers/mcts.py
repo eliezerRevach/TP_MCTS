@@ -46,6 +46,20 @@ def _resolution_heuristic_kwargs_from_cli() -> dict:
     }
 
 
+def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
+    """Pick the goal-aggregation for heuristic_score based on the strategy.
+
+    `baseline_survival` produces a full per-layer probability profile in which
+    deletable facts decay and recover, so it uses the time-aware "area"
+    aggregation (mean of the goal-product over all layers) to expose that
+    signal as a graded value. Every other strategy keeps the final-layer
+    "product" score it was designed around.
+    """
+    if (temporal_heuristic_strategy or "").strip().lower() == "baseline_survival":
+        return "area"
+    return "product"
+
+
 def _uses_tprpg_family(heuristic_name: str) -> bool:
     return (
         heuristic_name == "temporal_probabilistic_rpg"
@@ -143,7 +157,7 @@ def _temporal_heuristic(
             result = heuristic.heuristic_score(
                 state,
                 heuristic_mdp.problem.goals,
-                aggregation="product",
+                aggregation=_aggregation_for_strategy(temporal_heuristic_strategy),
                 fixed_depth=effective_depth,
                 start_time=current_time,
                 strategy=temporal_heuristic_strategy,
@@ -158,7 +172,7 @@ def _temporal_heuristic(
     return heuristic.heuristic_score(
         state,
         heuristic_mdp.problem.goals,
-        aggregation="product",
+        aggregation=_aggregation_for_strategy(temporal_heuristic_strategy),
         fixed_depth=effective_depth,
         start_time=current_time,
         strategy=temporal_heuristic_strategy,
