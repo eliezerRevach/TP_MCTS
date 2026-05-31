@@ -210,6 +210,16 @@ class TemporalProbabilisticRPGHeuristic:
     Actions are ignored at a layer when their precondition support is zero.
     """
 
+    # Fallback add-probability for a probabilistic effect whose outcome
+    # distribution cannot be evaluated at model-build time (its probability
+    # function is an opaque, state-dependent callable that may raise when
+    # probed). Each structurally-declared affected fluent is then registered as
+    # an achiever with this probability so the fact stays reachable instead of
+    # being silently dropped to P=0. Optimistic (1.0) by default, matching the
+    # delete-relaxation spirit; lower it for more conservative stochastic
+    # achievement (override per-instance before constructing if desired).
+    _FALLBACK_PROBABILISTIC_ADD_PROB: float = 1.0
+
     def __init__(
         self,
         actions: Sequence[object],
@@ -2693,33 +2703,56 @@ class TemporalProbabilisticRPGHeuristic:
                 pass
         return 1
 
-    @staticmethod
-    def _extract_add_probabilities(action) -> Dict[Fact, float]:
+    def _extract_add_probabilities(self, action) -> Dict[Fact, float]:
         add_probabilities: Dict[Fact, float] = {}
         for fact in getattr(action, "add_effects", set()):
             add_probabilities[fact] = 1.0
 
         for probabilistic_effect in getattr(action, "probabilistic_effects", []):
-            # Structural extraction only: sum probabilities of outcomes that add fact=True.
             per_effect_probability: MutableMapping[Fact, float] = {}
+
+            # Preferred path: execute the outcome function to read the exact
+            # per-fluent add probabilities. This works whenever the callable is
+            # evaluable in the current context.
+            outcomes = None
             try:
                 outcomes = probabilistic_effect.probability_function(
                     SimpleNamespace(predicates=set()),
                     None,
                 )
             except Exception:
-                outcomes = {}
-            for outcome_probability, assignments in outcomes.items():
-                p = _clamp_probability(outcome_probability)
-                for fact, value in assignments.items():
-                    is_positive = bool(value.bool_constant_value()) if hasattr(
-                        value,
-                        "bool_constant_value",
-                    ) else bool(value)
-                    if is_positive:
-                        per_effect_probability[fact] = _clamp_probability(
-                            per_effect_probability.get(fact, 0.0) + p
-                        )
+                outcomes = None
+
+            if outcomes:
+                for outcome_probability, assignments in outcomes.items():
+                    p = _clamp_probability(outcome_probability)
+                    for fact, value in assignments.items():
+                        is_positive = bool(value.bool_constant_value()) if hasattr(
+                            value,
+                            "bool_constant_value",
+                        ) else bool(value)
+                        if is_positive:
+                            per_effect_probability[fact] = _clamp_probability(
+                                per_effect_probability.get(fact, 0.0) + p
+                            )
+            else:
+                # Fallback: the outcome distribution could not be evaluated
+                # (the probability function is an opaque, state-dependent
+                # callable that may raise when probed with a placeholder
+                # state). Without this branch the affected fluents would get
+                # NO achiever and be silently treated as unreachable (P=0) —
+                # which is exactly what made machine_shop's probabilistic
+                # goals (shaped/smooth/painted/polished) score 0.
+                #
+                # The set of affected fluents is available *structurally* via
+                # `probabilistic_effect.fluents` without executing anything, so
+                # register each as an achiever with a fallback probability.
+                # Sign is assumed positive (add); deterministic deletes are
+                # captured separately from `del_effects`.
+                for fact in getattr(probabilistic_effect, "fluents", []):
+                    per_effect_probability[fact] = _clamp_probability(
+                        self._FALLBACK_PROBABILISTIC_ADD_PROB
+                    )
 
             for fact, probability in per_effect_probability.items():
                 existing = add_probabilities.get(fact, 0.0)
