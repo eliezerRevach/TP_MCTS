@@ -268,5 +268,111 @@ class TestDiagnostics(unittest.TestCase):
         self.assertGreater(diag["and_calls"], 0)
 
 
+class TestResolutionAndGamma(unittest.TestCase):
+    """atom_backtrack_exact_resolution_and_gamma: resolution backtrack + gamma."""
+
+    def test_strategy_is_normalized(self):
+        n = TemporalProbabilisticRPGHeuristic._normalize_strategy(
+            "atom_backtrack_exact_resolution_and_gamma"
+        )
+        self.assertEqual(n, "atom_backtrack_exact_resolution_and_gamma")
+
+    def test_callable_through_heuristic_score(self):
+        h = TemporalProbabilisticRPGHeuristic(
+            actions=[SyntheticAction("a_to_b", frozenset({"A"}), frozenset({"B"}))],
+            facts={"A", "B"},
+            initial_facts={"A"},
+            goal_facts={"B"},
+        )
+        score = h.heuristic_score(
+            {"A"}, {"B"}, fixed_depth=4,
+            strategy="atom_backtrack_exact_resolution_and_gamma",
+        )
+        self.assertGreaterEqual(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+    def test_reduces_to_resolution_when_no_dependency(self):
+        # Independent two-precondition action -> singleton components -> gamma=1.
+        h = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction("mkX", frozenset({"S"}), frozenset({"X"})),
+                SyntheticAction("mkY", frozenset({"T"}), frozenset({"Y"})),
+                SyntheticAction("use", frozenset({"X", "Y"}), frozenset({"G"})),
+            ],
+            facts={"S", "T", "X", "Y", "G"},
+            initial_facts={"S", "T"},
+            goal_facts={"G"},
+        )
+        depth = 8
+        res = h.heuristic_score(
+            {"S", "T"}, {"G"}, fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution",
+        )
+        gam = h.heuristic_score(
+            {"S", "T"}, {"G"}, fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution_and_gamma",
+        )
+        self.assertAlmostEqual(res, gam, places=9)
+
+    def test_positive_dependency_inflates(self):
+        # mk adds both f1,f2 -> positive edge; use needs both (not an atom action).
+        h = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction("mk", frozenset({"S"}), frozenset({"f1", "f2"})),
+                SyntheticAction("use", frozenset({"f1", "f2"}), frozenset({"G"})),
+            ],
+            facts={"S", "f1", "f2", "G"},
+            initial_facts={"S"},
+            goal_facts={"G"},
+        )
+        h._ensure_and_gamma_built()
+        self.assertAlmostEqual(
+            h._and_gamma_factor("use"), h._and_gamma_config.gamma_positive, places=9
+        )
+        depth = 8
+        res = h.heuristic_score(
+            {"S"}, {"G"}, fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution",
+        )
+        gam = h.heuristic_score(
+            {"S"}, {"G"}, fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution_and_gamma",
+        )
+        # Positive gamma (1.2 > 1) inflates the AND product -> G at least as likely.
+        self.assertGreaterEqual(gam, res - 1e-9)
+
+    def test_mutex_dependency_shrinks(self):
+        # p: del f1/add f2 ; q: del f2/add f1 -> toggling mutex; use needs both.
+        h = TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction(
+                    "p", frozenset(), frozenset({"f2"}), del_effects=frozenset({"f1"})
+                ),
+                SyntheticAction(
+                    "q", frozenset(), frozenset({"f1"}), del_effects=frozenset({"f2"})
+                ),
+                SyntheticAction("use", frozenset({"f1", "f2"}), frozenset({"G"})),
+            ],
+            facts={"f1", "f2", "G"},
+            initial_facts=set(),
+            goal_facts={"G"},
+        )
+        h._ensure_and_gamma_built()
+        self.assertAlmostEqual(
+            h._and_gamma_factor("use"), h._and_gamma_config.gamma_mutex, places=9
+        )
+        depth = 8
+        res = h.heuristic_score(
+            set(), {"G"}, fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution",
+        )
+        gam = h.heuristic_score(
+            set(), {"G"}, fixed_depth=depth,
+            strategy="atom_backtrack_exact_resolution_and_gamma",
+        )
+        # Mutex gamma (0.3 < 1) shrinks the AND product -> G no more likely.
+        self.assertLessEqual(gam, res + 1e-9)
+
+
 if __name__ == "__main__":
     unittest.main()

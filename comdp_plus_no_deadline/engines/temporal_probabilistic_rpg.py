@@ -357,6 +357,7 @@ class TemporalProbabilisticRPGHeuristic:
         if chosen_strategy in (
             "atom_backtrack_exact",
             "atom_backtrack_exact_resolution",
+            "atom_backtrack_exact_resolution_and_gamma",
             "atom_backtrack_exact_unbiased",
             "atom_backtrack_cached",
             "fast_atom_cache",
@@ -364,6 +365,7 @@ class TemporalProbabilisticRPGHeuristic:
             query_key = query_key + (self._query_cache_goal_key(goal_facts, state_facts),)
         if chosen_strategy in (
             "atom_backtrack_exact_resolution",
+            "atom_backtrack_exact_resolution_and_gamma",
             "atom_backtrack_exact_unbiased",
         ):
             query_key = query_key + (
@@ -403,6 +405,19 @@ class TemporalProbabilisticRPGHeuristic:
             return result
         if chosen_strategy == "atom_backtrack_exact_resolution":
             result = self._heuristic_propagate_atom_backtrack_exact_resolution(
+                state=state,
+                goal_facts=goal_facts,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+                resolution_alpha=resolution_alpha,
+                resolution_forced_minimum=resolution_forced_minimum,
+                resolution_reference_t=resolution_reference_t,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "atom_backtrack_exact_resolution_and_gamma":
+            result = self._heuristic_propagate_atom_backtrack_exact_resolution_and_gamma(
                 state=state,
                 goal_facts=goal_facts,
                 fixed_depth=fixed_depth,
@@ -794,6 +809,7 @@ class TemporalProbabilisticRPGHeuristic:
             "atom_half_split",
             "atom_backtrack_exact",
             "atom_backtrack_exact_resolution",
+            "atom_backtrack_exact_resolution_and_gamma",
             "atom_backtrack_exact_unbiased",
             "atom_backtrack_cached",
             "fast_atom_cache",
@@ -805,6 +821,7 @@ class TemporalProbabilisticRPGHeuristic:
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "atom_half_split, "
                 "atom_backtrack_exact, atom_backtrack_exact_resolution, "
+                "atom_backtrack_exact_resolution_and_gamma, "
                 "atom_backtrack_exact_unbiased, "
                 "atom_backtrack_cached, fast_atom_cache."
             )
@@ -1769,7 +1786,12 @@ class TemporalProbabilisticRPGHeuristic:
         resolution_alpha: Optional[float] = None,
         resolution_forced_minimum: bool = False,
         resolution_reference_t: Optional[int] = None,
+        gamma_factor_fn: Optional[Callable[[str], float]] = None,
     ) -> TemporalPropagationResult:
+        # `gamma_factor_fn`, when provided, returns a per-action multiplicative
+        # AND-layer gamma factor applied to the precondition product R(a) (only
+        # for real multi-precondition actions, not atoms). Default None keeps the
+        # exact atom_backtrack_exact_resolution behaviour.
         del start_time
         state_facts = _extract_state_facts(state)
         depth = max(0, int(fixed_depth))
@@ -1834,6 +1856,16 @@ class TemporalProbabilisticRPGHeuristic:
                                 completion_times = _resolution_completion_times(
                                     anchors_asc, first_completion, horizon
                                 )
+                                # AND-layer gamma correction on the precondition
+                                # product. Constant per action (structural), so
+                                # compute once; only meaningful for real
+                                # multi-precondition actions, not atoms.
+                                gamma_factor = 1.0
+                                if (
+                                    gamma_factor_fn is not None
+                                    and not is_atom_action(action_model)
+                                ):
+                                    gamma_factor = gamma_factor_fn(action_model.name)
                                 achiever_failure = 1.0
                                 for completion_time in reversed(completion_times):
                                     available_horizon = completion_time - delay
@@ -1844,6 +1876,7 @@ class TemporalProbabilisticRPGHeuristic:
                                                 precondition,
                                                 available_horizon,
                                             )
+                                        precondition_support *= gamma_factor
                                     step_success = _clamp_probability(
                                         add_probability * precondition_support
                                     )
@@ -1885,6 +1918,57 @@ class TemporalProbabilisticRPGHeuristic:
             cache_hit=False,
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
+        )
+
+    def _heuristic_propagate_atom_backtrack_exact_resolution_and_gamma(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+        *,
+        resolution_alpha: Optional[float] = None,
+        resolution_forced_minimum: bool = False,
+        resolution_reference_t: Optional[int] = None,
+    ) -> TemporalPropagationResult:
+        """Resolution backtrack (log-spaced / exponential-width layers) PLUS the
+        component-wise AND-layer gamma correction on the precondition product.
+
+        This is ``atom_backtrack_exact_resolution`` with ``R(a)`` replaced by
+        ``R_gamma(a) = R(a) * Π_C gamma(key(C))`` — exactly the same AND-layer
+        correction used by ``baseline_survival_and_gamma``, but on the
+        logarithmic-layer backtrack instead of the linear survival DP. Reduces to
+        plain resolution when no precondition dependency is detected (all gamma
+        factors = 1). The noisy-OR achiever structure and the resolution anchor
+        schedule are untouched.
+        """
+        self._ensure_and_gamma_built()
+        calibrator = self._and_gamma_calibrator
+        state_facts = _extract_state_facts(state)
+
+        # Lazy calibration pre-pass: refine gamma for the keys present in this
+        # query before the backtrack reads them. No-op unless rollout calibration
+        # is enabled and some key is low-confidence with budget left.
+        if calibrator is not None and self._and_gamma_config.enable_rollout_calibration:
+            needed_keys = set()
+            for model in self._action_models:
+                for comp in self._and_gamma_components_by_name.get(model.name, []):
+                    if comp.comp_type != "singleton":
+                        needed_keys.add(comp.key)
+            if needed_keys:
+                calibrator.calibrate(start_facts=state_facts, needed_keys=needed_keys)
+
+        return self._heuristic_propagate_atom_backtrack_exact_resolution(
+            state=state,
+            goal_facts=goal_facts,
+            fixed_depth=fixed_depth,
+            start_time=start_time,
+            debug=debug,
+            resolution_alpha=resolution_alpha,
+            resolution_forced_minimum=resolution_forced_minimum,
+            resolution_reference_t=resolution_reference_t,
+            gamma_factor_fn=self._and_gamma_factor,
         )
 
     # -------------------------------------------------------------------------

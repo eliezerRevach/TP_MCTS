@@ -15,6 +15,7 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "9": "baseline_survival",
         "10": "baseline_survival_meanvar",
         "11": "baseline_survival_and_gamma",
+        "12": "atom_backtrack_exact_resolution_and_gamma",
         "baseline": "baseline",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -26,6 +27,7 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "baseline_survival": "baseline_survival",
         "baseline_survival_meanvar": "baseline_survival_meanvar",
         "baseline_survival_and_gamma": "baseline_survival_and_gamma",
+        "atom_backtrack_exact_resolution_and_gamma": "atom_backtrack_exact_resolution_and_gamma",
     }
     if normalized not in aliases:
         raise argparse.ArgumentTypeError(
@@ -36,7 +38,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "8|atom_backtrack_exact_unbiased, "
             "9|baseline_survival, "
             "10|baseline_survival_meanvar, "
-            "11|baseline_survival_and_gamma"
+            "11|baseline_survival_and_gamma, "
+            "12|atom_backtrack_exact_resolution_and_gamma"
         )
     return aliases[normalized]
 
@@ -117,7 +120,10 @@ parser.add_argument(
         'aggregation mean-alpha*sqrt(k-1)*std over per-goal areas), '
         '11|baseline_survival_and_gamma (baseline_survival + component-wise AND-layer '
         'gamma correction on the precondition support; reduces to baseline_survival '
-        'when no dependency is detected; NOT calibrated probability)'
+        'when no dependency is detected; NOT calibrated probability), '
+        '12|atom_backtrack_exact_resolution_and_gamma (resolution backtrack with '
+        'log-spaced/exponential-width layers + the same AND-layer gamma correction; '
+        'reduces to atom_backtrack_exact_resolution when no dependency is detected)'
     ),
     nargs='?',
     default='baseline',

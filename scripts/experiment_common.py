@@ -64,6 +64,20 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_survival_and_gamma",
         "label": "baseline_survival_and_gamma",
     },
+    # Resolution backtrack (log-spaced / exponential-width layers) with the same
+    # component-wise AND-layer gamma correction as baseline_survival_and_gamma.
+    # Collapses to atomic_exact_resolution when no precondition dependency exists.
+    "atomic_exact_resolution_and_gamma": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_resolution_and_gamma",
+        "label": "atomic_exact_resolution_and_gamma",
+    },
+    # Synonym: internal temporal_heuristic_strategy name.
+    "atom_backtrack_exact_resolution_and_gamma": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_resolution_and_gamma",
+        "label": "atom_backtrack_exact_resolution_and_gamma",
+    },
     "atomic_exact": {
         "heuristic_name": "temporal_probabilistic_rpg",
         "temporal_heuristic_strategy": "atom_backtrack_exact",
