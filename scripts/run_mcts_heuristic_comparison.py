@@ -305,6 +305,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="T",
         help="Forwarded to run_domain: resolution reference horizon T (optional).",
     )
+    p.add_argument(
+        "--and-gamma-rollout-calibration",
+        action="store_true",
+        default=False,
+        help=(
+            "Forwarded to run_domain: enable lazy rollout calibration of the "
+            "baseline_survival_and_gamma AND-layer gamma factors (default off)."
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -335,6 +344,7 @@ def run_experiment(
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
     resolution_reference_t: int | None = None,
+    and_gamma_rollout_calibration: bool = False,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     depth = heuristic_depth if heuristic_depth is not None else deadline
@@ -375,6 +385,7 @@ def run_experiment(
         resolution_alpha=resolution_alpha,
         resolution_forced_minimum=resolution_forced_minimum,
         resolution_reference_t=resolution_reference_t,
+        and_gamma_rollout_calibration=and_gamma_rollout_calibration,
         verbose=verbose,
     )
     elapsed = time.perf_counter() - t0
@@ -493,6 +504,7 @@ def main(argv: list[str] | None = None) -> None:
                 resolution_alpha=args.resolution_alpha,
                 resolution_forced_minimum=args.resolution_forced_minimum,
                 resolution_reference_t=args.resolution_reference_t,
+                and_gamma_rollout_calibration=args.and_gamma_rollout_calibration,
             )
             rows.append(row)
 

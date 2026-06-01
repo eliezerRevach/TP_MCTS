@@ -155,6 +155,17 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    '--and-gamma-rollout-calibration',
+    dest='and_gamma_rollout_calibration',
+    action='store_true',
+    default=False,
+    help=(
+        'baseline_survival_and_gamma: enable lazy rollout calibration of the '
+        'AND-layer gamma factors (default off = static gamma table).'
+    ),
+)
+
+parser.add_argument(
     '--tree_depth',
     help='lookahead depth for heuristic_tree solver (separate from temporal_heuristic_depth)',
     nargs='?',

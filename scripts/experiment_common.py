@@ -188,6 +188,7 @@ def run_domain_subprocess(
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
     resolution_reference_t: int | None = None,
+    and_gamma_rollout_calibration: bool = False,
     extra_args: list[str] | None = None,
     verbose: bool = False,
 ) -> tuple[str, int]:
@@ -226,6 +227,8 @@ def run_domain_subprocess(
         cmd.append("--resolution-forced-minimum")
     if resolution_reference_t is not None:
         cmd.extend(["--resolution-reference-t", str(resolution_reference_t)])
+    if and_gamma_rollout_calibration:
+        cmd.append("--and-gamma-rollout-calibration")
     if extra_args:
         cmd.extend(extra_args)
 

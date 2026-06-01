@@ -130,6 +130,18 @@ def _temporal_heuristic(
         heuristic = TemporalProbabilisticRPGHeuristic.from_problem(heuristic_mdp.problem)
         setattr(heuristic_mdp, "_temporal_probabilistic_rpg_heuristic", heuristic)
 
+    # Optional: turn on AND-layer gamma rollout calibration from the CLI flag
+    # (--and-gamma-rollout-calibration). Set before the first
+    # baseline_survival_and_gamma query so the calibrator builds its simulator.
+    try:
+        _cli_args = getattr(up, "args", None)
+        if _cli_args is not None and getattr(_cli_args, "and_gamma_rollout_calibration", False):
+            _and_gamma_cfg = getattr(heuristic, "_and_gamma_config", None)
+            if _and_gamma_cfg is not None:
+                _and_gamma_cfg.enable_rollout_calibration = True
+    except Exception:
+        pass
+
     effective_depth = _effective_temporal_depth(
         temporal_heuristic_depth,
         current_time,
