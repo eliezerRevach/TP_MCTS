@@ -266,7 +266,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--value_mode",
-        choices=["tp_mcts", "greedy_matched", "ptrpg_guided_terminal_rollout"],
+        choices=[
+            "tp_mcts",
+            "greedy_matched",
+            "ptrpg_guided_terminal_rollout",
+            "fixed_tail_ptrpg_rollout",
+        ],
         default=DEFAULT_VALUE_MODE,
         help=f"MCTS backup target mode. Default: {DEFAULT_VALUE_MODE}",
     )
