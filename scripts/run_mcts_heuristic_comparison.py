@@ -332,6 +332,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--rollout-aligned-fallback", type=str, default=None,
                    choices=("horizon_capped", "raw"),
                    help="Forwarded to run_domain: budget-exhausted fallback.")
+    p.add_argument("--rollout-aligned-fixed-h", action="store_true", default=False,
+                   help="Forwarded to run_domain: use fixed H instead of dynamic (rollout_aligned_* only).")
+    p.add_argument("--rollout-aligned-boundary-mode", type=str, default=None,
+                   choices=("overshoot", "wait_no_overshoot", "expected_stochastic_rounding"),
+                   help="Forwarded to run_domain: prefix boundary handling.")
+    p.add_argument("--rollout-aligned-min-dynamic-horizon", type=int, default=None,
+                   help="Forwarded to run_domain: safety floor on the dynamic horizon.")
+    p.add_argument("--rollout-aligned-fallback-if-small", type=str, default=None,
+                   choices=("use_anyway", "fixed", "raw"),
+                   help="Forwarded to run_domain: behavior when H_p < min-dynamic-horizon.")
+    p.add_argument("--rollout-aligned-lambda-align", type=float, default=None,
+                   help="Forwarded to run_domain: frontier_aligned_* selection blend lambda.")
     return p.parse_args(argv)
 
 
@@ -371,6 +383,11 @@ def run_experiment(
     rollout_aligned_max_rollouts_per_search: int | None = None,
     rollout_aligned_max_time_per_search: float | None = None,
     rollout_aligned_fallback: str | None = None,
+    rollout_aligned_fixed_h: bool = False,
+    rollout_aligned_boundary_mode: str | None = None,
+    rollout_aligned_min_dynamic_horizon: int | None = None,
+    rollout_aligned_fallback_if_small: str | None = None,
+    rollout_aligned_lambda_align: float | None = None,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     depth = heuristic_depth if heuristic_depth is not None else deadline
@@ -420,6 +437,11 @@ def run_experiment(
         rollout_aligned_max_rollouts_per_search=rollout_aligned_max_rollouts_per_search,
         rollout_aligned_max_time_per_search=rollout_aligned_max_time_per_search,
         rollout_aligned_fallback=rollout_aligned_fallback,
+        rollout_aligned_fixed_h=rollout_aligned_fixed_h,
+        rollout_aligned_boundary_mode=rollout_aligned_boundary_mode,
+        rollout_aligned_min_dynamic_horizon=rollout_aligned_min_dynamic_horizon,
+        rollout_aligned_fallback_if_small=rollout_aligned_fallback_if_small,
+        rollout_aligned_lambda_align=rollout_aligned_lambda_align,
         verbose=verbose,
     )
     elapsed = time.perf_counter() - t0
@@ -547,6 +569,11 @@ def main(argv: list[str] | None = None) -> None:
                 rollout_aligned_max_rollouts_per_search=args.rollout_aligned_max_rollouts_per_search,
                 rollout_aligned_max_time_per_search=args.rollout_aligned_max_time_per_search,
                 rollout_aligned_fallback=args.rollout_aligned_fallback,
+                rollout_aligned_fixed_h=args.rollout_aligned_fixed_h,
+                rollout_aligned_boundary_mode=args.rollout_aligned_boundary_mode,
+                rollout_aligned_min_dynamic_horizon=args.rollout_aligned_min_dynamic_horizon,
+                rollout_aligned_fallback_if_small=args.rollout_aligned_fallback_if_small,
+                rollout_aligned_lambda_align=args.rollout_aligned_lambda_align,
             )
             rows.append(row)
 

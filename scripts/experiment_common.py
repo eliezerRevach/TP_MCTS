@@ -257,6 +257,11 @@ def run_domain_subprocess(
     rollout_aligned_max_rollouts_per_search: int | None = None,
     rollout_aligned_max_time_per_search: float | None = None,
     rollout_aligned_fallback: str | None = None,
+    rollout_aligned_fixed_h: bool = False,
+    rollout_aligned_boundary_mode: str | None = None,
+    rollout_aligned_min_dynamic_horizon: int | None = None,
+    rollout_aligned_fallback_if_small: str | None = None,
+    rollout_aligned_lambda_align: float | None = None,
     extra_args: list[str] | None = None,
     verbose: bool = False,
 ) -> tuple[str, int]:
@@ -313,6 +318,16 @@ def run_domain_subprocess(
         cmd.extend(["--rollout-aligned-max-time-per-search", str(rollout_aligned_max_time_per_search)])
     if rollout_aligned_fallback is not None:
         cmd.extend(["--rollout-aligned-fallback", str(rollout_aligned_fallback)])
+    if rollout_aligned_fixed_h:
+        cmd.append("--rollout-aligned-fixed-h")
+    if rollout_aligned_boundary_mode is not None:
+        cmd.extend(["--rollout-aligned-boundary-mode", str(rollout_aligned_boundary_mode)])
+    if rollout_aligned_min_dynamic_horizon is not None:
+        cmd.extend(["--rollout-aligned-min-dynamic-horizon", str(rollout_aligned_min_dynamic_horizon)])
+    if rollout_aligned_fallback_if_small is not None:
+        cmd.extend(["--rollout-aligned-fallback-if-small", str(rollout_aligned_fallback_if_small)])
+    if rollout_aligned_lambda_align is not None:
+        cmd.extend(["--rollout-aligned-lambda-align", str(rollout_aligned_lambda_align)])
     if extra_args:
         cmd.extend(extra_args)
 
