@@ -321,6 +321,49 @@ class TestFrontierScore(unittest.TestCase):
         self.assertGreater(b, a)
 
 
+class TestOptionASanity(unittest.TestCase):
+    """Spec sanity (#10): align frontier nodes to the deepest elapsed.
+
+    Frontier A: elapsed=0, remaining=25 ; B: elapsed=10, remaining=15.
+    deepest_elapsed=10 -> H_frontier=15. A must be scored by rolling 10 time
+    units then PTRPG(.,15); B directly by PTRPG(B,15). It must NOT compare
+    PTRPG(A,25) against PTRPG(B,15).
+    """
+
+    def test_ab_alignment_to_deepest(self):
+        cfg = RolloutAlignedConfig(use_dynamic_H=True, redo=1)
+        raw_calls = []
+        rolled = []
+
+        def raw_eval(state, horizon):
+            raw_calls.append((getattr(state, "name", state), horizon))
+            return 0.5
+
+        def prefix(state, delta):
+            rolled.append((getattr(state, "name", state), delta))
+            return (
+                FakeState("after_" + state.name, current_time=state.current_time + delta),
+                False,
+                int(delta),
+                False,
+            )
+
+        ev = RolloutAlignedEvaluator(
+            cfg, raw_eval, prefix,
+            state_hash_fn=lambda s: (frozenset(s.predicates), s.current_time),
+        )
+        # H_frontier = deadline - deepest_elapsed = 25 - 10 = 15 (passed as h_override).
+        v_a = ev.evaluate(FakeState("A", current_time=0.0), remaining_horizon=25, h_override=15)
+        v_b = ev.evaluate(FakeState("B", current_time=10.0), remaining_horizon=15, h_override=15)
+        # A: delta = 25 - 15 = 10 -> one prefix rollout of 10, then PTRPG at H=15.
+        self.assertEqual(rolled, [("A", 10)])
+        # B: delta = 0 -> PTRPG(B, 15) directly (no rollout).
+        # Both suffixes are evaluated at the COMMON horizon 15, never 25.
+        self.assertEqual(raw_calls, [("after_A", 15), ("B", 15)])
+        self.assertEqual(v_a, 0.5)
+        self.assertEqual(v_b, 0.5)
+
+
 class TestFrontierStrategyRecognition(unittest.TestCase):
     def test_strategies_normalize(self):
         for name in (

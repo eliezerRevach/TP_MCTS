@@ -288,6 +288,13 @@ parser.add_argument(
     type=float,
     help='rollout_aligned_*: blended-selection weight lambda_align in [0,1] (advisory).',
 )
+parser.add_argument(
+    '--frontier-aligned-debug',
+    dest='frontier_aligned_debug',
+    action='store_true',
+    default=False,
+    help='frontier_aligned_*: print a per-candidate trace for the first few MCTS decisions.',
+)
 
 parser.add_argument(
     '--tree_depth',
