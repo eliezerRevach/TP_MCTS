@@ -1,9 +1,9 @@
 """
 Fixed-tail PTRPG evaluation for MCTS leaf backup.
 
-Prefix: random parallel sets of legal actions (no PTRPG) until the tail boundary.
-If goal is reached during the prefix, return 1.0.
-Otherwise one PTRPG evaluation at horizon FIXED_TAIL_H (e.g. atom_backtrack_exact_resolution).
+Prefix: random parallel sets of MDP-legal, STN-feasible actions (no PTRPG) until the
+tail boundary. If goal is reached during the prefix, return 1.0.
+Otherwise one PTRPG at horizon FIXED_TAIL_H (e.g. atom_backtrack_exact_resolution).
 """
 
 from __future__ import annotations
@@ -66,13 +66,8 @@ class FixedTailConfig:
 class _PrefixResult:
     state: "up.engines.State"
     stn: "up.plans.stn.STNPlan"
-    previous_action_node: "up.plans.stn.STNPlanNode"
-    waited: bool
     boundary_time: float
     goal_reached: bool = False
-    dead_end: bool = False
-    stn_infeasible: bool = False
-    terminal_value: Optional[float] = None
 
 
 def fixed_tail_config_from_args(args=None) -> FixedTailConfig:
@@ -91,25 +86,31 @@ def _goal_reached(mdp: "up.engines.MDP", state: "up.engines.State") -> bool:
     return preds is not None and goals.issubset(set(preds))
 
 
-def _failure_at(
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _clock_time(
     mdp: "up.engines.MDP",
     state: "up.engines.State",
     stn: "up.plans.stn.STNPlan",
-) -> tuple[bool, bool]:
-    try:
-        if not stn.is_consistent():
-            return False, True
-        if stn.get_current_end_time() > mdp.deadline():
-            return False, True
-    except Exception:
-        return False, True
-    if not mdp.legal_actions(state):
-        return True, False
-    return False, False
+) -> float:
+    """Prefer combination-state simulated time; fall back to STN end time."""
+    ct = getattr(state, "current_time", None)
+    if ct is not None:
+        return float(ct)
+    return float(stn.get_current_end_time())
 
 
-def _clamp01(value: float) -> float:
-    return max(0.0, min(1.0, float(value)))
+def _remaining_horizon(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
+) -> int:
+    deadline = mdp.deadline()
+    if deadline is None:
+        return 0
+    return max(0, int(math.floor(deadline - _clock_time(mdp, state, stn))))
 
 
 def _ptrpg_at_horizon(
@@ -183,20 +184,23 @@ def _run_prefix_rollout(
     delta: int,
     max_parallel_set_size: int = GREEDY_MAX_PARALLEL_SET_SIZE,
 ) -> _PrefixResult:
+    """
+    Advance toward the tail boundary with random parallel sets of legal + STN-feasible
+    actions. Prefix failures do not return 0; tail PTRPG handles the estimate.
+    """
     assert delta >= 0
-    start_ct = float(stn.get_current_end_time())
+    start_ct = _clock_time(mdp, state, stn)
     boundary_time = start_ct + float(delta)
     current_state = state
     current_stn = stn
     current_prev = previous_action_node
-    waited = False
 
     while True:
-        remaining = remaining_deadline(mdp, current_stn)
+        remaining = _remaining_horizon(mdp, current_state, current_stn)
         if remaining <= fixed_tail_h:
             break
 
-        elapsed = float(current_stn.get_current_end_time()) - start_ct
+        elapsed = _clock_time(mdp, current_state, current_stn) - start_ct
         if elapsed >= delta - 1e-9:
             break
 
@@ -204,32 +208,19 @@ def _run_prefix_rollout(
             return _PrefixResult(
                 state=current_state,
                 stn=current_stn,
-                previous_action_node=current_prev,
-                waited=waited,
-                boundary_time=boundary_time,
+                boundary_time=_clock_time(mdp, current_state, current_stn),
                 goal_reached=True,
-                terminal_value=1.0,
             )
 
-        dead_end, stn_bad = _failure_at(mdp, current_state, current_stn)
-        if dead_end or stn_bad:
-            return _PrefixResult(
-                state=current_state,
-                stn=current_stn,
-                previous_action_node=current_prev,
-                waited=waited,
-                boundary_time=boundary_time,
-                dead_end=dead_end,
-                stn_infeasible=stn_bad,
-                terminal_value=0.0,
-            )
-
-        decision_time = float(current_stn.get_current_end_time())
+        decision_time = _clock_time(mdp, current_state, current_stn)
         gap = delta - (decision_time - start_ct)
         if gap <= 1e-9:
             break
 
         legal_actions = list(mdp.legal_actions(current_state))
+        if not legal_actions:
+            break
+
         random.shuffle(legal_actions)
         chosen_in_set = 0
 
@@ -237,7 +228,7 @@ def _run_prefix_rollout(
             if chosen_in_set >= max_parallel_set_size:
                 break
 
-            elapsed = float(current_stn.get_current_end_time()) - start_ct
+            elapsed = _clock_time(mdp, current_state, current_stn) - start_ct
             gap = delta - elapsed
             if gap <= 1e-9:
                 break
@@ -249,68 +240,43 @@ def _run_prefix_rollout(
                 continue
 
             candidate_stn, candidate_prev, _dur = fitted
-            prev_elapsed = elapsed
+            prev_clock = _clock_time(mdp, current_state, current_stn)
             terminal, next_state, _reward = mdp.step(current_state, action)
             current_state = next_state
             current_stn = candidate_stn
             current_prev = candidate_prev
             chosen_in_set += 1
 
-            new_elapsed = float(current_stn.get_current_end_time()) - start_ct
-            if new_elapsed <= prev_elapsed + 1e-9:
+            if not current_stn.is_consistent():
                 break
 
-            if terminal:
-                if _goal_reached(mdp, current_state):
-                    return _PrefixResult(
-                        state=current_state,
-                        stn=current_stn,
-                        previous_action_node=current_prev,
-                        waited=waited,
-                        boundary_time=boundary_time,
-                        goal_reached=True,
-                        terminal_value=1.0,
-                    )
+            new_clock = _clock_time(mdp, current_state, current_stn)
+            if new_clock <= prev_clock + 1e-9:
+                break
+
+            if terminal and _goal_reached(mdp, current_state):
                 return _PrefixResult(
                     state=current_state,
                     stn=current_stn,
-                    previous_action_node=current_prev,
-                    waited=waited,
-                    boundary_time=boundary_time,
-                    dead_end=True,
-                    terminal_value=0.0,
+                    boundary_time=new_clock,
+                    goal_reached=True,
                 )
 
-            dead_end, stn_bad = _failure_at(mdp, current_state, current_stn)
-            if dead_end or stn_bad:
-                return _PrefixResult(
-                    state=current_state,
-                    stn=current_stn,
-                    previous_action_node=current_prev,
-                    waited=waited,
-                    boundary_time=boundary_time,
-                    dead_end=dead_end,
-                    stn_infeasible=stn_bad,
-                    terminal_value=0.0,
-                )
-
-            if float(current_stn.get_current_end_time()) > decision_time + 1e-9:
+            if new_clock > decision_time + 1e-9:
                 break
 
         if chosen_in_set == 0:
-            waited = True
             break
 
-    tail_time = (
-        boundary_time
-        if waited or float(current_stn.get_current_end_time()) - start_ct < delta - 1e-9
-        else float(current_stn.get_current_end_time())
-    )
+    final_clock = _clock_time(mdp, current_state, current_stn)
+    if final_clock - start_ct < delta - 1e-9:
+        tail_time = boundary_time
+    else:
+        tail_time = final_clock
+
     return _PrefixResult(
         state=current_state,
         stn=current_stn,
-        previous_action_node=current_prev,
-        waited=waited,
         boundary_time=tail_time,
     )
 
@@ -330,14 +296,14 @@ def fixed_tail_ptrpg_value(
     if _goal_reached(mdp, state):
         return 1.0
 
-    dead_end, stn_bad = _failure_at(mdp, state, stn)
-    if dead_end or stn_bad:
-        return 0.0
+    if terminal_success_value(mdp, state, stn) >= 1.0:
+        return 1.0
 
     R = remaining_deadline(mdp, stn)
     if R <= H:
-        current_time = float(stn.get_current_end_time())
-        return _ptrpg_at_horizon(mdp, state, current_time, R, strategy)
+        return _ptrpg_at_horizon(
+            mdp, state, float(stn.get_current_end_time()), R, strategy
+        )
 
     delta = R - H
     prefix = _run_prefix_rollout(
@@ -349,21 +315,19 @@ def fixed_tail_ptrpg_value(
         delta=delta,
     )
 
-    if prefix.terminal_value is not None:
-        return _clamp01(prefix.terminal_value)
+    if prefix.goal_reached:
+        return 1.0
 
-    remaining_after = remaining_deadline(mdp, prefix.stn)
+    remaining_after = _remaining_horizon(mdp, prefix.state, prefix.stn)
     if remaining_after <= H:
         tail_horizon = remaining_after
-        tail_time = float(prefix.stn.get_current_end_time())
     else:
         tail_horizon = H
-        tail_time = prefix.boundary_time
 
     tail_val = _ptrpg_at_horizon(
         mdp,
         prefix.state,
-        tail_time,
+        prefix.boundary_time,
         tail_horizon,
         strategy,
     )

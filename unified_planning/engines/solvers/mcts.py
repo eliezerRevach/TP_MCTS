@@ -860,7 +860,7 @@ class C_MCTS(Base_MCTS):
                 fixed_tail_config_from_args,
             )
 
-            self._fixed_tail_config = fixed_tail_config_from_args(mdp)
+            self._fixed_tail_config = fixed_tail_config_from_args()
             self._fixed_tail_config.tail_strategy = temporal_heuristic_strategy
 
         self._next_option_a_node_id = 1

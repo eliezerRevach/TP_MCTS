@@ -108,8 +108,6 @@ class TestFixedTailPtrpgRollout(unittest.TestCase):
             mock_prefix.return_value = _PrefixResult(
                 state=self.state,
                 stn=self.stn,
-                previous_action_node=None,
-                waited=False,
                 boundary_time=15.0,
             )
             value = fixed_tail_ptrpg_value(
@@ -134,11 +132,8 @@ class TestFixedTailPtrpgRollout(unittest.TestCase):
             mock_prefix.return_value = _PrefixResult(
                 state=self.state,
                 stn=self.stn,
-                previous_action_node=None,
-                waited=False,
                 boundary_time=3.0,
                 goal_reached=True,
-                terminal_value=1.0,
             )
             value = fixed_tail_ptrpg_value(
                 mdp=self.mdp,
@@ -148,6 +143,33 @@ class TestFixedTailPtrpgRollout(unittest.TestCase):
                 config=self.config,
             )
         self.assertEqual(value, 1.0)
+
+    def test_prefix_dead_end_still_calls_tail_ptrpg(self):
+        with mock.patch(
+            "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout._run_prefix_rollout",
+        ) as mock_prefix, mock.patch(
+            "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout._ptrpg_at_horizon",
+            return_value=0.41,
+        ) as mock_tail:
+            from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                _PrefixResult,
+            )
+
+            mock_prefix.return_value = _PrefixResult(
+                state=self.state,
+                stn=self.stn,
+                boundary_time=3.0,
+                goal_reached=False,
+            )
+            value = fixed_tail_ptrpg_value(
+                mdp=self.mdp,
+                state=self.state,
+                stn=self.stn,
+                previous_action_node=None,
+                config=self.config,
+            )
+        self.assertEqual(value, 0.41)
+        mock_tail.assert_called_once()
 
     def test_single_eval_deadline_25_h_22(self):
         converted = _build_split_problem(duration=2, deadline=25)
