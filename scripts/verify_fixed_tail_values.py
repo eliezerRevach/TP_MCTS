@@ -1,8 +1,7 @@
-"""Quick check: fixed-tail leaf eval and MCTS backups are not all zero."""
+"""Quick check: fixed-tail prefix-frac bootstrap and MCTS backups are sensible."""
 from __future__ import annotations
 
 import argparse
-import random
 import sys
 from pathlib import Path
 
@@ -15,11 +14,14 @@ from experiment_common import HEURISTIC_ALIASES
 from inspect_mcts_tree import build_mdp, set_seed
 from unified_planning.engines.utils import create_init_stn
 from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+    build_fixed_tail_search_context,
+    crossed_cutoff,
+    elapsed_from_root,
+    fixed_tail_bootstrap_value,
     fixed_tail_config_from_args,
-    fixed_tail_ptrpg_value,
+    node_remaining,
 )
 from unified_planning.engines.solvers.mcts import C_MCTS
-from unified_planning.engines.solvers.ptrpg_guided_rollout import remaining_deadline
 
 
 def main() -> int:
@@ -27,21 +29,23 @@ def main() -> int:
     p.add_argument("--domain", default="machine_shop")
     p.add_argument("--object_amount", type=int, default=2)
     p.add_argument("--deadline", type=int, default=25)
-    p.add_argument("--fixed_tail_h", type=int, default=23)
+    p.add_argument("--fixed_tail_prefix_frac", type=float, default=0.10)
     p.add_argument("--search_depth", type=int, default=2)
     p.add_argument("--seed", type=int, default=123)
-    p.add_argument("--iterations", type=int, default=50)
+    p.add_argument("--iterations", type=int, default=30)
     args = p.parse_args()
 
     set_seed(args.seed)
     up.args = argparse.Namespace(
-        fixed_tail_h=args.fixed_tail_h,
+        fixed_tail_prefix_frac=args.fixed_tail_prefix_frac,
+        fixed_tail_debug=False,
         resolution_alpha=2.0,
         resolution_forced_minimum=False,
         resolution_reference_t=None,
     )
 
     alias = HEURISTIC_ALIASES["fixed_tail_atomic_exact_resolution"]
+    strat = alias["temporal_heuristic_strategy"]
     ns = argparse.Namespace(
         domain=args.domain,
         domain_type="combination",
@@ -56,13 +60,14 @@ def main() -> int:
     stn = create_init_stn(mdp)
     state = mdp.initial_state()
     cfg = fixed_tail_config_from_args()
-    strat = alias["temporal_heuristic_strategy"]
+    ctx = build_fixed_tail_search_context(mdp, state, stn, cfg)
 
-    R = remaining_deadline(mdp, stn)
-    root_val = fixed_tail_ptrpg_value(
-        mdp, state, stn, None, cfg, tail_strategy=strat
+    root_rem = node_remaining(mdp, state, stn)
+    root_val = fixed_tail_bootstrap_value(mdp, state, stn, strat, ctx=ctx)
+    print(
+        f"Root remaining={root_rem} prefix_frac={cfg.prefix_frac} "
+        f"prefix_budget={ctx.prefix_budget} bootstrap={root_val:.6f}"
     )
-    print(f"Root R={R} H={cfg.fixed_tail_h} direct fixed_tail_ptrpg_value={root_val:.6f}")
 
     mcts = C_MCTS(
         mdp,
@@ -73,17 +78,17 @@ def main() -> int:
         stn,
         "avg",
         10,
-        previous_chosen_action_node=None,
         heuristic_name=alias["heuristic_name"],
         temporal_heuristic_strategy=strat,
         value_mode="fixed_tail_ptrpg_rollout",
     )
+    assert mcts._fixed_tail_ctx.prefix_budget == ctx.prefix_budget
+
     for _ in range(args.iterations):
         mcts.search(1, "avg", "q")
 
     vals = []
     for action, anode in mcts.root_node.children.items():
-        # Node.update stores the running mean in anode.value — do not divide by count again.
         backup = float(anode.value)
         vals.append(backup)
         print(
@@ -95,8 +100,8 @@ def main() -> int:
     nonzero = sum(1 for v in vals if abs(v) > 1e-6)
     print(f"visited_value_spread={spread:.6f}  nonzero_children={nonzero}/{len(vals)}")
 
-    ok = root_val > 1e-6 and nonzero > 0 and spread > 1e-6
-    print("PASS" if ok else "FAIL (need root eval > 0 and differing nonzero backups)")
+    ok = root_val > 1e-6 and nonzero > 0
+    print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
 

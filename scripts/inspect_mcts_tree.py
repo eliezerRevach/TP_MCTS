@@ -143,11 +143,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Log the first rollout per search.",
     )
     p.add_argument(
-        "--fixed-tail-h",
-        dest="fixed_tail_h",
-        type=int,
+        "--fixed-tail-prefix-frac",
+        dest="fixed_tail_prefix_frac",
+        type=float,
         default=None,
-        help="fixed_tail_ptrpg_rollout: common PTRPG suffix horizon H (default 10 if omitted).",
+        help="fixed_tail_ptrpg_rollout: prefix budget as fraction of root remaining (default 0.10).",
     )
     p.add_argument(
         "--fixed-tail-debug",
@@ -258,8 +258,8 @@ def apply_heuristic_alias_overrides(args: argparse.Namespace) -> None:
     args.value_mode = alias.get("value_mode", args.value_mode)
     if args.ptrpg_guided_rollout_policy is None:
         args.ptrpg_guided_rollout_policy = alias.get("ptrpg_guided_rollout_policy")
-    if getattr(args, "fixed_tail_h", None) is None and "fixed_tail_h" in alias:
-        args.fixed_tail_h = int(alias["fixed_tail_h"])
+    if getattr(args, "fixed_tail_prefix_frac", None) is None and "fixed_tail_prefix_frac" in alias:
+        args.fixed_tail_prefix_frac = float(alias["fixed_tail_prefix_frac"])
 
 
 def strategy_for_greedy_matched_expected(strategy: str) -> str:
@@ -303,8 +303,8 @@ def configure_fixed_tail_cli(args: argparse.Namespace) -> None:
     a = getattr(up, "args", None)
     if a is None:
         return
-    if getattr(args, "fixed_tail_h", None) is not None:
-        a.fixed_tail_h = int(args.fixed_tail_h)
+    if getattr(args, "fixed_tail_prefix_frac", None) is not None:
+        a.fixed_tail_prefix_frac = float(args.fixed_tail_prefix_frac)
     if getattr(args, "fixed_tail_debug", False):
         a.fixed_tail_debug = True
 
@@ -545,16 +545,26 @@ def main(argv: list[str] | None = None) -> None:
     milestones = sorted(set(max(0, m) for m in args.milestones))
 
     mcts = build_mcts(args)
-    tail_h = getattr(args, "fixed_tail_h", None)
-    if args.value_mode == "fixed_tail_ptrpg_rollout" and tail_h is None:
-        tail_h = getattr(getattr(up, "args", None), "fixed_tail_h", 10)
+    tail_frac = getattr(args, "fixed_tail_prefix_frac", None)
+    if args.value_mode == "fixed_tail_ptrpg_rollout" and tail_frac is None:
+        tail_frac = getattr(getattr(up, "args", None), "fixed_tail_prefix_frac", 0.10)
+    tail_budget = None
+    if args.value_mode == "fixed_tail_ptrpg_rollout" and tail_frac is not None:
+        import math
+
+        root_rem = int(args.deadline)
+        tail_budget = max(0, int(math.floor(float(tail_frac) * root_rem)))
     print(
         "TP-MCTS tree inspection: "
         f"domain={args.domain} obj={args.object_amount} deadline={args.deadline} "
         f"heuristic={args.heuristic} selection={args.selection_type} "
         f"value_mode={args.value_mode} depth={args.search_depth} "
         f"k={args.k} uct_initial_k={args.uct_initial_k} C={args.exploration_constant} seed={args.seed}"
-        + (f" fixed_tail_h={tail_h}" if args.value_mode == "fixed_tail_ptrpg_rollout" else "")
+        + (
+            f" fixed_tail_prefix_frac={tail_frac} prefix_budget~{tail_budget}"
+            if args.value_mode == "fixed_tail_ptrpg_rollout"
+            else ""
+        )
     )
     print(
         f"Milestones (cumulative selection iterations): {milestones}  top_n={args.top_n}"

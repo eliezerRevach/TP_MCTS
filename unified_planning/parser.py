@@ -331,18 +331,18 @@ parser.add_argument(
     choices=('tp_mcts', 'greedy_matched', 'ptrpg_guided_terminal_rollout', 'fixed_tail_ptrpg_rollout'),
 )
 parser.add_argument(
-    '--fixed-tail-h',
-    dest='fixed_tail_h',
-    type=int,
-    default=10,
-    help='fixed_tail_ptrpg_rollout: common PTRPG suffix horizon H (default 10).',
+    '--fixed-tail-prefix-frac',
+    dest='fixed_tail_prefix_frac',
+    type=float,
+    default=0.10,
+    help='fixed_tail_ptrpg_rollout: prefix time budget as fraction of root remaining (default 0.10).',
 )
 parser.add_argument(
     '--fixed-tail-debug',
     dest='fixed_tail_debug',
     action='store_true',
     default=False,
-    help='Deprecated (no effect). Kept for backward-compatible experiment scripts.',
+    help='Log the first 5 fixed-tail bootstrap evaluations per MCTS search.',
 )
 parser.add_argument(
     '--ptrpg-guided-rollout-policy',

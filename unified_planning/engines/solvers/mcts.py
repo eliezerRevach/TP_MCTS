@@ -607,6 +607,8 @@ class Base_MCTS:
         i = 0
         if hasattr(self, "_ptrpg_rollout_debug_done"):
             self._ptrpg_rollout_debug_done = False
+        if hasattr(self, "_fixed_tail_debug_count"):
+            self._fixed_tail_debug_count = 0
         avg_variants = {'avg', 'avg_topk', 'avg_pw'}
         selection = (
             self.selection
@@ -855,13 +857,19 @@ class C_MCTS(Base_MCTS):
                 pass
 
         self._fixed_tail_config = None
+        self._fixed_tail_ctx = None
+        self._fixed_tail_debug_count = 0
         if _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode):
             from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                build_fixed_tail_search_context,
                 fixed_tail_config_from_args,
             )
 
             self._fixed_tail_config = fixed_tail_config_from_args()
             self._fixed_tail_config.tail_strategy = temporal_heuristic_strategy
+            self._fixed_tail_ctx = build_fixed_tail_search_context(
+                mdp, root_state, stn, self._fixed_tail_config
+            )
 
         self._next_option_a_node_id = 1
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
@@ -912,33 +920,74 @@ class C_MCTS(Base_MCTS):
     def _uses_fixed_tail_ptrpg_rollout(self) -> bool:
         return _uses_fixed_tail_ptrpg_rollout_value_mode(self.value_mode)
 
-    def _leaf_fixed_tail_value_from_anode(
+    def _fixed_tail_snode_stn(self, snode: "up.engines.C_SNode") -> "up.plans.stn.STNPlan":
+        if snode.parent is not None:
+            return snode.parent.stn
+        return self._stn
+
+    def _fixed_tail_should_debug(self) -> bool:
+        cli = getattr(up, "args", None)
+        if cli is None or not getattr(cli, "fixed_tail_debug", False):
+            return False
+        if self._fixed_tail_debug_count >= 5:
+            return False
+        self._fixed_tail_debug_count += 1
+        return True
+
+    def _fixed_tail_bootstrap_at_snode(
         self,
-        state: "up.engines.State",
-        anode: "up.engines.C_ANode",
-        leaf_id: object = None,
+        snode: "up.engines.C_SNode",
+        *,
+        label: str = "bootstrap",
+        action_duration: float | None = None,
+        child_remaining: int | None = None,
+        child_elapsed: int | None = None,
+        crossed: bool | None = None,
+        cache: bool = True,
     ) -> float:
         from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
-            fixed_tail_ptrpg_value,
+            fixed_tail_bootstrap_value,
         )
 
-        return fixed_tail_ptrpg_value(
-            mdp=self.mdp,
-            state=state,
-            stn=anode.stn,
-            previous_action_node=anode.STNNode,
-            config=self._fixed_tail_config,
-            tail_strategy=self.temporal_heuristic_strategy,
+        if cache and getattr(snode, "_fixed_tail_bootstrap", False):
+            return float(getattr(snode, "_fixed_tail_value", 0.0))
+
+        stn = self._fixed_tail_snode_stn(snode)
+        debug = self._fixed_tail_should_debug()
+        value = fixed_tail_bootstrap_value(
+            self.mdp,
+            snode.state,
+            stn,
+            self.temporal_heuristic_strategy,
+            ctx=self._fixed_tail_ctx,
+            debug_emit=debug,
+            debug_label=label,
+            action_duration=action_duration,
+            child_remaining=child_remaining,
+            child_elapsed=child_elapsed,
+            crossed=crossed,
         )
+        if cache:
+            snode._fixed_tail_bootstrap = True
+            snode._fixed_tail_value = value
+        return value
+
+    def _fixed_tail_elapsed_at_snode(self, snode: "up.engines.C_SNode") -> int:
+        from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+            elapsed_from_root,
+            node_remaining,
+        )
+
+        rem = node_remaining(self.mdp, snode.state, self._fixed_tail_snode_stn(snode))
+        return elapsed_from_root(self._fixed_tail_ctx, rem)
+
+    def _fixed_tail_at_cutoff(self, snode: "up.engines.C_SNode") -> bool:
+        from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import crossed_cutoff
+
+        return crossed_cutoff(self._fixed_tail_ctx, self._fixed_tail_elapsed_at_snode(snode))
 
     def _leaf_fixed_tail_value(self, snode: "up.engines.C_SNode") -> float:
-        if snode.parent is None:
-            return 0.0
-        return self._leaf_fixed_tail_value_from_anode(
-            snode.state,
-            snode.parent,
-            leaf_id=getattr(snode, "_option_a_node_id", id(snode)),
-        )
+        return self._fixed_tail_bootstrap_at_snode(snode, label="depth_or_leaf")
 
     def _leaf_rollout_value_from_anode(
         self,
@@ -1517,9 +1566,26 @@ class C_MCTS(Base_MCTS):
                     )
             elif self._uses_fixed_tail_ptrpg_rollout():
                 if not terminal:
-                    reward += self.mdp.discount_factor * self._leaf_fixed_tail_value_from_anode(
-                        next_state, snode.children[action]
+                    anode_child = snode.children[action]
+                    child_snode, _ = self.create_Snode(
+                        next_state, snode.depth + 1, anode_child.stn, anode_child
                     )
+                    from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                        crossed_cutoff,
+                        elapsed_from_root,
+                        node_remaining,
+                    )
+
+                    child_rem = node_remaining(self.mdp, next_state, anode_child.stn)
+                    child_elapsed = elapsed_from_root(self._fixed_tail_ctx, child_rem)
+                    anode_child.add_child(child_snode)
+                    if crossed_cutoff(self._fixed_tail_ctx, child_elapsed):
+                        leaf_val = self._fixed_tail_post_step_child_value(
+                            snode, child_snode, anode_child
+                        )
+                    else:
+                        leaf_val = self.selection_max(child_snode)
+                    reward += self.mdp.discount_factor * leaf_val
             else:
                 reward += self.mdp.discount_factor * self.heuristic_init(
                     next_state, snode.children[action].stn, parent_snode=snode
@@ -1534,22 +1600,57 @@ class C_MCTS(Base_MCTS):
         return snode, best
 
 
+    def _fixed_tail_post_step_child_value(
+        self,
+        parent_snode: "up.engines.C_SNode",
+        child_snode: "up.engines.C_SNode",
+        anode: "up.engines.C_ANode",
+    ) -> float:
+        from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+            crossed_cutoff,
+            elapsed_from_root,
+            node_remaining,
+        )
+
+        child_rem = node_remaining(self.mdp, child_snode.state, anode.stn)
+        child_elapsed = elapsed_from_root(self._fixed_tail_ctx, child_rem)
+        parent_rem = node_remaining(
+            self.mdp, parent_snode.state, self._fixed_tail_snode_stn(parent_snode)
+        )
+        action_duration = float(max(0, parent_rem - child_rem))
+        crossed = crossed_cutoff(self._fixed_tail_ctx, child_elapsed)
+        label = "overshoot_child" if crossed else "expand_child"
+        return self._fixed_tail_bootstrap_at_snode(
+            child_snode,
+            label=label,
+            action_duration=action_duration,
+            child_remaining=child_rem,
+            child_elapsed=child_elapsed,
+            crossed=crossed,
+            cache=crossed,
+        )
+
     def selection(self, snode: "up.engines.C_Snode"):
         """
                 Traverse the tree until reaching a leaf node.
          """
+        if self._uses_fixed_tail_ptrpg_rollout():
+            if getattr(snode, "_fixed_tail_bootstrap", False):
+                return float(getattr(snode, "_fixed_tail_value", 0.0))
+
         if len(snode.possible_actions) == 0:
-            # Stop when there are no possible actions to take so the plan remains consistent
+            if self._uses_fixed_tail_ptrpg_rollout():
+                return 0.0
             return -100
 
         if snode.depth > self.search_depth:
-            # Stop if the search depth is reached
-            # return 0
             return self._depth_cutoff_value(snode)
+
+        if self._uses_fixed_tail_ptrpg_rollout() and self._fixed_tail_at_cutoff(snode):
+            return self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
 
         explore_constant = self.exploration_constant
 
-        # Choose a consistent action
         action = self.uct(snode, explore_constant)
         terminal, next_state, reward = self.mdp.step(snode.state, action)
         reward = self._terminal_backup_reward(terminal, next_state, reward)
@@ -1566,18 +1667,31 @@ class C_MCTS(Base_MCTS):
                 elif self._uses_ptrpg_guided_rollout():
                     reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
                 elif self._uses_fixed_tail_ptrpg_rollout():
-                    reward += self.mdp.discount_factor * self._leaf_fixed_tail_value(next_snode)
+                    from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                        crossed_cutoff,
+                        elapsed_from_root,
+                        node_remaining,
+                    )
+
+                    child_rem = node_remaining(self.mdp, next_state, anode.stn)
+                    child_elapsed = elapsed_from_root(self._fixed_tail_ctx, child_rem)
+                    if crossed_cutoff(self._fixed_tail_ctx, child_elapsed):
+                        leaf_val = self._fixed_tail_post_step_child_value(
+                            snode, next_snode, anode
+                        )
+                        reward += self.mdp.discount_factor * leaf_val
+                        anode.add_child(next_snode)
+                    else:
+                        anode.add_child(next_snode)
+                        reward += self.mdp.discount_factor * self.selection(next_snode)
+                        next_snode.update(reward)
                 else:
-                    # Standard PTRPG value — this is what gets backpropagated.
                     h_val = self.heuristic(next_snode)
-                    # frontier_aligned_*: the aligned value is SELECTION-ONLY.
-                    # Stash it on the action node for the frontier blend; it is
-                    # never added to `reward` / backed up.
                     if self.temporal_heuristic_strategy in _FRONTIER_ALIGNED_SUFFIX:
                         anode._aligned_seed = self._frontier_aligned_value(next_snode)
                     reward += self.mdp.discount_factor * h_val
-                anode.add_child(next_snode)
-                next_snode.update(reward)
+                    anode.add_child(next_snode)
+                    next_snode.update(reward)
 
         snode.update(reward)
         anode.update(reward)
@@ -1590,16 +1704,23 @@ class C_MCTS(Base_MCTS):
         Selection with max logic -
         average between states and maximum between possible actions
         """
+        if self._uses_fixed_tail_ptrpg_rollout():
+            if getattr(snode, "_fixed_tail_bootstrap", False):
+                return float(getattr(snode, "_fixed_tail_value", 0.0))
+
         if len(snode.possible_actions) == 0:
-            # Stop when there are no possible actions to take so the plan remains consistent
+            if self._uses_fixed_tail_ptrpg_rollout():
+                return 0.0
             return -100
 
         if snode.depth > self.search_depth:
-            # Stop if the search depth is reached
             return self._depth_cutoff_value(snode)
+
+        if self._uses_fixed_tail_ptrpg_rollout() and self._fixed_tail_at_cutoff(snode):
+            return self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
+
         explore_constant = self.exploration_constant
 
-        # Choose a consistent action
         action = self.uct(snode, explore_constant)
         terminal, next_state, reward = self.mdp.step(snode.state, action)
         reward = self._terminal_backup_reward(terminal, next_state, reward)
@@ -1618,11 +1739,26 @@ class C_MCTS(Base_MCTS):
                     reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
                 elif self._uses_fixed_tail_ptrpg_rollout():
                     next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
-                    reward += self.mdp.discount_factor * self._leaf_fixed_tail_value(next_snode)
+                    from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                        crossed_cutoff,
+                        elapsed_from_root,
+                        node_remaining,
+                    )
+
+                    child_rem = node_remaining(self.mdp, next_state, anode.stn)
+                    child_elapsed = elapsed_from_root(self._fixed_tail_ctx, child_rem)
+                    if crossed_cutoff(self._fixed_tail_ctx, child_elapsed):
+                        leaf_val = self._fixed_tail_post_step_child_value(
+                            snode, next_snode, anode
+                        )
+                        reward += self.mdp.discount_factor * leaf_val
+                    else:
+                        reward += self.mdp.discount_factor * self.selection_max(next_snode)
+                    anode.add_child(next_snode)
                 else:
                     next_snode, snode_reward = self.create_Snode_max(next_state, snode.depth + 1, anode.stn, anode)
                     reward += snode_reward
-                anode.add_child(next_snode)
+                    anode.add_child(next_snode)
 
         anode.update(reward)
         max_v = snode.max_update()
@@ -1636,18 +1772,28 @@ class C_MCTS(Base_MCTS):
         set the value per root action legal interval.
         The value is propagated and updated according the legal interval
         """
+        if self._uses_fixed_tail_ptrpg_rollout():
+            if getattr(snode, "_fixed_tail_bootstrap", False):
+                val = float(getattr(snode, "_fixed_tail_value", 0.0))
+                if root_STNnode is None:
+                    return val
+                return val, *snode.parent.stn.get_legal_interval(root_STNnode)
+
         if len(snode.possible_actions) == 0:
-            # Stop when there are no possible actions to take so the plan remains consistent
             if root_STNnode is None:
-                return 0
-            return 0, *snode.parent.stn.get_legal_interval(root_STNnode)
+                return 0.0 if self._uses_fixed_tail_ptrpg_rollout() else 0
+            zero = 0.0 if self._uses_fixed_tail_ptrpg_rollout() else 0
+            return zero, *snode.parent.stn.get_legal_interval(root_STNnode)
 
         if snode.depth > self.search_depth:
-            # Stop if the search depth is reached
-            return self._depth_cutoff_value(snode), *snode.parent.stn.get_legal_interval(root_STNnode)
+            cutoff = self._depth_cutoff_value(snode)
+            return cutoff, *snode.parent.stn.get_legal_interval(root_STNnode)
+
+        if self._uses_fixed_tail_ptrpg_rollout() and self._fixed_tail_at_cutoff(snode):
+            val = self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
+            return val, *snode.parent.stn.get_legal_interval(root_STNnode)
 
         explore_constant = self.exploration_constant
-        # Choose a consistent action
         action = self.uct(snode, explore_constant)
         terminal, next_state, reward = self.mdp.step(snode.state, action)
         reward = self._terminal_backup_reward(terminal, next_state, reward)
@@ -1664,18 +1810,41 @@ class C_MCTS(Base_MCTS):
 
             else: # leaf
                 next_snode, _ = self.create_Snode_root_interval(next_state, snode.depth + 1, anode.stn, anode)
-                # legal interval of the root action node in the leaf node
                 lower, upper = anode.stn.get_legal_interval(root_STNnode)
                 if self.value_mode == "greedy_matched":
                     reward = self._greedy_matched_action_target(snode, action)
+                    anode.add_child(next_snode)
+                    next_snode.update(reward, lower, upper)
                 elif self._uses_ptrpg_guided_rollout():
                     reward += self._leaf_rollout_value(next_snode) * self.mdp.discount_factor
+                    anode.add_child(next_snode)
+                    next_snode.update(reward, lower, upper)
                 elif self._uses_fixed_tail_ptrpg_rollout():
-                    reward += self._leaf_fixed_tail_value(next_snode) * self.mdp.discount_factor
+                    from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                        crossed_cutoff,
+                        elapsed_from_root,
+                        node_remaining,
+                    )
+
+                    child_rem = node_remaining(self.mdp, next_state, anode.stn)
+                    child_elapsed = elapsed_from_root(self._fixed_tail_ctx, child_rem)
+                    if crossed_cutoff(self._fixed_tail_ctx, child_elapsed):
+                        leaf_val = self._fixed_tail_post_step_child_value(
+                            snode, next_snode, anode
+                        )
+                        reward += leaf_val * self.mdp.discount_factor
+                        anode.add_child(next_snode)
+                    else:
+                        anode.add_child(next_snode)
+                        next_reward, lower, upper = self.selection_root_interval(
+                            next_snode, root_STNnode
+                        )
+                        reward += next_reward * self.mdp.discount_factor
+                        next_snode.update(reward, lower, upper)
                 else:
                     reward += self.heuristic(next_snode) * self.mdp.discount_factor
-                anode.add_child(next_snode)
-                next_snode.update(reward, lower, upper)
+                    anode.add_child(next_snode)
+                    next_snode.update(reward, lower, upper)
 
         else:
             # when the state is terminal set the lower and upper according to anode root

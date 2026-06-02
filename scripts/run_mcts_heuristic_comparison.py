@@ -303,11 +303,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Forwarded to run_domain: log first rollout per search.",
     )
     p.add_argument(
-        "--fixed-tail-h",
-        dest="fixed_tail_h",
-        type=int,
+        "--fixed-tail-prefix-frac",
+        dest="fixed_tail_prefix_frac",
+        type=float,
         default=None,
-        help="Forwarded to run_domain: fixed_tail_ptrpg_rollout suffix horizon H.",
+        help="Forwarded to run_domain: prefix time budget fraction of root remaining.",
     )
     p.add_argument(
         "--fixed-tail-debug",
@@ -441,18 +441,17 @@ def run_experiment(
     ptrpg_guided_rollout_max_steps: int | None = None,
     ptrpg_guided_rollout_epsilon: float | None = None,
     ptrpg_guided_rollout_debug: bool = False,
-    fixed_tail_h: int | None = None,
+    fixed_tail_prefix_frac: float | None = None,
     fixed_tail_debug: bool = False,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     effective_value_mode = alias.get("value_mode", value_mode)
     effective_rollout_policy = alias.get("ptrpg_guided_rollout_policy", ptrpg_guided_rollout_policy)
-    # CLI / notebook FIXED_TAIL_H wins; alias fixed_tail_h is only a fallback default.
-    effective_fixed_tail_h = (
-        fixed_tail_h if fixed_tail_h is not None else alias.get("fixed_tail_h")
-    )
-    if effective_fixed_tail_h is not None:
-        effective_fixed_tail_h = int(effective_fixed_tail_h)
+    effective_fixed_tail_prefix_frac = fixed_tail_prefix_frac
+    if effective_fixed_tail_prefix_frac is None:
+        effective_fixed_tail_prefix_frac = alias.get("fixed_tail_prefix_frac")
+    if effective_fixed_tail_prefix_frac is not None:
+        effective_fixed_tail_prefix_frac = float(effective_fixed_tail_prefix_frac)
     depth = heuristic_depth if heuristic_depth is not None else deadline
 
     label = f"[{domain} obj={object_amount} dl={deadline}] heuristic={heuristic_key}"
@@ -492,7 +491,7 @@ def run_experiment(
         ptrpg_guided_rollout_max_steps=ptrpg_guided_rollout_max_steps,
         ptrpg_guided_rollout_epsilon=ptrpg_guided_rollout_epsilon,
         ptrpg_guided_rollout_debug=ptrpg_guided_rollout_debug,
-        fixed_tail_h=effective_fixed_tail_h,
+        fixed_tail_prefix_frac=effective_fixed_tail_prefix_frac,
         fixed_tail_debug=fixed_tail_debug,
         resolution_alpha=resolution_alpha,
         resolution_forced_minimum=resolution_forced_minimum,
@@ -630,7 +629,7 @@ def main(argv: list[str] | None = None) -> None:
                 ptrpg_guided_rollout_max_steps=args.ptrpg_guided_rollout_max_steps,
                 ptrpg_guided_rollout_epsilon=args.ptrpg_guided_rollout_epsilon,
                 ptrpg_guided_rollout_debug=args.ptrpg_guided_rollout_debug,
-                fixed_tail_h=args.fixed_tail_h,
+                fixed_tail_prefix_frac=args.fixed_tail_prefix_frac,
                 fixed_tail_debug=args.fixed_tail_debug,
                 verbose=args.verbose,
                 resolution_alpha=args.resolution_alpha,

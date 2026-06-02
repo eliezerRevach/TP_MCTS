@@ -288,7 +288,7 @@ def run_domain_subprocess(
     ptrpg_guided_rollout_max_steps: int | None = None,
     ptrpg_guided_rollout_epsilon: float | None = None,
     ptrpg_guided_rollout_debug: bool = False,
-    fixed_tail_h: int | None = None,
+    fixed_tail_prefix_frac: float | None = None,
     fixed_tail_debug: bool = False,
     garbage_amount: int = 0,
     resolution_alpha: float | None = None,
@@ -385,8 +385,8 @@ def run_domain_subprocess(
         cmd.extend(["--ptrpg-guided-rollout-epsilon", str(ptrpg_guided_rollout_epsilon)])
     if ptrpg_guided_rollout_debug:
         cmd.append("--ptrpg-guided-rollout-debug")
-    if fixed_tail_h is not None:
-        cmd.extend(["--fixed-tail-h", str(fixed_tail_h)])
+    if fixed_tail_prefix_frac is not None:
+        cmd.extend(["--fixed-tail-prefix-frac", str(fixed_tail_prefix_frac)])
     if fixed_tail_debug:
         cmd.append("--fixed-tail-debug")
     if extra_args:

@@ -1,28 +1,24 @@
 """
 Fixed-tail PTRPG evaluation for MCTS leaf backup.
 
-Prefix: random parallel sets of MDP-legal, STN-feasible actions (no PTRPG) until the
-tail boundary. If goal is reached during the prefix, return 1.0.
-Otherwise one PTRPG at horizon FIXED_TAIL_H (e.g. atom_backtrack_exact_resolution).
+Per search: prefix_budget = floor(prefix_frac * root_remaining), measured as elapsed
+time from the MCTS root. Nodes at or past the budget bootstrap with PTRPG(remaining);
+one expansion may overshoot the budget, evaluating PTRPG on the child after the action.
 """
 
 from __future__ import annotations
 
 import logging
 import math
-import random
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 import unified_planning as up
-from unified_planning.engines.solvers.greedy_parallel import (
-    GREEDY_MAX_PARALLEL_SET_SIZE,
-    terminal_success_value,
-)
-from unified_planning.engines.solvers.ptrpg_guided_rollout import remaining_deadline
-from unified_planning.engines.utils import update_stn
+from unified_planning.engines.solvers.greedy_parallel import terminal_success_value
 
 logger = logging.getLogger(__name__)
+
+_FIXED_TAIL_DEBUG_MAX = 5
 
 
 def _resolution_heuristic_kwargs_from_cli() -> dict:
@@ -55,27 +51,53 @@ def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
 
 @dataclass
 class FixedTailConfig:
-    fixed_tail_h: int = 10
+    prefix_frac: float = 0.10
     tail_strategy: str = "atom_backtrack_exact_resolution"
 
     def __post_init__(self) -> None:
-        self.fixed_tail_h = max(0, int(self.fixed_tail_h))
+        frac = float(self.prefix_frac)
+        if frac <= 0.0:
+            self.prefix_frac = 0.0
+        elif frac > 1.0:
+            self.prefix_frac = 1.0
+        else:
+            self.prefix_frac = frac
 
 
-@dataclass
-class _PrefixResult:
-    state: "up.engines.State"
-    stn: "up.plans.stn.STNPlan"
-    boundary_time: float
-    goal_reached: bool = False
+@dataclass(frozen=True)
+class FixedTailSearchContext:
+    """Constant for one MCTS search; recomputed when online root changes."""
+
+    root_remaining: int
+    prefix_budget: int
+    prefix_frac: float
 
 
 def fixed_tail_config_from_args(args=None) -> FixedTailConfig:
     cli = args if args is not None else getattr(up, "args", None)
-    fixed_tail_h = 10
+    prefix_frac = 0.10
     if cli is not None:
-        fixed_tail_h = int(getattr(cli, "fixed_tail_h", fixed_tail_h))
-    return FixedTailConfig(fixed_tail_h=fixed_tail_h)
+        prefix_frac = float(getattr(cli, "fixed_tail_prefix_frac", prefix_frac))
+    return FixedTailConfig(prefix_frac=prefix_frac)
+
+
+def build_fixed_tail_search_context(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
+    config: FixedTailConfig,
+) -> FixedTailSearchContext:
+    root_remaining = node_remaining(mdp, state, stn)
+    frac = config.prefix_frac
+    if frac <= 0.0:
+        prefix_budget = 0
+    else:
+        prefix_budget = max(0, int(math.floor(frac * root_remaining)))
+    return FixedTailSearchContext(
+        root_remaining=root_remaining,
+        prefix_budget=prefix_budget,
+        prefix_frac=frac,
+    )
 
 
 def _goal_reached(mdp: "up.engines.MDP", state: "up.engines.State") -> bool:
@@ -102,7 +124,7 @@ def _clock_time(
     return float(stn.get_current_end_time())
 
 
-def _remaining_horizon(
+def node_remaining(
     mdp: "up.engines.MDP",
     state: "up.engines.State",
     stn: "up.plans.stn.STNPlan",
@@ -113,10 +135,34 @@ def _remaining_horizon(
     return max(0, int(math.floor(deadline - _clock_time(mdp, state, stn))))
 
 
-def _ptrpg_at_horizon(
+def elapsed_from_root(ctx: FixedTailSearchContext, node_rem: int) -> int:
+    return max(0, ctx.root_remaining - node_rem)
+
+
+def crossed_cutoff(ctx: FixedTailSearchContext, elapsed: int) -> bool:
+    return elapsed >= ctx.prefix_budget
+
+
+def fixed_tail_dead_end_value(
     mdp: "up.engines.MDP",
     state: "up.engines.State",
-    current_time: float,
+    stn: "up.plans.stn.STNPlan",
+) -> bool:
+    """True when the node should backup 0.0 (infeasible / past deadline / no legal actions)."""
+    if not stn.is_consistent():
+        return True
+    end = _clock_time(mdp, state, stn)
+    if mdp.deadline() is not None and end > mdp.deadline() + 1e-9:
+        return True
+    if len(mdp.legal_actions(state)) == 0 and not _goal_reached(mdp, state):
+        return True
+    return False
+
+
+def ptrpg_at_horizon(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
     horizon: int,
     strategy: str,
 ) -> float:
@@ -130,6 +176,7 @@ def _ptrpg_at_horizon(
         setattr(mdp, "_temporal_probabilistic_rpg_heuristic", heuristic)
 
     goals = set(mdp.problem.goals)
+    current_time = _clock_time(mdp, state, stn)
     eff = max(0, int(horizon))
     if mdp.deadline() is not None:
         eff = min(eff, max(0, int(math.floor(mdp.deadline() - current_time))))
@@ -146,196 +193,98 @@ def _ptrpg_at_horizon(
     return _clamp01(score)
 
 
-def _stn_dispatch_fits(
-    mdp: "up.engines.MDP",
-    stn: "up.plans.stn.STNPlan",
-    previous_action_node: "up.plans.stn.STNPlanNode",
-    action: "up.engines.Action",
-    gap: float,
-) -> Optional[Tuple["up.plans.stn.STNPlan", "up.plans.stn.STNPlanNode", float]]:
-    candidate_stn = stn.clone()
-    candidate_prev = previous_action_node
-    try:
-        candidate_prev = update_stn(
-            candidate_stn,
-            action,
-            candidate_prev,
-            type="SetTime",
-        )
-    except Exception:
-        return None
-    if not candidate_stn.is_consistent():
-        return None
-    if candidate_stn.get_current_end_time() > mdp.deadline():
-        return None
-    dur = float(candidate_stn.get_current_end_time()) - float(stn.get_current_end_time())
-    if dur <= 0.0 or dur > gap + 1e-9:
-        return None
-    return candidate_stn, candidate_prev, dur
-
-
-def _run_prefix_rollout(
+def fixed_tail_bootstrap_value(
     mdp: "up.engines.MDP",
     state: "up.engines.State",
     stn: "up.plans.stn.STNPlan",
-    previous_action_node: "up.plans.stn.STNPlanNode",
+    strategy: str,
     *,
-    fixed_tail_h: int,
-    delta: int,
-    max_parallel_set_size: int = GREEDY_MAX_PARALLEL_SET_SIZE,
-) -> _PrefixResult:
-    """
-    Advance toward the tail boundary with random parallel sets of legal + STN-feasible
-    actions. Prefix failures do not return 0; tail PTRPG handles the estimate.
-    """
-    assert delta >= 0
-    start_ct = _clock_time(mdp, state, stn)
-    boundary_time = start_ct + float(delta)
-    current_state = state
-    current_stn = stn
-    current_prev = previous_action_node
-
-    while True:
-        remaining = _remaining_horizon(mdp, current_state, current_stn)
-        if remaining <= fixed_tail_h:
-            break
-
-        elapsed = _clock_time(mdp, current_state, current_stn) - start_ct
-        if elapsed >= delta - 1e-9:
-            break
-
-        if terminal_success_value(mdp, current_state, current_stn) >= 1.0:
-            return _PrefixResult(
-                state=current_state,
-                stn=current_stn,
-                boundary_time=_clock_time(mdp, current_state, current_stn),
-                goal_reached=True,
-            )
-
-        decision_time = _clock_time(mdp, current_state, current_stn)
-        gap = delta - (decision_time - start_ct)
-        if gap <= 1e-9:
-            break
-
-        legal_actions = list(mdp.legal_actions(current_state))
-        if not legal_actions:
-            break
-
-        random.shuffle(legal_actions)
-        chosen_in_set = 0
-
-        for action in legal_actions:
-            if chosen_in_set >= max_parallel_set_size:
-                break
-
-            elapsed = _clock_time(mdp, current_state, current_stn) - start_ct
-            gap = delta - elapsed
-            if gap <= 1e-9:
-                break
-
-            fitted = _stn_dispatch_fits(
-                mdp, current_stn, current_prev, action, gap
-            )
-            if fitted is None:
-                continue
-
-            candidate_stn, candidate_prev, _dur = fitted
-            prev_clock = _clock_time(mdp, current_state, current_stn)
-            terminal, next_state, _reward = mdp.step(current_state, action)
-            current_state = next_state
-            current_stn = candidate_stn
-            current_prev = candidate_prev
-            chosen_in_set += 1
-
-            if not current_stn.is_consistent():
-                break
-
-            new_clock = _clock_time(mdp, current_state, current_stn)
-            if new_clock <= prev_clock + 1e-9:
-                break
-
-            if terminal and _goal_reached(mdp, current_state):
-                return _PrefixResult(
-                    state=current_state,
-                    stn=current_stn,
-                    boundary_time=new_clock,
-                    goal_reached=True,
-                )
-
-            if new_clock > decision_time + 1e-9:
-                break
-
-        if chosen_in_set == 0:
-            break
-
-    final_clock = _clock_time(mdp, current_state, current_stn)
-    if final_clock - start_ct < delta - 1e-9:
-        tail_time = boundary_time
-    else:
-        tail_time = final_clock
-
-    return _PrefixResult(
-        state=current_state,
-        stn=current_stn,
-        boundary_time=tail_time,
-    )
-
-
-def fixed_tail_ptrpg_value(
-    mdp: "up.engines.MDP",
-    state: "up.engines.State",
-    stn: "up.plans.stn.STNPlan",
-    previous_action_node: "up.plans.stn.STNPlanNode",
-    config: FixedTailConfig,
-    tail_strategy: Optional[str] = None,
-    **_kwargs,
+    ctx: Optional[FixedTailSearchContext] = None,
+    debug_emit: bool = False,
+    debug_label: str = "",
+    action_duration: Optional[float] = None,
+    child_remaining: Optional[int] = None,
+    child_elapsed: Optional[int] = None,
+    crossed: Optional[bool] = None,
 ) -> float:
-    H = config.fixed_tail_h
-    strategy = tail_strategy or config.tail_strategy
-
+    """
+    Bootstrap leaf: goal 1.0, dead-end 0.0, else PTRPG with horizon = node remaining.
+    """
     if _goal_reached(mdp, state):
-        return 1.0
+        value = 1.0
+        horizon_used = 0
+    elif terminal_success_value(mdp, state, stn) >= 1.0:
+        value = 1.0
+        horizon_used = 0
+    elif fixed_tail_dead_end_value(mdp, state, stn):
+        value = 0.0
+        horizon_used = 0
+    else:
+        rem = node_remaining(mdp, state, stn)
+        horizon_used = rem
+        value = ptrpg_at_horizon(mdp, state, stn, rem, strategy)
 
-    if terminal_success_value(mdp, state, stn) >= 1.0:
-        return 1.0
-
-    R = remaining_deadline(mdp, stn)
-    if R <= H:
-        return _ptrpg_at_horizon(
-            mdp, state, float(stn.get_current_end_time()), R, strategy
+    if debug_emit and ctx is not None:
+        node_rem = node_remaining(mdp, state, stn)
+        el = elapsed_from_root(ctx, node_rem)
+        _emit_fixed_tail_debug(
+            label=debug_label,
+            ctx=ctx,
+            node_remaining=node_rem,
+            elapsed_from_root=el,
+            action_duration=action_duration,
+            child_remaining=child_remaining,
+            child_elapsed=child_elapsed,
+            crossed_cutoff=crossed if crossed is not None else crossed_cutoff(ctx, el),
+            ptrpg_horizon=horizon_used,
+            returned_value=value,
         )
 
-    delta = R - H
-    prefix = _run_prefix_rollout(
-        mdp,
-        state,
-        stn,
-        previous_action_node,
-        fixed_tail_h=H,
-        delta=delta,
-    )
+    return value
 
-    if prefix.goal_reached:
-        return 1.0
 
-    remaining_after = _remaining_horizon(mdp, prefix.state, prefix.stn)
-    if remaining_after <= H:
-        tail_horizon = remaining_after
-    else:
-        tail_horizon = H
-
-    tail_val = _ptrpg_at_horizon(
-        mdp,
-        prefix.state,
-        prefix.boundary_time,
-        tail_horizon,
-        strategy,
-    )
-    return _clamp01(tail_val)
+def _emit_fixed_tail_debug(
+    *,
+    label: str,
+    ctx: FixedTailSearchContext,
+    node_remaining: int,
+    elapsed_from_root: int,
+    action_duration: Optional[float],
+    child_remaining: Optional[int],
+    child_elapsed: Optional[int],
+    crossed_cutoff: bool,
+    ptrpg_horizon: int,
+    returned_value: float,
+) -> None:
+    parts = [
+        f"[fixed_tail] {label}",
+        f"root_remaining={ctx.root_remaining}",
+        f"prefix_frac={ctx.prefix_frac}",
+        f"prefix_budget={ctx.prefix_budget}",
+        f"node_remaining={node_remaining}",
+        f"elapsed_from_root={elapsed_from_root}",
+    ]
+    if action_duration is not None:
+        parts.append(f"action_duration={action_duration}")
+    if child_remaining is not None:
+        parts.append(f"child_remaining={child_remaining}")
+    if child_elapsed is not None:
+        parts.append(f"child_elapsed={child_elapsed}")
+    parts.append(f"crossed_cutoff={'yes' if crossed_cutoff else 'no'}")
+    parts.append(f"ptrpg_horizon={ptrpg_horizon}")
+    parts.append(f"returned_value={returned_value:.6f}")
+    print(" ".join(parts), flush=True)
 
 
 __all__ = [
     "FixedTailConfig",
+    "FixedTailSearchContext",
+    "build_fixed_tail_search_context",
+    "crossed_cutoff",
+    "elapsed_from_root",
+    "fixed_tail_bootstrap_value",
     "fixed_tail_config_from_args",
-    "fixed_tail_ptrpg_value",
+    "fixed_tail_dead_end_value",
+    "node_remaining",
+    "ptrpg_at_horizon",
 ]
