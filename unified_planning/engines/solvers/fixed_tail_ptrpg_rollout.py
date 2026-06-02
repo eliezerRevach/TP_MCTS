@@ -2,8 +2,9 @@
 Fixed-tail PTRPG evaluation for MCTS leaf backup.
 
 When remaining horizon R exceeds FIXED_TAIL_H, run a prefix rollout for
-delta = R - FIXED_TAIL_H time units (no overshoot past the tail boundary),
-then evaluate PTRPG at horizon FIXED_TAIL_H only.
+delta = R - FIXED_TAIL_H: parallel sets of legal actions per time slice (as in
+greedy_parallel), no PTRPG in the prefix. Return 1.0 if goal is reached early;
+otherwise one PTRPG evaluation at horizon FIXED_TAIL_H from the tail boundary.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import List, Optional, Tuple
 
 import unified_planning as up
 from unified_planning.engines.solvers.greedy_parallel import (
+    GREEDY_MAX_PARALLEL_SET_SIZE,
     pick_best_action,
     pick_first_legal_fitting_action,
     terminal_success_value,
@@ -420,7 +422,12 @@ def _run_prefix_rollout(
     temporal_heuristic_depth: int,
     trace: _EvalTrace,
     t0: float,
+    max_parallel_set_size: int = GREEDY_MAX_PARALLEL_SET_SIZE,
 ) -> _PrefixResult:
+    """
+    Prefix rollout until tail boundary: dispatch parallel sets of legal actions
+    per time slice (same structure as greedy_parallel), then caller runs PTRPG once.
+    """
     assert delta >= 0, f"delta must be non-negative, got {delta}"
     start_ct = float(stn.get_current_end_time())
     boundary_time = start_ct + float(delta)
@@ -480,86 +487,100 @@ def _run_prefix_rollout(
                 trace=trace,
             )
 
-        gap = delta - elapsed
-        picked = _pick_prefix_action(
-            mdp,
-            current_state,
-            current_stn,
-            current_prev,
-            gap,
-            config,
-            heuristic_name,
-            temporal_heuristic_depth,
-            policy_calls,
-        )
-        legal_count = len(mdp.legal_actions(current_state))
-
-        if picked is None:
-            waited = True
+        decision_time = float(current_stn.get_current_end_time())
+        gap = delta - (decision_time - start_ct)
+        if gap <= 1e-9:
             break
 
-        _score, action, candidate_stn, candidate_prev, _any_term, _cache = picked
-        selected_action = action
-        dur = float(candidate_stn.get_current_end_time()) - float(
-            current_stn.get_current_end_time()
-        )
-        selected_duration = dur
+        chosen_in_set = 0
+        while chosen_in_set < max_parallel_set_size:
+            elapsed = float(current_stn.get_current_end_time()) - start_ct
+            gap = delta - elapsed
+            if gap <= 1e-9:
+                break
 
-        if dur <= 0.0 or dur > gap + 1e-9:
-            waited = True
-            break
+            picked = _pick_prefix_action(
+                mdp,
+                current_state,
+                current_stn,
+                current_prev,
+                gap,
+                config,
+                heuristic_name,
+                temporal_heuristic_depth,
+                policy_calls,
+            )
+            if picked is None:
+                break
 
-        terminal, next_state, _reward = mdp.step(current_state, action)
-        trace.mdp_step_calls += 1
-        prefix_steps += 1
-        trace.prefix_actions.append(getattr(action, "name", str(action)))
-        prev_elapsed = elapsed
-        current_state = next_state
-        current_stn = candidate_stn
-        current_prev = candidate_prev
-        new_elapsed = float(current_stn.get_current_end_time()) - start_ct
-        trace.remaining_after_steps.append(remaining_deadline(mdp, current_stn))
+            _score, action, candidate_stn, candidate_prev, _any_term, _cache = picked
+            selected_action = action
+            dur = float(candidate_stn.get_current_end_time()) - float(
+                current_stn.get_current_end_time()
+            )
+            selected_duration = dur
 
-        if new_elapsed <= prev_elapsed + 1e-9:
-            waited = True
-            break
+            if dur <= 0.0 or dur > gap + 1e-9:
+                break
 
-        if terminal:
-            if _goal_reached(mdp, current_state):
+            prev_elapsed = elapsed
+            terminal, next_state, _reward = mdp.step(current_state, action)
+            trace.mdp_step_calls += 1
+            prefix_steps += 1
+            trace.prefix_actions.append(getattr(action, "name", str(action)))
+            current_state = next_state
+            current_stn = candidate_stn
+            current_prev = candidate_prev
+            chosen_in_set += 1
+            trace.remaining_after_steps.append(remaining_deadline(mdp, current_stn))
+
+            new_elapsed = float(current_stn.get_current_end_time()) - start_ct
+            if new_elapsed <= prev_elapsed + 1e-9:
+                break
+
+            if terminal:
+                if _goal_reached(mdp, current_state):
+                    return _PrefixResult(
+                        state=current_state,
+                        stn=current_stn,
+                        previous_action_node=current_prev,
+                        waited=waited,
+                        boundary_time=boundary_time,
+                        goal_reached=True,
+                        terminal_value=1.0,
+                        trace=trace,
+                    )
                 return _PrefixResult(
                     state=current_state,
                     stn=current_stn,
                     previous_action_node=current_prev,
                     waited=waited,
                     boundary_time=boundary_time,
-                    goal_reached=True,
-                    terminal_value=1.0,
+                    dead_end=True,
+                    terminal_value=0.0,
                     trace=trace,
                 )
-            return _PrefixResult(
-                state=current_state,
-                stn=current_stn,
-                previous_action_node=current_prev,
-                waited=waited,
-                boundary_time=boundary_time,
-                dead_end=True,
-                terminal_value=0.0,
-                trace=trace,
-            )
 
-        dead_end, stn_bad = _failure_at(mdp, current_state, current_stn)
-        if dead_end or stn_bad:
-            return _PrefixResult(
-                state=current_state,
-                stn=current_stn,
-                previous_action_node=current_prev,
-                waited=waited,
-                boundary_time=boundary_time,
-                dead_end=dead_end,
-                stn_infeasible=stn_bad,
-                terminal_value=0.0,
-                trace=trace,
-            )
+            dead_end, stn_bad = _failure_at(mdp, current_state, current_stn)
+            if dead_end or stn_bad:
+                return _PrefixResult(
+                    state=current_state,
+                    stn=current_stn,
+                    previous_action_node=current_prev,
+                    waited=waited,
+                    boundary_time=boundary_time,
+                    dead_end=dead_end,
+                    stn_infeasible=stn_bad,
+                    terminal_value=0.0,
+                    trace=trace,
+                )
+
+            if float(current_stn.get_current_end_time()) > decision_time + 1e-9:
+                break
+
+        if chosen_in_set == 0:
+            waited = True
+            break
 
     trace.prefix_steps = prefix_steps
     trace.policy_heuristic_calls = policy_calls[0]
