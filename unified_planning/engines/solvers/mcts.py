@@ -821,16 +821,16 @@ class C_MCTS(Base_MCTS):
             except ValueError:
                 pass
 
+        self._next_option_a_node_id = 1
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
         snode, _ = create_snode(root_state, 0, stn,
                                 previous_chosen_action_node=previous_chosen_action_node)
         self.set_root_node(root_node if root_node is not None else snode)
         self._stn = stn
-        self._next_option_a_node_id = 1
-        if _is_option_a_strategy(temporal_heuristic_strategy):
-            self._assign_option_a_node_id(self.root_node, parent_snode=None)
 
     def _assign_option_a_node_id(self, snode, parent_snode=None):
+        if not hasattr(self, "_next_option_a_node_id"):
+            self._next_option_a_node_id = 1
         snode._option_a_node_id = self._next_option_a_node_id
         snode._option_a_parent_id = (
             None if parent_snode is None else getattr(parent_snode, "_option_a_node_id", None)
