@@ -78,6 +78,52 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "atom_backtrack_exact_resolution_and_gamma",
         "label": "atom_backtrack_exact_resolution_and_gamma",
     },
+    # Survival/delete forward DP over log-spaced (exponential-width) resolution
+    # layers: P_{t-k} with k = exponential gap. Standalone, and the suffix
+    # evaluator of rollout_aligned_resolution_survival.
+    "baseline_survival_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_survival_resolution",
+        "label": "baseline_survival_resolution",
+    },
+    # Rollout-aligned common-horizon PTRPG (3 versions). Each aligns a node's
+    # remaining horizon to a shared suffix horizon H via real prefix rollouts,
+    # then scores the common suffix with the named underlying PTRPG.
+    #   v1: baseline (pure testing) | v2: baseline_survival | v3: survival+resolution
+    "rollout_aligned_baseline": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "rollout_aligned_baseline",
+        "label": "rollout_aligned_baseline",
+    },
+    "rollout_aligned_survival": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "rollout_aligned_survival",
+        "label": "rollout_aligned_survival",
+    },
+    "rollout_aligned_resolution_survival": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "rollout_aligned_resolution_survival",
+        "label": "rollout_aligned_resolution_survival",
+    },
+    # Option A: frontier-aligned SELECTION. Same per-node aligned value as the
+    # rollout-aligned strategies, but used as a frontier selection score (blended
+    # with Q via lambda_align) to choose which child to expand; the original node
+    # is expanded (no rollout endpoints inserted). Compare against rollout_aligned_*.
+    "frontier_aligned_baseline": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "frontier_aligned_baseline",
+        "label": "frontier_aligned_baseline",
+    },
+    "frontier_aligned_survival": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "frontier_aligned_survival",
+        "label": "frontier_aligned_survival",
+    },
+    "frontier_aligned_resolution_survival": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "frontier_aligned_resolution_survival",
+        "label": "frontier_aligned_resolution_survival",
+    },
     "atomic_exact": {
         "heuristic_name": "temporal_probabilistic_rpg",
         "temporal_heuristic_strategy": "atom_backtrack_exact",
@@ -203,6 +249,14 @@ def run_domain_subprocess(
     resolution_forced_minimum: bool = False,
     resolution_reference_t: int | None = None,
     and_gamma_rollout_calibration: bool = False,
+    rollout_aligned_h: int | None = None,
+    rollout_aligned_redo: int | None = None,
+    rollout_aligned_policy: str | None = None,
+    rollout_aligned_cache: bool = False,
+    rollout_aligned_max_rollouts_per_node: int | None = None,
+    rollout_aligned_max_rollouts_per_search: int | None = None,
+    rollout_aligned_max_time_per_search: float | None = None,
+    rollout_aligned_fallback: str | None = None,
     extra_args: list[str] | None = None,
     verbose: bool = False,
 ) -> tuple[str, int]:
@@ -243,6 +297,22 @@ def run_domain_subprocess(
         cmd.extend(["--resolution-reference-t", str(resolution_reference_t)])
     if and_gamma_rollout_calibration:
         cmd.append("--and-gamma-rollout-calibration")
+    if rollout_aligned_h is not None:
+        cmd.extend(["--rollout-aligned-h", str(rollout_aligned_h)])
+    if rollout_aligned_redo is not None:
+        cmd.extend(["--rollout-aligned-redo", str(rollout_aligned_redo)])
+    if rollout_aligned_policy is not None:
+        cmd.extend(["--rollout-aligned-policy", str(rollout_aligned_policy)])
+    if rollout_aligned_cache:
+        cmd.append("--rollout-aligned-cache")
+    if rollout_aligned_max_rollouts_per_node is not None:
+        cmd.extend(["--rollout-aligned-max-rollouts-per-node", str(rollout_aligned_max_rollouts_per_node)])
+    if rollout_aligned_max_rollouts_per_search is not None:
+        cmd.extend(["--rollout-aligned-max-rollouts-per-search", str(rollout_aligned_max_rollouts_per_search)])
+    if rollout_aligned_max_time_per_search is not None:
+        cmd.extend(["--rollout-aligned-max-time-per-search", str(rollout_aligned_max_time_per_search)])
+    if rollout_aligned_fallback is not None:
+        cmd.extend(["--rollout-aligned-fallback", str(rollout_aligned_fallback)])
     if extra_args:
         cmd.extend(extra_args)
 

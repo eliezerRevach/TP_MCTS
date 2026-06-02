@@ -314,6 +314,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "baseline_survival_and_gamma AND-layer gamma factors (default off)."
         ),
     )
+    # Rollout-aligned common-horizon PTRPG (strategies 14/15/16).
+    p.add_argument("--rollout-aligned-h", type=int, default=None,
+                   help="Forwarded to run_domain: common suffix horizon H (sweep 5/10/15/20).")
+    p.add_argument("--rollout-aligned-redo", type=int, default=None,
+                   help="Forwarded to run_domain: prefix rollouts averaged per node (sweep 1/5/10/20).")
+    p.add_argument("--rollout-aligned-policy", type=str, default=None,
+                   help="Forwarded to run_domain: prefix rollout policy.")
+    p.add_argument("--rollout-aligned-cache", action="store_true", default=False,
+                   help="Forwarded to run_domain: cache aligned values.")
+    p.add_argument("--rollout-aligned-max-rollouts-per-node", type=int, default=None,
+                   help="Forwarded to run_domain: cap prefix rollouts per node.")
+    p.add_argument("--rollout-aligned-max-rollouts-per-search", type=int, default=None,
+                   help="Forwarded to run_domain: cap prefix rollouts per search.")
+    p.add_argument("--rollout-aligned-max-time-per-search", type=float, default=None,
+                   help="Forwarded to run_domain: cap prefix-rollout seconds per search.")
+    p.add_argument("--rollout-aligned-fallback", type=str, default=None,
+                   choices=("horizon_capped", "raw"),
+                   help="Forwarded to run_domain: budget-exhausted fallback.")
     return p.parse_args(argv)
 
 
@@ -345,6 +363,14 @@ def run_experiment(
     resolution_forced_minimum: bool = False,
     resolution_reference_t: int | None = None,
     and_gamma_rollout_calibration: bool = False,
+    rollout_aligned_h: int | None = None,
+    rollout_aligned_redo: int | None = None,
+    rollout_aligned_policy: str | None = None,
+    rollout_aligned_cache: bool = False,
+    rollout_aligned_max_rollouts_per_node: int | None = None,
+    rollout_aligned_max_rollouts_per_search: int | None = None,
+    rollout_aligned_max_time_per_search: float | None = None,
+    rollout_aligned_fallback: str | None = None,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     depth = heuristic_depth if heuristic_depth is not None else deadline
@@ -386,6 +412,14 @@ def run_experiment(
         resolution_forced_minimum=resolution_forced_minimum,
         resolution_reference_t=resolution_reference_t,
         and_gamma_rollout_calibration=and_gamma_rollout_calibration,
+        rollout_aligned_h=rollout_aligned_h,
+        rollout_aligned_redo=rollout_aligned_redo,
+        rollout_aligned_policy=rollout_aligned_policy,
+        rollout_aligned_cache=rollout_aligned_cache,
+        rollout_aligned_max_rollouts_per_node=rollout_aligned_max_rollouts_per_node,
+        rollout_aligned_max_rollouts_per_search=rollout_aligned_max_rollouts_per_search,
+        rollout_aligned_max_time_per_search=rollout_aligned_max_time_per_search,
+        rollout_aligned_fallback=rollout_aligned_fallback,
         verbose=verbose,
     )
     elapsed = time.perf_counter() - t0
@@ -505,6 +539,14 @@ def main(argv: list[str] | None = None) -> None:
                 resolution_forced_minimum=args.resolution_forced_minimum,
                 resolution_reference_t=args.resolution_reference_t,
                 and_gamma_rollout_calibration=args.and_gamma_rollout_calibration,
+                rollout_aligned_h=args.rollout_aligned_h,
+                rollout_aligned_redo=args.rollout_aligned_redo,
+                rollout_aligned_policy=args.rollout_aligned_policy,
+                rollout_aligned_cache=args.rollout_aligned_cache,
+                rollout_aligned_max_rollouts_per_node=args.rollout_aligned_max_rollouts_per_node,
+                rollout_aligned_max_rollouts_per_search=args.rollout_aligned_max_rollouts_per_search,
+                rollout_aligned_max_time_per_search=args.rollout_aligned_max_time_per_search,
+                rollout_aligned_fallback=args.rollout_aligned_fallback,
             )
             rows.append(row)
 

@@ -16,6 +16,13 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "10": "baseline_survival_meanvar",
         "11": "baseline_survival_and_gamma",
         "12": "atom_backtrack_exact_resolution_and_gamma",
+        "13": "baseline_survival_resolution",
+        "14": "rollout_aligned_baseline",
+        "15": "rollout_aligned_survival",
+        "16": "rollout_aligned_resolution_survival",
+        "17": "frontier_aligned_baseline",
+        "18": "frontier_aligned_survival",
+        "19": "frontier_aligned_resolution_survival",
         "baseline": "baseline",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -28,6 +35,13 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "baseline_survival_meanvar": "baseline_survival_meanvar",
         "baseline_survival_and_gamma": "baseline_survival_and_gamma",
         "atom_backtrack_exact_resolution_and_gamma": "atom_backtrack_exact_resolution_and_gamma",
+        "baseline_survival_resolution": "baseline_survival_resolution",
+        "rollout_aligned_baseline": "rollout_aligned_baseline",
+        "rollout_aligned_survival": "rollout_aligned_survival",
+        "rollout_aligned_resolution_survival": "rollout_aligned_resolution_survival",
+        "frontier_aligned_baseline": "frontier_aligned_baseline",
+        "frontier_aligned_survival": "frontier_aligned_survival",
+        "frontier_aligned_resolution_survival": "frontier_aligned_resolution_survival",
     }
     if normalized not in aliases:
         raise argparse.ArgumentTypeError(
@@ -39,7 +53,14 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "9|baseline_survival, "
             "10|baseline_survival_meanvar, "
             "11|baseline_survival_and_gamma, "
-            "12|atom_backtrack_exact_resolution_and_gamma"
+            "12|atom_backtrack_exact_resolution_and_gamma, "
+            "13|baseline_survival_resolution, "
+            "14|rollout_aligned_baseline, "
+            "15|rollout_aligned_survival, "
+            "16|rollout_aligned_resolution_survival, "
+            "17|frontier_aligned_baseline, "
+            "18|frontier_aligned_survival, "
+            "19|frontier_aligned_resolution_survival"
         )
     return aliases[normalized]
 
@@ -169,6 +190,103 @@ parser.add_argument(
         'baseline_survival_and_gamma: enable lazy rollout calibration of the '
         'AND-layer gamma factors (default off = static gamma table).'
     ),
+)
+
+# Rollout-aligned common-horizon PTRPG (strategies 14/15/16). These wrap the
+# underlying PTRPG suffix with a real prefix rollout up to the common horizon H.
+parser.add_argument(
+    '--rollout-aligned-h',
+    dest='rollout_aligned_h',
+    default=15,
+    type=int,
+    metavar='H',
+    help='rollout_aligned_*: common suffix horizon H (default 15). Try 5/10/15/20.',
+)
+parser.add_argument(
+    '--rollout-aligned-redo',
+    dest='rollout_aligned_redo',
+    default=1,
+    type=int,
+    help='rollout_aligned_*: number of prefix rollouts averaged per node (default 1). Try 1/5/10/20.',
+)
+parser.add_argument(
+    '--rollout-aligned-policy',
+    dest='rollout_aligned_policy',
+    default='random',
+    help='rollout_aligned_*: prefix rollout policy (default random).',
+)
+parser.add_argument(
+    '--rollout-aligned-cache',
+    dest='rollout_aligned_cache',
+    action='store_true',
+    default=False,
+    help='rollout_aligned_*: cache aligned values (sample estimates; default off).',
+)
+parser.add_argument(
+    '--rollout-aligned-max-rollouts-per-node',
+    dest='rollout_aligned_max_rollouts_per_node',
+    default=0,
+    type=int,
+    help='rollout_aligned_*: cap prefix rollouts per node (0 = unlimited).',
+)
+parser.add_argument(
+    '--rollout-aligned-max-rollouts-per-search',
+    dest='rollout_aligned_max_rollouts_per_search',
+    default=0,
+    type=int,
+    help='rollout_aligned_*: cap prefix rollouts per search (0 = unlimited).',
+)
+parser.add_argument(
+    '--rollout-aligned-max-time-per-search',
+    dest='rollout_aligned_max_time_per_search',
+    default=0.0,
+    type=float,
+    help='rollout_aligned_*: cap prefix-rollout seconds per search (0 = unlimited).',
+)
+parser.add_argument(
+    '--rollout-aligned-fallback',
+    dest='rollout_aligned_fallback',
+    default='horizon_capped',
+    choices=('horizon_capped', 'raw'),
+    help='rollout_aligned_*: budget-exhausted fallback (default horizon_capped).',
+)
+parser.add_argument(
+    '--rollout-aligned-fixed-h',
+    dest='rollout_aligned_fixed_h',
+    action='store_true',
+    default=False,
+    help=(
+        'rollout_aligned_*: disable the dynamic parent-local horizon and use the '
+        'fixed --rollout-aligned-h instead (old fixed-H behavior).'
+    ),
+)
+parser.add_argument(
+    '--rollout-aligned-boundary-mode',
+    dest='rollout_aligned_boundary_mode',
+    default='overshoot',
+    choices=('overshoot', 'wait_no_overshoot', 'expected_stochastic_rounding'),
+    help='rollout_aligned_*: prefix boundary handling (default overshoot).',
+)
+parser.add_argument(
+    '--rollout-aligned-min-dynamic-horizon',
+    dest='rollout_aligned_min_dynamic_horizon',
+    default=None,
+    type=int,
+    help='rollout_aligned_*: safety floor on the dynamic horizon H_p (default off).',
+)
+parser.add_argument(
+    '--rollout-aligned-fallback-if-small',
+    dest='rollout_aligned_fallback_if_small',
+    default='use_anyway',
+    choices=('use_anyway', 'fixed', 'raw'),
+    help='rollout_aligned_*: behavior when H_p < min-dynamic-horizon (default use_anyway).',
+)
+parser.add_argument(
+    '--rollout-aligned-lambda-align',
+    dest='rollout_aligned_lambda_align',
+    default=None,
+    type=float,
+    help='rollout_aligned_*: blended-selection weight lambda_align in [0,1] (advisory).',
 )
 
 parser.add_argument(

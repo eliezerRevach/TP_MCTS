@@ -367,6 +367,7 @@ class TemporalProbabilisticRPGHeuristic:
             "atom_backtrack_exact_resolution",
             "atom_backtrack_exact_resolution_and_gamma",
             "atom_backtrack_exact_unbiased",
+            "baseline_survival_resolution",
         ):
             query_key = query_key + (
                 float(2.0 if resolution_alpha is None else resolution_alpha),
@@ -481,6 +482,20 @@ class TemporalProbabilisticRPGHeuristic:
                 fixed_depth=fixed_depth,
                 start_time=start_time,
                 debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_survival_resolution":
+            # Survival/delete recursion over log-spaced (exponential-width)
+            # resolution layers: P_{t-k} with k = exponential gap.
+            result = self._heuristic_propagate_baseline_survival_resolution(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+                resolution_alpha=resolution_alpha,
+                resolution_forced_minimum=resolution_forced_minimum,
+                resolution_reference_t=resolution_reference_t,
             )
             self._query_cache[query_key] = result
             return result
@@ -806,6 +821,7 @@ class TemporalProbabilisticRPGHeuristic:
             "baseline_survival",
             "baseline_survival_meanvar",
             "baseline_survival_and_gamma",
+            "baseline_survival_resolution",
             "atom_half_split",
             "atom_backtrack_exact",
             "atom_backtrack_exact_resolution",
@@ -819,6 +835,7 @@ class TemporalProbabilisticRPGHeuristic:
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
                 "Supported strategies: baseline, baseline_cached, baseline_survival, "
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
+                "baseline_survival_resolution, "
                 "atom_half_split, "
                 "atom_backtrack_exact, atom_backtrack_exact_resolution, "
                 "atom_backtrack_exact_resolution_and_gamma, "
@@ -1438,6 +1455,171 @@ class TemporalProbabilisticRPGHeuristic:
             start_time=start_time,
             debug=debug,
             r_estimator=r_estimator,
+        )
+
+    # -------------------------------------------------------------------------
+    # baseline_survival_resolution: survival DP over log-spaced (exp-width) layers
+    # -------------------------------------------------------------------------
+    #
+    # Combines the survival/delete recursion of baseline_survival with the
+    # logarithmic-time layer schedule of atom_backtrack_exact_resolution. Instead
+    # of stepping one integer layer at a time, it advances over the resolution
+    # anchors (gaps grow geometrically: fine near the current time, coarse far in
+    # the future). Each super-step of width ``k = cur_anchor - prev_anchor`` uses
+    # the same survival formula but references the PREVIOUS ANCHOR ``P_{t-k}`` and
+    # raises the per-step factors to the ``k``-th power (k steps of retries /
+    # decay):
+    #
+    #   survival_k(f) = (1 - h_del(f)) ** k          (k delete-events over the gap)
+    #   H_k(f)        = 1 - Π_a (1 - s_a(f)) ** att   (att = k - delay(a) + 1 retries)
+    #   P_cur(f)      = P_prev(f)*survival_k + (1 - P_prev(f)*survival_k) * H_k(f)
+    #
+    # with s_a(f) = R(a)·add_prob and R(a), h_del(f) evaluated at the previous
+    # anchor (the coarse-far-future relaxation). When a gap is k=1 this collapses
+    # to one baseline_survival step, so near-term layers stay exact and only the
+    # far-future layers are coarsened. Used standalone and as the v3 suffix
+    # evaluator of rollout_aligned_resolution_survival.
+    # -------------------------------------------------------------------------
+
+    def _heuristic_propagate_baseline_survival_resolution(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+        *,
+        resolution_alpha: Optional[float] = None,
+        resolution_forced_minimum: bool = False,
+        resolution_reference_t: Optional[int] = None,
+    ) -> TemporalPropagationResult:
+        self._ensure_survival_delete_table()
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        del start_time
+        facts = self._facts.union(state_facts)
+
+        del_prob_by_name = self._survival_del_prob_by_name
+        facts_with_deleters = self._survival_facts_with_deleters
+
+        # Log-spaced ascending anchors [0, ..., depth] (fine near 0, coarse far).
+        anchors = _resolution_anchors_ascending(
+            depth,
+            alpha=resolution_alpha,
+            t_ref=resolution_reference_t,
+            delta_min=1,
+            forced_minimum=resolution_forced_minimum,
+        )
+
+        # Probability vector, advanced anchor-by-anchor (only {0, depth} are
+        # materialized into the result, matching the resolution strategies).
+        current_probs: Dict[Fact, float] = {
+            fact: (1.0 if fact in state_facts else 0.0) for fact in facts
+        }
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            0: dict(current_probs)
+        }
+        traces: List[TemporalLayerTrace] = []
+        if debug:
+            traces.append(
+                TemporalLayerTrace(layer=0, fact_probabilities=dict(current_probs))
+            )
+
+        prev_anchor = 0
+        for cur_anchor in anchors[1:]:
+            k = int(cur_anchor - prev_anchor)
+            if k <= 0:
+                continue
+
+            # Action reachability R(a) at the previous anchor (one product per
+            # action over its preconditions' current probabilities).
+            r_by_name: Dict[str, float] = {}
+            denominator = 0.0
+            for action_model in self._action_models:
+                probs_for_preconditions = {
+                    f: _clamp_probability(current_probs.get(f, 0.0))
+                    for f in action_model.preconditions
+                }
+                r = compute_precondition_support(
+                    action_model.preconditions,
+                    probs_for_preconditions,
+                    strict=True,
+                )
+                r_by_name[action_model.name] = r
+                denominator += r  # every reachable action feeds the delete denom
+
+            # Per-fact delete numerator at this anchor.
+            delete_num: Dict[Fact, float] = {}
+            if denominator > 0.0:
+                for name, dels in del_prob_by_name.items():
+                    r = r_by_name.get(name, 0.0)
+                    if r <= 0.0:
+                        continue
+                    for f, del_prob in dels.items():
+                        delete_num[f] = delete_num.get(f, 0.0) + r * del_prob
+
+            next_probs: Dict[Fact, float] = {}
+            arrivals: Dict[Fact, float] = {}
+            for fact in facts:
+                previous = current_probs.get(fact, 0.0)
+
+                # Arrival hazard over the k-wide window: each achiever can
+                # complete (k - delay + 1) times within the gap.
+                failure = 1.0
+                for achiever in self._actions_by_effect_fact.get(fact, []):
+                    delay = max(0, int(achiever.effect_delay_steps))
+                    attempts = k - delay + 1
+                    if attempts <= 0:
+                        continue
+                    r = r_by_name.get(achiever.name, 0.0)
+                    if r <= 0.0:
+                        continue
+                    add_prob = _clamp_probability(
+                        achiever.add_probabilities.get(fact, 0.0)
+                    )
+                    step_success = _clamp_probability(r * add_prob)
+                    if step_success <= 0.0:
+                        continue
+                    failure *= (1.0 - step_success) ** attempts
+                arrival_hazard = _clamp_probability(1.0 - failure)
+
+                # Survival decay over the k steps.
+                if (
+                    fact in facts_with_deleters
+                    and denominator > 0.0
+                    and previous > 0.0
+                ):
+                    h_del = _clamp_probability(delete_num.get(fact, 0.0) / denominator)
+                    survival = _clamp_probability((1.0 - h_del) ** k)
+                else:
+                    survival = 1.0
+
+                decayed = _clamp_probability(previous * survival)
+                updated = _clamp_probability(
+                    decayed + (1.0 - decayed) * arrival_hazard
+                )
+                next_probs[fact] = updated
+                if arrival_hazard > 0.0:
+                    arrivals[fact] = arrival_hazard
+
+            current_probs = next_probs
+            prev_anchor = cur_anchor
+            if debug:
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=cur_anchor,
+                        fact_probabilities=dict(current_probs),
+                        arrivals=arrivals,
+                    )
+                )
+
+        probabilities_by_layer[depth] = dict(current_probs)
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=0,
+            action_cache_hits=0,
         )
 
     @staticmethod

@@ -70,6 +70,37 @@ def _uses_tprpg_family(heuristic_name: str) -> bool:
     )
 
 
+def _dynamic_aligned_horizon(heuristic_mdp, parent_snode):
+    """Parent-local comparison horizon H_p = min over the parent's children of
+    their remaining horizon = deadline - max(child STN end time).
+
+    Each child action-node carries an STN whose current end time is that child's
+    current_time, so this needs no extra stepping. Returns None when it cannot be
+    computed (no parent / no deadline / no children)."""
+    if parent_snode is None:
+        return None
+    deadline = heuristic_mdp.deadline()
+    if deadline is None:
+        return None
+    children = getattr(parent_snode, "children", None)
+    if not children:
+        return None
+    max_end = None
+    for anode in children.values():
+        stn = getattr(anode, "stn", None)
+        if stn is None:
+            continue
+        try:
+            end = stn.get_current_end_time()
+        except Exception:
+            continue
+        if max_end is None or end > max_end:
+            max_end = end
+    if max_end is None:
+        return None
+    return max(0, int(math.floor(deadline - max_end)))
+
+
 def _tprpg_heuristic_value(
     heuristic_mdp,
     state,
@@ -78,6 +109,7 @@ def _tprpg_heuristic_value(
     temporal_heuristic_strategy: str,
     cached_table=None,
     leaf_heuristic_name: str = "temporal_probabilistic_rpg",
+    aligned_h_override=None,
 ):
     """
     Evaluate the temporal_probabilistic_rpg heuristic, threading the baseline_cached
@@ -105,9 +137,195 @@ def _tprpg_heuristic_value(
             heuristic_mdp, state, current_time,
             temporal_heuristic_depth, temporal_heuristic_strategy,
             leaf_heuristic_name=leaf_heuristic_name,
+            aligned_h_override=aligned_h_override,
         )
         cache_out = None
     return score - 0.001 * current_time, cache_out
+
+
+# Rollout-aligned common-horizon PTRPG: maps each version to the underlying
+# PTRPG suffix strategy used over the common horizon H.
+_ROLLOUT_ALIGNED_SUFFIX = {
+    "rollout_aligned_baseline": "baseline",
+    "rollout_aligned_survival": "baseline_survival",
+    "rollout_aligned_resolution_survival": "baseline_survival_resolution",
+}
+
+# Option A frontier-aligned SELECTION: same per-node aligned value as the
+# rollout-aligned strategies, but the aligned value is used as a frontier
+# selection score (blended with the backed-up Q via lambda_align) to decide which
+# child to descend/expand. H_frontier = deadline - max(child elapsed) over the
+# candidate child set. The original node is expanded; rollout endpoints are never
+# inserted into the tree.
+_FRONTIER_ALIGNED_SUFFIX = {
+    "frontier_aligned_baseline": "baseline",
+    "frontier_aligned_survival": "baseline_survival",
+    "frontier_aligned_resolution_survival": "baseline_survival_resolution",
+}
+
+# Both families compute the per-node aligned value through the same evaluator.
+_ALIGNED_SUFFIX = {**_ROLLOUT_ALIGNED_SUFFIX, **_FRONTIER_ALIGNED_SUFFIX}
+
+
+def _rollout_aligned_config_from_cli():
+    """Build a RolloutAlignedConfig from unified_planning.parser CLI args."""
+    from comdp_plus_no_deadline.engines.rollout_aligned import RolloutAlignedConfig
+
+    cfg = RolloutAlignedConfig()
+    a = getattr(up, "args", None)
+    if a is None:
+        return cfg
+    h = getattr(a, "rollout_aligned_h", None)
+    if h is not None:
+        cfg.common_horizon_H = int(h)
+    redo = getattr(a, "rollout_aligned_redo", None)
+    if redo is not None:
+        cfg.redo = max(1, int(redo))
+    policy = getattr(a, "rollout_aligned_policy", None)
+    if policy:
+        cfg.prefix_rollout_policy = str(policy)
+    cfg.cache_aligned_values = bool(getattr(a, "rollout_aligned_cache", False))
+    # Dynamic parent-local horizon knobs.
+    cfg.use_dynamic_H = not bool(getattr(a, "rollout_aligned_fixed_h", False))
+    boundary = getattr(a, "rollout_aligned_boundary_mode", None)
+    if boundary:
+        cfg.boundary_mode = str(boundary)
+    min_dyn = getattr(a, "rollout_aligned_min_dynamic_horizon", None)
+    if min_dyn is not None:
+        cfg.min_dynamic_horizon = int(min_dyn)
+    small_fb = getattr(a, "rollout_aligned_fallback_if_small", None)
+    if small_fb:
+        cfg.fallback_if_H_too_small = str(small_fb)
+    lam = getattr(a, "rollout_aligned_lambda_align", None)
+    if lam is not None:
+        cfg.lambda_align = float(lam)
+    mr_node = getattr(a, "rollout_aligned_max_rollouts_per_node", None)
+    if mr_node is not None:
+        cfg.max_prefix_rollouts_per_node = int(mr_node)
+    mr_search = getattr(a, "rollout_aligned_max_rollouts_per_search", None)
+    if mr_search is not None:
+        cfg.max_prefix_rollouts_per_search = int(mr_search)
+    mt = getattr(a, "rollout_aligned_max_time_per_search", None)
+    if mt is not None:
+        cfg.max_prefix_rollout_time_per_search = float(mt)
+    fb = getattr(a, "rollout_aligned_fallback", None)
+    if fb:
+        cfg.fallback_mode = str(fb)
+    return cfg
+
+
+def _get_rollout_aligned_evaluator(heuristic_mdp, heuristic, suffix_strategy: str):
+    """Build (once per MDP+suffix) a RolloutAlignedEvaluator bound to this MDP.
+
+    The closures use the *real* MDP for the unmatched prefix (legal actions,
+    durations, stochastic effects via mdp.step — exactly like ``simulate()``),
+    and raw PTRPG for the common suffix horizon.
+    """
+    from comdp_plus_no_deadline.engines.rollout_aligned import (
+        BOUNDARY_WAIT_NO_OVERSHOOT,
+        RolloutAlignedEvaluator,
+    )
+
+    cache = getattr(heuristic_mdp, "_rollout_aligned_evaluators", None)
+    if cache is None:
+        cache = {}
+        setattr(heuristic_mdp, "_rollout_aligned_evaluators", cache)
+    existing = cache.get(suffix_strategy)
+    if existing is not None:
+        return existing
+
+    cfg = _rollout_aligned_config_from_cli()
+    deadline = heuristic_mdp.deadline()
+    goals = set(heuristic_mdp.problem.goals)
+    res_kwargs = _resolution_heuristic_kwargs_from_cli()
+    suffix_aggregation = _aggregation_for_strategy(suffix_strategy)
+
+    def _is_goal(s):
+        preds = getattr(s, "predicates", None)
+        return preds is not None and goals.issubset(set(preds))
+
+    def raw_eval_fn(s, horizon):
+        ct = float(getattr(s, "current_time", 0.0))
+        if deadline is not None:
+            eff = min(int(horizon), max(0, int(math.floor(deadline - ct))))
+        else:
+            eff = int(horizon)
+        return heuristic.heuristic_score(
+            s,
+            goals,
+            aggregation=suffix_aggregation,
+            fixed_depth=eff,
+            start_time=ct,
+            strategy=suffix_strategy,
+            **res_kwargs,
+        )
+
+    def prefix_rollout_fn(s, delta):
+        # Real MDP prefix rollout (legal actions, durations, stochastic effects,
+        # STN feasibility via legal_actions/step). Returns dead_end=True when it
+        # hits a no-legal-action / terminal-without-goal state before the
+        # boundary (value 0.0). Boundary handling: "wait_no_overshoot" never
+        # commits an action that would advance past the boundary (waits instead);
+        # otherwise the last action may overshoot.
+        sim = s
+        start_ct = float(getattr(sim, "current_time", 0.0))
+        reached = False
+        dead_end = False
+        length = 0
+        no_overshoot = cfg.boundary_mode == BOUNDARY_WAIT_NO_OVERSHOOT
+        while (float(getattr(sim, "current_time", 0.0)) - start_ct) < delta:
+            legal = heuristic_mdp.legal_actions(sim)
+            if not legal:
+                dead_end = True
+                break
+            if no_overshoot:
+                committed = False
+                candidates = list(legal)
+                random.shuffle(candidates)
+                for action in candidates:
+                    terminal, next_state, _r = heuristic_mdp.step(sim, action)
+                    new_elapsed = float(getattr(next_state, "current_time", 0.0)) - start_ct
+                    if new_elapsed <= delta:
+                        sim = next_state
+                        committed = True
+                        length += 1
+                        if _is_goal(sim):
+                            reached = True
+                        elif terminal:
+                            dead_end = True
+                        break
+                if not committed:
+                    break  # no fitting action -> wait at the boundary
+                if reached or dead_end:
+                    break
+            else:
+                action = random.choice(legal)
+                terminal, next_state, _r = heuristic_mdp.step(sim, action)
+                sim = next_state
+                length += 1
+                if _is_goal(sim):
+                    reached = True
+                    break
+                if terminal:
+                    dead_end = True
+                    break
+        return sim, reached, length, dead_end
+
+    def state_hash_fn(s):
+        preds = getattr(s, "predicates", None)
+        ct = getattr(s, "current_time", 0.0)
+        if preds is not None:
+            return (frozenset(preds), ct)
+        return (id(s), ct)
+
+    evaluator = RolloutAlignedEvaluator(
+        config=cfg,
+        raw_eval_fn=raw_eval_fn,
+        prefix_rollout_fn=prefix_rollout_fn,
+        state_hash_fn=state_hash_fn,
+    )
+    cache[suffix_strategy] = evaluator
+    return evaluator
 
 
 def _temporal_heuristic(
@@ -119,6 +337,7 @@ def _temporal_heuristic(
     cached_table=None,
     return_cache_table: bool = False,
     leaf_heuristic_name: str = "temporal_probabilistic_rpg",
+    aligned_h_override=None,
 ):
     from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
         TemporalProbabilisticRPGHeuristic,
@@ -147,6 +366,20 @@ def _temporal_heuristic(
         current_time,
         heuristic_mdp.deadline(),
     )
+
+    # Rollout-aligned common-horizon PTRPG: align this node's remaining horizon
+    # to the shared suffix horizon H via real prefix rollouts, then score the
+    # common suffix with the underlying PTRPG strategy. Intercept before the
+    # plain heuristic_score path (these strategy names are MCTS-only and are not
+    # propagation strategies of the heuristic itself).
+    if temporal_heuristic_strategy in _ALIGNED_SUFFIX:
+        suffix_strategy = _ALIGNED_SUFFIX[temporal_heuristic_strategy]
+        evaluator = _get_rollout_aligned_evaluator(
+            heuristic_mdp, heuristic, suffix_strategy
+        )
+        return evaluator.evaluate(
+            state, effective_depth, h_override=aligned_h_override
+        )
 
     if leaf_heuristic_name in _CORR_PESSIMISTIC:
         return heuristic.pessimistic_heuristic(
@@ -574,7 +807,71 @@ class C_MCTS(Base_MCTS):
 
         return ranked_actions[:allowed]
 
+    def _frontier_lambda_align(self) -> float:
+        a = getattr(up, "args", None)
+        lam = getattr(a, "rollout_aligned_lambda_align", None) if a is not None else None
+        return 1.0 if lam is None else max(0.0, min(1.0, float(lam)))
+
+    def _uct_frontier_aligned(self, snode: "up.engines.Snode", explore_constant: float):
+        """Option A: pick the child to descend/expand by a frontier-aligned score.
+
+        Over the candidate child set (the frontier F), every child's aligned value
+        was computed against H_frontier = deadline - max(child elapsed) and stashed
+        on its action node. The selection score blends that aligned value with the
+        backed-up action value Q via lambda_align, plus a UCT exploration term.
+        Unvisited children are explored first. The ORIGINAL chosen child is then
+        expanded by the normal selection flow (rollout endpoints are never
+        inserted)."""
+        from comdp_plus_no_deadline.engines.rollout_aligned import frontier_score
+
+        anodes = snode.children
+        if not anodes:
+            return super().uct(snode, explore_constant)
+
+        # Explore unvisited children first (standard UCT behavior).
+        for action, anode in anodes.items():
+            if anode.count == 0:
+                return action
+
+        # Frontier diagnostics (deepest elapsed / H_frontier).
+        diag = getattr(self.mdp, "_frontier_aligned_diag", None)
+        if diag is None:
+            diag = {"selections": 0, "h_frontier_sum": 0.0, "frontier_size_sum": 0}
+            setattr(self.mdp, "_frontier_aligned_diag", diag)
+        deadline = self.mdp.deadline()
+        deepest_elapsed = None
+        for anode in anodes.values():
+            stn = getattr(anode, "stn", None)
+            if stn is None:
+                continue
+            try:
+                end = stn.get_current_end_time()
+            except Exception:
+                continue
+            if deepest_elapsed is None or end > deepest_elapsed:
+                deepest_elapsed = end
+        if deadline is not None and deepest_elapsed is not None:
+            diag["h_frontier_sum"] += max(0.0, float(deadline) - float(deepest_elapsed))
+        diag["frontier_size_sum"] += len(anodes)
+        diag["selections"] += 1
+
+        lam = self._frontier_lambda_align()
+        log_n = math.log(snode.count) if snode.count > 0 else 0.0
+        best_score = -float("inf")
+        best_action = None
+        for action, anode in anodes.items():
+            q = anode.value
+            aligned = getattr(anode, "_aligned_seed", q)
+            exploration = explore_constant * math.sqrt(log_n / anode.count)
+            score = frontier_score(q, aligned, lam, exploration)
+            if score > best_score:
+                best_score = score
+                best_action = action
+        return best_action if best_action is not None else super().uct(snode, explore_constant)
+
     def uct(self, snode: "up.engines.Snode", explore_constant: float):
+        if self.temporal_heuristic_strategy in _FRONTIER_ALIGNED_SUFFIX:
+            return self._uct_frontier_aligned(snode, explore_constant)
         if self._uct_filter_mode is None:
             return super().uct(snode, explore_constant)
 
@@ -635,7 +932,9 @@ class C_MCTS(Base_MCTS):
                 if not terminal:
                     reward = self._greedy_matched_action_target(snode, action)
             else:
-                reward += self.mdp.discount_factor * self.heuristic_init(next_state, snode.children[action].stn)
+                reward += self.mdp.discount_factor * self.heuristic_init(
+                    next_state, snode.children[action].stn, parent_snode=snode
+                )
             snode.children[action].update(reward)
             if reward > best:
                 best = reward
@@ -676,7 +975,12 @@ class C_MCTS(Base_MCTS):
                 if self.value_mode == "greedy_matched":
                     reward = self._greedy_matched_action_target(snode, action)
                 else:
-                    reward += self.mdp.discount_factor * self.heuristic(next_snode)
+                    h_val = self.heuristic(next_snode)
+                    # frontier_aligned_*: remember the aligned value on the action
+                    # node so the frontier selection can blend it with Q.
+                    if self.temporal_heuristic_strategy in _FRONTIER_ALIGNED_SUFFIX:
+                        anode._aligned_seed = h_val
+                    reward += self.mdp.discount_factor * h_val
                 anode.add_child(next_snode)
                 next_snode.update(reward)
 
@@ -820,6 +1124,15 @@ class C_MCTS(Base_MCTS):
             current_time = snode.parent.stn.get_current_end_time()
             lower_bounds = snode.parent.stn.get_lower_bound_potential_end_action()
         if _uses_tprpg_family(self.heuristic_name):
+            aligned_override = None
+            if (
+                self.temporal_heuristic_strategy in _ALIGNED_SUFFIX
+                and snode.parent is not None
+            ):
+                # Parent-local H_p / H_frontier from the parent snode's child set.
+                aligned_override = _dynamic_aligned_horizon(
+                    self.mdp, snode.parent.parent
+                )
             score, _ = _tprpg_heuristic_value(
                 self.mdp,
                 snode.state,
@@ -828,14 +1141,18 @@ class C_MCTS(Base_MCTS):
                 self.temporal_heuristic_strategy,
                 cached_table=self._root_baseline_cache,
                 leaf_heuristic_name=self.heuristic_name,
+                aligned_h_override=aligned_override,
             )
             return score
         h = up.engines.heuristics.TRPG(self.mdp, snode.state, current_time)
         return h.get_heuristic(lower_bounds)
 
-    def heuristic_init(self, state, stn):
+    def heuristic_init(self, state, stn, parent_snode=None):
         current_time = stn.get_current_end_time()
         if _uses_tprpg_family(self.heuristic_name):
+            aligned_override = None
+            if self.temporal_heuristic_strategy in _ALIGNED_SUFFIX:
+                aligned_override = _dynamic_aligned_horizon(self.mdp, parent_snode)
             score, _ = _tprpg_heuristic_value(
                 self.mdp,
                 state,
@@ -844,6 +1161,7 @@ class C_MCTS(Base_MCTS):
                 self.temporal_heuristic_strategy,
                 cached_table=self._root_baseline_cache,
                 leaf_heuristic_name=self.heuristic_name,
+                aligned_h_override=aligned_override,
             )
             return score
         h = up.engines.heuristics.TRPG(self.mdp, state, current_time)
