@@ -26,6 +26,7 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "20": "frontier_aligned_option_a",
         "21": "frontier_aligned_option_a_survival",
         "22": "frontier_aligned_option_a_resolution",
+        "23": "baseline_time_to_goal",
         "baseline": "baseline",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -48,6 +49,7 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "frontier_aligned_option_a": "frontier_aligned_option_a",
         "frontier_aligned_option_a_survival": "frontier_aligned_option_a_survival",
         "frontier_aligned_option_a_resolution": "frontier_aligned_option_a_resolution",
+        "baseline_time_to_goal": "baseline_time_to_goal",
     }
     if normalized not in aliases:
         raise argparse.ArgumentTypeError(
@@ -69,7 +71,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "19|frontier_aligned_resolution_survival, "
             "20|frontier_aligned_option_a, "
             "21|frontier_aligned_option_a_survival, "
-            "22|frontier_aligned_option_a_resolution"
+            "22|frontier_aligned_option_a_resolution, "
+            "23|baseline_time_to_goal"
         )
     return aliases[normalized]
 
@@ -321,11 +324,25 @@ parser.add_argument(
 )
 parser.add_argument(
     '--value_mode',
-    help='MCTS leaf/backup target mode: tp_mcts (default), greedy_matched, or '
-         'ptrpg_guided_terminal_rollout (stochastic rollout backup, PTRPG policy only)',
+    help='MCTS leaf/backup target mode: tp_mcts (default), greedy_matched, '
+         'ptrpg_guided_terminal_rollout, or fixed_tail_ptrpg_rollout (prefix + fixed-horizon PTRPG tail)',
     nargs='?',
     default='tp_mcts',
-    choices=('tp_mcts', 'greedy_matched', 'ptrpg_guided_terminal_rollout'),
+    choices=('tp_mcts', 'greedy_matched', 'ptrpg_guided_terminal_rollout', 'fixed_tail_ptrpg_rollout'),
+)
+parser.add_argument(
+    '--fixed-tail-h',
+    dest='fixed_tail_h',
+    type=int,
+    default=10,
+    help='fixed_tail_ptrpg_rollout: common PTRPG suffix horizon H (default 10).',
+)
+parser.add_argument(
+    '--fixed-tail-debug',
+    dest='fixed_tail_debug',
+    action='store_true',
+    default=False,
+    help='fixed_tail_ptrpg_rollout: log the first 5 leaf evaluations per MCTS search.',
 )
 parser.add_argument(
     '--ptrpg-guided-rollout-policy',

@@ -733,6 +733,57 @@ class TemporalProbabilisticRPGHeuristic:
                     score = mean_area - c * std
                 else:
                     score = mean_area
+        elif aggregation in ("time_to_goal", "deadline_margin"):
+            # Deadline-normalized relaxed time-to-goal margin:
+            #     V = 1 - t* / R
+            # where G_t = prod_g P_t(g) is the per-layer goal-conjunction
+            # probability (an S-curve), t* is the (interpolated) layer at which
+            # G_t first crosses half its plateau G_inf = max_t G_t, and R is the
+            # remaining-budget horizon the DP was run to (result.depth_used).
+            #
+            # Rationale (see scripts/probe_propagation.py): the final-layer
+            # "product" saturates (~constant for any R > t*) and so cannot order
+            # nodes at different deadlines; the naive layer-mean ("area") drifts
+            # because area(H) ~= G_inf*(1 - t*/H) confounds plateau/rise/horizon.
+            # t* (relaxed time-to-achieve-all-goals) is horizon-INVARIANT, so
+            # V = 1 - t*/R is a comparable feasibility margin in [0,1]: it is
+            # informative at every depth, not just near the deadline. Requires
+            # the full per-layer profile -> forward strategies only (baseline /
+            # baseline_survival / baseline_cached / atom_half_split).
+            layers = sorted(result.probabilities_by_layer.keys())
+            R = int(result.depth_used)
+            if not goals_list:
+                score = 1.0
+            elif not layers or R <= 0:
+                score = 0.0
+            else:
+                def _goal_product(layer: int) -> float:
+                    probs = result.probabilities_by_layer[layer]
+                    p = 1.0
+                    for goal in goals_list:
+                        p *= _clamp_probability(probs.get(goal, 0.0))
+                    return p
+
+                g_curve = [(t, _goal_product(t)) for t in layers]
+                g_inf = max(v for _, v in g_curve)
+                if g_inf <= 1e-9:
+                    # goal not relaxed-achievable within R -> no margin.
+                    score = 0.0
+                else:
+                    theta = 0.5 * g_inf
+                    tstar = float(R)  # default: never crossed within R
+                    prev_t, prev_v = g_curve[0]
+                    for t, v in g_curve:
+                        if v >= theta:
+                            if v == prev_v or t == prev_t:
+                                tstar = float(t)
+                            else:
+                                # linear interpolation of the sub-layer crossing
+                                frac = (theta - prev_v) / (v - prev_v)
+                                tstar = prev_t + frac * (t - prev_t)
+                            break
+                        prev_t, prev_v = t, v
+                    score = max(0.0, min(1.0, 1.0 - tstar / float(R)))
         else:
             raise ValueError(f"Unknown aggregation: {aggregation}")
 
@@ -815,6 +866,12 @@ class TemporalProbabilisticRPGHeuristic:
     @staticmethod
     def _normalize_strategy(strategy: str) -> str:
         value = (strategy or "baseline").strip().lower()
+        # baseline_time_to_goal is baseline PROPAGATION; it differs only in the
+        # goal aggregation ("time_to_goal"), which the caller selects separately
+        # (mcts._aggregation_for_strategy / explicit aggregation arg). Collapse
+        # it to baseline here so the full per-layer forward DP is produced.
+        if value == "baseline_time_to_goal":
+            value = "baseline"
         valid = {
             "baseline",
             "baseline_cached",

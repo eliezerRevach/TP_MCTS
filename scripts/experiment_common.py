@@ -211,6 +211,15 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "ptrpg_guided_rollout_policy": "atomic_exact_resolution",
         "label": "ptrpg_guided_rollout_atomic_exact_resolution",
     },
+    # MCTS leaf: PTRPG-guided prefix to fixed tail horizon, then PTRPG(state, H).
+    "fixed_tail_atomic_exact_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
+        "value_mode": "fixed_tail_ptrpg_rollout",
+        "ptrpg_guided_rollout_policy": "atomic_exact_resolution",
+        "fixed_tail_h": 10,
+        "label": "fixed_tail_atomic_exact_resolution",
+    },
 }
 
 ALL_HEURISTICS = list(HEURISTIC_ALIASES.keys())
@@ -280,6 +289,8 @@ def run_domain_subprocess(
     ptrpg_guided_rollout_max_steps: int | None = None,
     ptrpg_guided_rollout_epsilon: float | None = None,
     ptrpg_guided_rollout_debug: bool = False,
+    fixed_tail_h: int | None = None,
+    fixed_tail_debug: bool = False,
     garbage_amount: int = 0,
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
@@ -375,6 +386,10 @@ def run_domain_subprocess(
         cmd.extend(["--ptrpg-guided-rollout-epsilon", str(ptrpg_guided_rollout_epsilon)])
     if ptrpg_guided_rollout_debug:
         cmd.append("--ptrpg-guided-rollout-debug")
+    if fixed_tail_h is not None:
+        cmd.extend(["--fixed-tail-h", str(fixed_tail_h)])
+    if fixed_tail_debug:
+        cmd.append("--fixed-tail-debug")
     if extra_args:
         cmd.extend(extra_args)
 

@@ -99,11 +99,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--reward_mode", choices=["deadline", "terminal"], default="deadline")
     p.add_argument(
         "--value_mode",
-        choices=["tp_mcts", "greedy_matched", "ptrpg_guided_terminal_rollout"],
+        choices=[
+            "tp_mcts",
+            "greedy_matched",
+            "ptrpg_guided_terminal_rollout",
+            "fixed_tail_ptrpg_rollout",
+        ],
         default="greedy_matched",
         help=(
-            "MCTS leaf/backup target: tp_mcts (PTRPG heuristic), greedy_matched, or "
-            "ptrpg_guided_terminal_rollout (stochastic rollout, PTRPG policy only)."
+            "MCTS leaf/backup target: tp_mcts (PTRPG heuristic), greedy_matched, "
+            "ptrpg_guided_terminal_rollout, or fixed_tail_ptrpg_rollout."
         ),
     )
     p.add_argument(
@@ -240,6 +245,8 @@ def apply_heuristic_alias_overrides(args: argparse.Namespace) -> None:
     args.value_mode = alias.get("value_mode", args.value_mode)
     if args.ptrpg_guided_rollout_policy is None:
         args.ptrpg_guided_rollout_policy = alias.get("ptrpg_guided_rollout_policy")
+    if getattr(args, "fixed_tail_h", None) is None and "fixed_tail_h" in alias:
+        args.fixed_tail_h = int(alias["fixed_tail_h"])
 
 
 def strategy_for_greedy_matched_expected(strategy: str) -> str:
@@ -276,6 +283,17 @@ def configure_ptrpg_rollout_cli(args: argparse.Namespace) -> None:
         up.args.ptrpg_guided_rollout_epsilon = args.ptrpg_guided_rollout_epsilon
     if args.ptrpg_guided_rollout_debug:
         up.args.ptrpg_guided_rollout_debug = True
+
+
+def configure_fixed_tail_cli(args: argparse.Namespace) -> None:
+    """Mirror fixed-tail flags on up.args for direct C_MCTS construction."""
+    a = getattr(up, "args", None)
+    if a is None:
+        return
+    if getattr(args, "fixed_tail_h", None) is not None:
+        a.fixed_tail_h = int(args.fixed_tail_h)
+    if getattr(args, "fixed_tail_debug", False):
+        a.fixed_tail_debug = True
 
 
 def build_mcts(args: argparse.Namespace) -> C_MCTS:
@@ -504,6 +522,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     apply_heuristic_alias_overrides(args)
     configure_ptrpg_rollout_cli(args)
+    configure_fixed_tail_cli(args)
     configure_rollout_aligned_cli(args)
     if args.resolution_alpha is not None:
         up.args.resolution_alpha = args.resolution_alpha

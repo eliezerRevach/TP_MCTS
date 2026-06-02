@@ -69,8 +69,13 @@ def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
     (identical survival propagation, different goal aggregation). Every other
     strategy also uses "product".
     """
-    if (temporal_heuristic_strategy or "").strip().lower() == "baseline_survival_meanvar":
+    strat = (temporal_heuristic_strategy or "").strip().lower()
+    if strat == "baseline_survival_meanvar":
         return "meanvar"
+    if strat == "baseline_time_to_goal":
+        # baseline propagation + deadline-normalized time-to-goal margin
+        # V = 1 - t*/R (comparable across deadlines; see temporal_probabilistic_rpg).
+        return "time_to_goal"
     return "product"
 
 
@@ -173,6 +178,11 @@ _FRONTIER_ALIGNED_SUFFIX = {
     "frontier_aligned_baseline": "baseline",
     "frontier_aligned_survival": "baseline_survival",
     "frontier_aligned_resolution_survival": "baseline_survival_resolution",
+    # Explicit Option A names (global open-leaf frontier driver). Same global
+    # frontier behavior as the frontier_aligned_* above.
+    "frontier_aligned_option_a": "baseline",
+    "frontier_aligned_option_a_survival": "baseline_survival",
+    "frontier_aligned_option_a_resolution": "baseline_survival_resolution",
 }
 
 # Both families compute the per-node aligned value through the same evaluator.
@@ -197,6 +207,28 @@ def validate_ptrpg_guided_rollout_config(
     if _is_option_a_strategy(temporal_heuristic_strategy):
         raise ValueError(
             "value_mode=ptrpg_guided_terminal_rollout cannot be combined with "
+            f"frontier_aligned_option_a strategy {temporal_heuristic_strategy!r}"
+        )
+
+
+def _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode: str) -> bool:
+    return value_mode == "fixed_tail_ptrpg_rollout"
+
+
+def validate_fixed_tail_ptrpg_rollout_config(
+    value_mode: str,
+    temporal_heuristic_strategy: str,
+) -> None:
+    if not _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode):
+        return
+    if temporal_heuristic_strategy in _ALIGNED_SUFFIX:
+        raise ValueError(
+            "value_mode=fixed_tail_ptrpg_rollout cannot be combined with "
+            f"rollout_aligned / frontier_aligned strategy {temporal_heuristic_strategy!r}"
+        )
+    if _is_option_a_strategy(temporal_heuristic_strategy):
+        raise ValueError(
+            "value_mode=fixed_tail_ptrpg_rollout cannot be combined with "
             f"frontier_aligned_option_a strategy {temporal_heuristic_strategy!r}"
         )
 
@@ -575,6 +607,8 @@ class Base_MCTS:
         i = 0
         if hasattr(self, "_ptrpg_rollout_debug_done"):
             self._ptrpg_rollout_debug_done = False
+        if hasattr(self, "_fixed_tail_debug_evals"):
+            self._fixed_tail_debug_evals = 0
         avg_variants = {'avg', 'avg_topk', 'avg_pw'}
         selection = (
             self.selection
@@ -800,6 +834,7 @@ class C_MCTS(Base_MCTS):
         self._root_baseline_cache = root_baseline_cache
         self.value_mode = value_mode
         validate_ptrpg_guided_rollout_config(value_mode, temporal_heuristic_strategy)
+        validate_fixed_tail_ptrpg_rollout_config(value_mode, temporal_heuristic_strategy)
         self._uct_initial_k = max(1, int(uct_initial_k))
         self._uct_filter_mode = {
             'avg_topk': 'topk',
@@ -820,6 +855,16 @@ class C_MCTS(Base_MCTS):
                 )
             except ValueError:
                 pass
+
+        self._fixed_tail_config = None
+        self._fixed_tail_debug_evals = 0
+        if _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode):
+            from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                fixed_tail_config_from_args,
+            )
+
+            self._fixed_tail_config = fixed_tail_config_from_args(mdp)
+            self._fixed_tail_config.tail_strategy = temporal_heuristic_strategy
 
         self._next_option_a_node_id = 1
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
@@ -867,6 +912,48 @@ class C_MCTS(Base_MCTS):
     def _uses_ptrpg_guided_rollout(self) -> bool:
         return _uses_ptrpg_guided_rollout_value_mode(self.value_mode)
 
+    def _uses_fixed_tail_ptrpg_rollout(self) -> bool:
+        return _uses_fixed_tail_ptrpg_rollout_value_mode(self.value_mode)
+
+    def _leaf_fixed_tail_value_from_anode(
+        self,
+        state: "up.engines.State",
+        anode: "up.engines.C_ANode",
+        leaf_id: object = None,
+    ) -> float:
+        from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+            fixed_tail_ptrpg_value,
+        )
+
+        debug_emit = False
+        if (
+            self._fixed_tail_config is not None
+            and self._fixed_tail_config.debug_enabled
+            and self._fixed_tail_debug_evals < self._fixed_tail_config.debug_eval_limit
+        ):
+            debug_emit = True
+            self._fixed_tail_debug_evals += 1
+        return fixed_tail_ptrpg_value(
+            mdp=self.mdp,
+            state=state,
+            stn=anode.stn,
+            previous_action_node=anode.STNNode,
+            config=self._fixed_tail_config,
+            heuristic_name=self.heuristic_name,
+            temporal_heuristic_depth=self.temporal_heuristic_depth,
+            leaf_id=leaf_id if leaf_id is not None else id(anode),
+            debug_emit=debug_emit,
+        )
+
+    def _leaf_fixed_tail_value(self, snode: "up.engines.C_SNode") -> float:
+        if snode.parent is None:
+            return 0.0
+        return self._leaf_fixed_tail_value_from_anode(
+            snode.state,
+            snode.parent,
+            leaf_id=getattr(snode, "_option_a_node_id", id(snode)),
+        )
+
     def _leaf_rollout_value_from_anode(
         self,
         state: "up.engines.State",
@@ -903,6 +990,8 @@ class C_MCTS(Base_MCTS):
     def _depth_cutoff_value(self, snode: "up.engines.C_Snode"):
         if self._uses_ptrpg_guided_rollout():
             return self._leaf_rollout_value(snode)
+        if self._uses_fixed_tail_ptrpg_rollout():
+            return self._leaf_fixed_tail_value(snode)
         if self.value_mode != "greedy_matched":
             return self.heuristic(snode)
 
@@ -1116,8 +1205,24 @@ class C_MCTS(Base_MCTS):
             rows.append((n, elapsed, remaining, delta, aligned, existing, score))
 
         if self._frontier_debug_enabled():
-            budget = getattr(self.mdp, "_frontier_debug_remaining", 3)
-            if budget > 0:
+            # Spend the trace budget on NON-degenerate frontiers (delta>0 on some
+            # node) so we actually observe alignment engaging; degenerate frontiers
+            # (all elapsed equal -> no alignment) only get a single compact note so
+            # the early all-elapsed-0 phase does not exhaust the budget. Override
+            # the old "first N iterations" behavior with FRONTIER_ALIGNED_DEBUG_ALL=1.
+            import os
+            debug_all = bool(os.environ.get("FRONTIER_ALIGNED_DEBUG_ALL"))
+            budget = getattr(self.mdp, "_frontier_debug_remaining", 5)
+            should_print = budget > 0 and (debug_all or not same_elapsed)
+            if same_elapsed and not debug_all:
+                if not getattr(self.mdp, "_frontier_debug_degen_noted", False):
+                    setattr(self.mdp, "_frontier_debug_degen_noted", True)
+                    print(f"\n[frontier_aligned/global] DEGENERATE frontier "
+                          f"(all elapsed={deepest_elapsed}, size={len(frontier)}); "
+                          f"suppressing further degenerate traces, waiting for delta>0.",
+                          flush=True)
+                should_print = False
+            if should_print:
                 setattr(self.mdp, "_frontier_debug_remaining", budget - 1)
                 note = ("  (DEGENERATE: all frontier nodes share elapsed -> raw PTRPG, no alignment needed)"
                         if same_elapsed else "")
@@ -1128,6 +1233,18 @@ class C_MCTS(Base_MCTS):
                     print(f"  depth={n.depth:<2} elapsed={elapsed:<6} remaining={remaining:<6} "
                           f"delta={delta:<6} aligned={aligned:.4f} existing={existing:.4f} "
                           f"frontier_score={score:.4f} selected={'YES' if n is best else 'no'}",
+                          flush=True)
+                # Surface evaluator diagnostics so we can tell WHY delta>0 inflates:
+                # goal-reaching during the prefix (-> 1.0) vs a higher suffix PTRPG.
+                evals = getattr(self.mdp, "_rollout_aligned_evaluators", None) or {}
+                for ekey, ev in evals.items():
+                    d = ev.diagnostics.as_dict()
+                    print(f"  [evaluator {ekey}] prefix_rollouts={d['prefix_rollouts']} "
+                          f"reached_goal={d['prefix_rollouts_reached_goal']} "
+                          f"dead_end={d['prefix_rollouts_dead_end']} "
+                          f"goal_rate={d['prefix_goal_rate']:.3f} "
+                          f"avg_suffix_ptrpg={d['avg_suffix_ptrpg_value']:.4f} "
+                          f"avg_prefix_len={d['avg_prefix_rollout_length']:.2f}",
                           flush=True)
 
         if best is not None:
@@ -1412,6 +1529,11 @@ class C_MCTS(Base_MCTS):
                     reward += self.mdp.discount_factor * self._leaf_rollout_value_from_anode(
                         next_state, snode.children[action]
                     )
+            elif self._uses_fixed_tail_ptrpg_rollout():
+                if not terminal:
+                    reward += self.mdp.discount_factor * self._leaf_fixed_tail_value_from_anode(
+                        next_state, snode.children[action]
+                    )
             else:
                 reward += self.mdp.discount_factor * self.heuristic_init(
                     next_state, snode.children[action].stn, parent_snode=snode
@@ -1457,6 +1579,8 @@ class C_MCTS(Base_MCTS):
                     reward = self._greedy_matched_action_target(snode, action)
                 elif self._uses_ptrpg_guided_rollout():
                     reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
+                elif self._uses_fixed_tail_ptrpg_rollout():
+                    reward += self.mdp.discount_factor * self._leaf_fixed_tail_value(next_snode)
                 else:
                     # Standard PTRPG value — this is what gets backpropagated.
                     h_val = self.heuristic(next_snode)
@@ -1506,6 +1630,9 @@ class C_MCTS(Base_MCTS):
                 elif self._uses_ptrpg_guided_rollout():
                     next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
                     reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
+                elif self._uses_fixed_tail_ptrpg_rollout():
+                    next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
+                    reward += self.mdp.discount_factor * self._leaf_fixed_tail_value(next_snode)
                 else:
                     next_snode, snode_reward = self.create_Snode_max(next_state, snode.depth + 1, anode.stn, anode)
                     reward += snode_reward
@@ -1557,6 +1684,8 @@ class C_MCTS(Base_MCTS):
                     reward = self._greedy_matched_action_target(snode, action)
                 elif self._uses_ptrpg_guided_rollout():
                     reward += self._leaf_rollout_value(next_snode) * self.mdp.discount_factor
+                elif self._uses_fixed_tail_ptrpg_rollout():
+                    reward += self._leaf_fixed_tail_value(next_snode) * self.mdp.discount_factor
                 else:
                     reward += self.heuristic(next_snode) * self.mdp.discount_factor
                 anode.add_child(next_snode)
