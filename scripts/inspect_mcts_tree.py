@@ -147,7 +147,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="fixed_tail_h",
         type=int,
         default=None,
-        help="fixed_tail_ptrpg_rollout: common PTRPG suffix horizon H (defaults from alias).",
+        help="fixed_tail_ptrpg_rollout: common PTRPG suffix horizon H (default 10 if omitted).",
     )
     p.add_argument(
         "--fixed-tail-debug",
@@ -545,12 +545,16 @@ def main(argv: list[str] | None = None) -> None:
     milestones = sorted(set(max(0, m) for m in args.milestones))
 
     mcts = build_mcts(args)
+    tail_h = getattr(args, "fixed_tail_h", None)
+    if args.value_mode == "fixed_tail_ptrpg_rollout" and tail_h is None:
+        tail_h = getattr(getattr(up, "args", None), "fixed_tail_h", 10)
     print(
         "TP-MCTS tree inspection: "
         f"domain={args.domain} obj={args.object_amount} deadline={args.deadline} "
         f"heuristic={args.heuristic} selection={args.selection_type} "
         f"value_mode={args.value_mode} depth={args.search_depth} "
         f"k={args.k} uct_initial_k={args.uct_initial_k} C={args.exploration_constant} seed={args.seed}"
+        + (f" fixed_tail_h={tail_h}" if args.value_mode == "fixed_tail_ptrpg_rollout" else "")
     )
     print(
         f"Milestones (cumulative selection iterations): {milestones}  top_n={args.top_n}"

@@ -447,7 +447,10 @@ def run_experiment(
     alias = HEURISTIC_ALIASES[heuristic_key]
     effective_value_mode = alias.get("value_mode", value_mode)
     effective_rollout_policy = alias.get("ptrpg_guided_rollout_policy", ptrpg_guided_rollout_policy)
-    effective_fixed_tail_h = alias.get("fixed_tail_h", fixed_tail_h)
+    # CLI / notebook FIXED_TAIL_H wins; alias fixed_tail_h is only a fallback default.
+    effective_fixed_tail_h = (
+        fixed_tail_h if fixed_tail_h is not None else alias.get("fixed_tail_h")
+    )
     if effective_fixed_tail_h is not None:
         effective_fixed_tail_h = int(effective_fixed_tail_h)
     depth = heuristic_depth if heuristic_depth is not None else deadline

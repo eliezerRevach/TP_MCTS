@@ -217,7 +217,6 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
         "value_mode": "fixed_tail_ptrpg_rollout",
         "ptrpg_guided_rollout_policy": "atomic_exact_resolution",
-        "fixed_tail_h": 10,
         "label": "fixed_tail_atomic_exact_resolution",
     },
 }
