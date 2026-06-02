@@ -345,6 +345,13 @@ parser.add_argument(
     help='fixed_tail_ptrpg_rollout: log the first 5 leaf evaluations per MCTS search.',
 )
 parser.add_argument(
+    '--fixed-tail-prefix-policy',
+    dest='fixed_tail_prefix_policy',
+    default='first_legal_fitting',
+    choices=('first_legal_fitting', 'ptrpg_greedy'),
+    help='fixed_tail_ptrpg_rollout: prefix action policy (default first_legal_fitting).',
+)
+parser.add_argument(
     '--ptrpg-guided-rollout-policy',
     dest='ptrpg_guided_rollout_policy',
     default='baseline_survival_resolution',

@@ -609,6 +609,12 @@ class Base_MCTS:
             self._ptrpg_rollout_debug_done = False
         if hasattr(self, "_fixed_tail_debug_evals"):
             self._fixed_tail_debug_evals = 0
+        if _uses_fixed_tail_ptrpg_rollout_value_mode(getattr(self, "value_mode", "")):
+            from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                reset_fixed_tail_profiler,
+            )
+
+            reset_fixed_tail_profiler()
         avg_variants = {'avg', 'avg_topk', 'avg_pw'}
         selection = (
             self.selection
@@ -865,6 +871,14 @@ class C_MCTS(Base_MCTS):
 
             self._fixed_tail_config = fixed_tail_config_from_args(mdp)
             self._fixed_tail_config.tail_strategy = temporal_heuristic_strategy
+            print(
+                f"[fixed_tail] value_mode={value_mode} heuristic_name={heuristic_name} "
+                f"temporal_heuristic_strategy={temporal_heuristic_strategy} "
+                f"FIXED_TAIL_H={self._fixed_tail_config.fixed_tail_h} "
+                f"deadline={mdp.deadline()} search_depth={search_depth} "
+                f"fixed_tail_prefix_policy={self._fixed_tail_config.prefix_policy}",
+                flush=True,
+            )
 
         self._next_option_a_node_id = 1
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
@@ -933,7 +947,7 @@ class C_MCTS(Base_MCTS):
         ):
             debug_emit = True
             self._fixed_tail_debug_evals += 1
-        return fixed_tail_ptrpg_value(
+        raw = fixed_tail_ptrpg_value(
             mdp=self.mdp,
             state=state,
             stn=anode.stn,
@@ -944,6 +958,13 @@ class C_MCTS(Base_MCTS):
             leaf_id=leaf_id if leaf_id is not None else id(anode),
             debug_emit=debug_emit,
         )
+        if not (0.0 <= raw <= 1.0):
+            print(
+                f"[fixed_tail warn] value out of [0,1]: {raw} "
+                f"producer=fixed_tail_ptrpg_value leaf_id={leaf_id}",
+                flush=True,
+            )
+        return max(0.0, min(1.0, raw))
 
     def _leaf_fixed_tail_value(self, snode: "up.engines.C_SNode") -> float:
         if snode.parent is None:
