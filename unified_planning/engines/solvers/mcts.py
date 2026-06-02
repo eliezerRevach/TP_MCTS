@@ -214,12 +214,17 @@ def _rollout_aligned_config_from_cli():
     return cfg
 
 
-def _get_rollout_aligned_evaluator(heuristic_mdp, heuristic, suffix_strategy: str):
+def _get_rollout_aligned_evaluator(
+    heuristic_mdp, heuristic, suffix_strategy: str, force_pure_dynamic: bool = False
+):
     """Build (once per MDP+suffix) a RolloutAlignedEvaluator bound to this MDP.
 
     The closures use the *real* MDP for the unmatched prefix (legal actions,
     durations, stochastic effects via mdp.step — exactly like ``simulate()``),
     and raw PTRPG for the common suffix horizon.
+
+    ``force_pure_dynamic`` (used for frontier_aligned_*) pins the evaluator to the
+    dynamic H_frontier and makes the fixed ROLLOUT_ALIGNED_H have no effect.
     """
     from comdp_plus_no_deadline.engines.rollout_aligned import (
         BOUNDARY_WAIT_NO_OVERSHOOT,
@@ -230,11 +235,16 @@ def _get_rollout_aligned_evaluator(heuristic_mdp, heuristic, suffix_strategy: st
     if cache is None:
         cache = {}
         setattr(heuristic_mdp, "_rollout_aligned_evaluators", cache)
-    existing = cache.get(suffix_strategy)
+    cache_key = (suffix_strategy, bool(force_pure_dynamic))
+    existing = cache.get(cache_key)
     if existing is not None:
         return existing
 
     cfg = _rollout_aligned_config_from_cli()
+    if force_pure_dynamic:
+        # frontier_aligned_*: always pure dynamic H_frontier. Ignore the fixed-H
+        # switch entirely so ROLLOUT_ALIGNED_H / FIXED_H can never affect it.
+        cfg.use_dynamic_H = True
     deadline = heuristic_mdp.deadline()
     goals = set(heuristic_mdp.problem.goals)
     res_kwargs = _resolution_heuristic_kwargs_from_cli()
@@ -324,7 +334,7 @@ def _get_rollout_aligned_evaluator(heuristic_mdp, heuristic, suffix_strategy: st
         prefix_rollout_fn=prefix_rollout_fn,
         state_hash_fn=state_hash_fn,
     )
-    cache[suffix_strategy] = evaluator
+    cache[cache_key] = evaluator
     return evaluator
 
 
@@ -374,8 +384,11 @@ def _temporal_heuristic(
     # propagation strategies of the heuristic itself).
     if temporal_heuristic_strategy in _ALIGNED_SUFFIX:
         suffix_strategy = _ALIGNED_SUFFIX[temporal_heuristic_strategy]
+        # frontier_aligned_* always uses pure dynamic H_frontier (the fixed
+        # ROLLOUT_ALIGNED_H must never affect it).
+        is_frontier = temporal_heuristic_strategy in _FRONTIER_ALIGNED_SUFFIX
         evaluator = _get_rollout_aligned_evaluator(
-            heuristic_mdp, heuristic, suffix_strategy
+            heuristic_mdp, heuristic, suffix_strategy, force_pure_dynamic=is_frontier
         )
         return evaluator.evaluate(
             state, effective_depth, h_override=aligned_h_override

@@ -62,7 +62,7 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
         self.assertEqual(ev.diagnostics.prefix_rollouts, 0)
 
     def test_goal_in_prefix_returns_one(self):
-        cfg = RolloutAlignedConfig(common_horizon_H=10, redo=1)
+        cfg = RolloutAlignedConfig(common_horizon_H=10, use_dynamic_H=False, redo=1)
 
         def prefix(state, delta):
             return FakeState("g", predicates=frozenset({"G"})), True, 2, False
@@ -74,14 +74,14 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
         self.assertEqual(calls, [])  # suffix PTRPG skipped when goal reached
 
     def test_no_goal_evaluates_suffix_at_H(self):
-        cfg = RolloutAlignedConfig(common_horizon_H=10, redo=1)
+        cfg = RolloutAlignedConfig(common_horizon_H=10, use_dynamic_H=False, redo=1)
         ev, calls = _make_evaluator(cfg)  # default prefix never reaches goal
         v = ev.evaluate(FakeState("n"), remaining_horizon=30)  # delta=20
         self.assertEqual(v, 0.5)
         self.assertEqual(calls, [("after", 10)])  # common suffix horizon H=10
 
     def test_redo_averaging(self):
-        cfg = RolloutAlignedConfig(common_horizon_H=10, redo=4)
+        cfg = RolloutAlignedConfig(common_horizon_H=10, use_dynamic_H=False, redo=4)
         seq = [True, False, True, False]  # -> (1 + 0.5 + 1 + 0.5)/4 = 0.75
         idx = {"i": 0}
 
@@ -100,6 +100,7 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
     def test_budget_fallback_horizon_capped(self):
         cfg = RolloutAlignedConfig(
             common_horizon_H=10,
+            use_dynamic_H=False,
             redo=5,
             max_prefix_rollouts_per_search=2,
             fallback_mode=FALLBACK_HORIZON_CAPPED,
@@ -118,6 +119,7 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
     def test_budget_fallback_raw_mode(self):
         cfg = RolloutAlignedConfig(
             common_horizon_H=10,
+            use_dynamic_H=False,
             redo=5,
             max_prefix_rollouts_per_search=0,  # unlimited; force via time instead
             fallback_mode=FALLBACK_RAW,
@@ -133,7 +135,7 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
 
     def test_reset_search_budget(self):
         cfg = RolloutAlignedConfig(
-            common_horizon_H=10, redo=5, max_prefix_rollouts_per_search=2
+            common_horizon_H=10, use_dynamic_H=False, redo=5, max_prefix_rollouts_per_search=2
         )
         ev, _ = _make_evaluator(cfg)
         ev.evaluate(FakeState("n1"), remaining_horizon=30)
@@ -145,7 +147,7 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
         self.assertEqual(ev._search_rollouts, 2)
 
     def test_caching(self):
-        cfg = RolloutAlignedConfig(common_horizon_H=10, redo=1, cache_aligned_values=True)
+        cfg = RolloutAlignedConfig(common_horizon_H=10, use_dynamic_H=False, redo=1, cache_aligned_values=True)
         ev, calls = _make_evaluator(cfg)
         s = FakeState("n", current_time=0.0)
         ev.evaluate(s, remaining_horizon=30)
@@ -155,7 +157,7 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
         self.assertEqual(ev.diagnostics.prefix_rollouts, n_rollouts)  # no new rollout
 
     def test_diagnostics_dict(self):
-        cfg = RolloutAlignedConfig(common_horizon_H=10, redo=2)
+        cfg = RolloutAlignedConfig(common_horizon_H=10, use_dynamic_H=False, redo=2)
         ev, _ = _make_evaluator(cfg)
         ev.evaluate(FakeState("n"), remaining_horizon=30)
         d = ev.diagnostics.as_dict()
@@ -175,15 +177,21 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
         self.assertEqual(ev.diagnostics.dynamic_h_evaluations, 1)
         self.assertEqual(ev.diagnostics.fixed_h_evaluations, 0)
 
-    def test_dynamic_h_capped_at_fixed(self):
-        # H_p larger than the fixed cap is clamped down to common_horizon_H.
-        cfg = RolloutAlignedConfig(
-            common_horizon_H=12, use_dynamic_H=True, cap_dynamic_h_at_fixed=True, redo=1
-        )
+    def test_dynamic_h_not_capped_by_fixed(self):
+        # The fixed horizon (common_horizon_H = ROLLOUT_ALIGNED_H) must NOT cap the
+        # dynamic H_p; H_p is used as-is (capped only at the node's own R).
+        cfg = RolloutAlignedConfig(common_horizon_H=12, use_dynamic_H=True, redo=1)
         ev, calls = _make_evaluator(cfg)
         ev.evaluate(FakeState("n"), remaining_horizon=40, h_override=30)
-        # H capped at 12 -> suffix at 12.
-        self.assertEqual(calls, [("after", 12)])
+        self.assertEqual(calls, [("after", 30)])  # H_p=30, NOT capped down to 12
+
+    def test_dynamic_no_override_uses_R_not_fixed(self):
+        # Dynamic mode with no h_override evaluates at the node's own R, never at
+        # common_horizon_H -> the fixed horizon is inert in dynamic mode.
+        cfg = RolloutAlignedConfig(common_horizon_H=5, use_dynamic_H=True, redo=1)
+        ev, calls = _make_evaluator(cfg)
+        ev.evaluate(FakeState("n"), remaining_horizon=20, h_override=None)
+        self.assertEqual(calls, [("n", 20)])  # H=R=20, NOT 5
 
     def test_fixed_h_when_dynamic_disabled(self):
         cfg = RolloutAlignedConfig(common_horizon_H=10, use_dynamic_H=False, redo=1)
@@ -193,7 +201,7 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
         self.assertEqual(ev.diagnostics.fixed_h_evaluations, 1)
 
     def test_dead_end_returns_zero(self):
-        cfg = RolloutAlignedConfig(common_horizon_H=10, redo=1)
+        cfg = RolloutAlignedConfig(common_horizon_H=10, use_dynamic_H=False, redo=1)
 
         def prefix(state, delta):
             return FakeState("dead"), False, 1, True  # dead-end
@@ -209,21 +217,19 @@ class TestRolloutAlignedWrapper(unittest.TestCase):
         cfg = RolloutAlignedConfig(
             common_horizon_H=12,
             use_dynamic_H=True,
-            cap_dynamic_h_at_fixed=False,
             min_dynamic_horizon=5,
             fallback_if_H_too_small="fixed",
             redo=1,
         )
         ev, calls = _make_evaluator(cfg)
         ev.evaluate(FakeState("n"), remaining_horizon=40, h_override=2)  # H_p=2 < 5
-        self.assertEqual(calls, [("after", 12)])  # used fixed H=12
+        self.assertEqual(calls, [("after", 12)])  # explicit opt-in to fixed H=12
         self.assertEqual(ev.diagnostics.small_h_fallbacks, 1)
 
     def test_min_dynamic_horizon_raw_fallback(self):
         cfg = RolloutAlignedConfig(
             common_horizon_H=12,
             use_dynamic_H=True,
-            cap_dynamic_h_at_fixed=False,
             min_dynamic_horizon=5,
             fallback_if_H_too_small="raw",
             redo=1,

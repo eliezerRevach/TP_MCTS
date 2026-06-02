@@ -93,8 +93,11 @@ class RolloutAlignedConfig:
     # is given) the evaluator falls back to the fixed common_horizon_H. The fixed
     # value also serves as an upper cap on H_p (a child never aligns above it).
     use_dynamic_H: bool = True
-    common_horizon_H: int = 15  # fixed suffix horizon / max cap on H_p
-    cap_dynamic_h_at_fixed: bool = True  # H_p <= common_horizon_H when capping
+    # Fixed suffix horizon. Read ONLY in fixed mode (use_dynamic_H == False).
+    # In dynamic mode it is never touched, so it CANNOT affect the dynamic
+    # parent-local (rollout_aligned_*) or frontier_aligned_* horizons — those use
+    # H_p / H_frontier (capped only at the node's own remaining R).
+    common_horizon_H: int = 15
 
     # Safety floor on the dynamic horizon (None disables the check).
     min_dynamic_horizon: Optional[int] = None
@@ -300,26 +303,37 @@ class RolloutAlignedEvaluator:
         return value
 
     def _resolve_horizon(self, state, R: int, h_override):
-        """Pick the comparison horizon H. Returns (H, raw_fallback_flag)."""
+        """Pick the comparison horizon H. Returns (H, raw_fallback_flag).
+
+        Invariant: ``common_horizon_H`` (the fixed horizon, = ROLLOUT_ALIGNED_H)
+        is read ONLY in fixed mode (``use_dynamic_H == False``). In dynamic mode
+        the horizon is the supplied ``h_override`` (H_p / H_frontier), capped only
+        at the node's own remaining ``R`` — never at ``common_horizon_H`` — so the
+        fixed horizon can never affect the dynamic or frontier-aligned variants.
+        """
         cfg = self.config
-        fixed = min(int(cfg.common_horizon_H), R)
-        if cfg.use_dynamic_H and h_override is not None:
-            H = max(0, int(h_override))
-            if cfg.cap_dynamic_h_at_fixed:
-                H = min(H, int(cfg.common_horizon_H))
-            H = min(H, R)
+        if cfg.use_dynamic_H:
             self.diagnostics.dynamic_h_evaluations += 1
-            # Safety floor on a too-small dynamic horizon.
+            if h_override is None:
+                # No frontier/parent horizon available (e.g. a root with no
+                # siblings) -> evaluate at the node's own remaining horizon.
+                # Deliberately NOT common_horizon_H.
+                return R, False
+            H = min(max(0, int(h_override)), R)
+            # Optional safety floor on a too-small dynamic horizon (off by
+            # default; only engages when min_dynamic_horizon is set explicitly).
             if cfg.min_dynamic_horizon is not None and H < int(cfg.min_dynamic_horizon):
                 self.diagnostics.small_h_fallbacks += 1
                 if cfg.fallback_if_H_too_small == SMALL_H_RAW:
                     return H, True
                 if cfg.fallback_if_H_too_small == SMALL_H_FIXED:
-                    H = fixed
+                    # Explicit user opt-in to the fixed horizon as the floor.
+                    H = min(int(cfg.common_horizon_H), R)
                 # SMALL_H_USE_ANYWAY: keep H as-is.
             return H, False
+        # Fixed mode only: this is the single place common_horizon_H is used.
         self.diagnostics.fixed_h_evaluations += 1
-        return fixed, False
+        return min(int(cfg.common_horizon_H), R), False
 
     # -- budget -------------------------------------------------------------
 
