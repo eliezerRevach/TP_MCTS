@@ -34,6 +34,10 @@ REPO_ROOT = SCRIPTS_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+from comdp_plus_no_deadline.engines.frontier_aligned_option_a import (
+    is_option_a_strategy,
+    option_a_ptrpg_suffix,
+)
 from experiment_common import HEURISTIC_ALIASES
 
 # The local unified_planning package parses sys.argv at import time.  Hide this
@@ -172,6 +176,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Set unified_planning.args.resolution_forced_minimum for atom_backtrack_exact_resolution.",
     )
+    p.add_argument(
+        "--rollout-aligned-h",
+        type=int,
+        default=None,
+        help="rollout_aligned_* / frontier_aligned_* / Option A: common suffix horizon H.",
+    )
+    p.add_argument(
+        "--rollout-aligned-redo",
+        type=int,
+        default=None,
+        help="Prefix rollouts averaged per aligned node (Option A uses this).",
+    )
+    p.add_argument(
+        "--rollout-aligned-boundary-mode",
+        default=None,
+        help="Prefix rollout boundary: overshoot | wait_no_overshoot | expected_stochastic_rounding.",
+    )
+    p.add_argument(
+        "--rollout-aligned-lambda-align",
+        type=float,
+        default=None,
+        help="frontier_aligned_* (non-Option-A): blend aligned value with UCT Q.",
+    )
+    p.add_argument(
+        "--rollout-aligned-fixed-h",
+        action="store_true",
+        help="rollout_aligned_* only: use fixed ROLLOUT_ALIGNED_H instead of dynamic H.",
+    )
     return p.parse_args(argv)
 
 
@@ -208,6 +240,30 @@ def apply_heuristic_alias_overrides(args: argparse.Namespace) -> None:
     args.value_mode = alias.get("value_mode", args.value_mode)
     if args.ptrpg_guided_rollout_policy is None:
         args.ptrpg_guided_rollout_policy = alias.get("ptrpg_guided_rollout_policy")
+
+
+def strategy_for_greedy_matched_expected(strategy: str) -> str:
+    """Map MCTS-only strategy names to a PTRPG strategy greedy_matched can evaluate."""
+    if is_option_a_strategy(strategy):
+        return option_a_ptrpg_suffix(strategy)
+    return strategy
+
+
+def configure_rollout_aligned_cli(args: argparse.Namespace) -> None:
+    """Mirror run_domain / experiment alignment flags on up.args."""
+    a = getattr(up, "args", None)
+    if a is None:
+        return
+    if args.rollout_aligned_h is not None:
+        a.rollout_aligned_h = int(args.rollout_aligned_h)
+    if args.rollout_aligned_redo is not None:
+        a.rollout_aligned_redo = int(args.rollout_aligned_redo)
+    if args.rollout_aligned_boundary_mode is not None:
+        a.rollout_aligned_boundary_mode = str(args.rollout_aligned_boundary_mode)
+    if args.rollout_aligned_lambda_align is not None:
+        a.rollout_aligned_lambda_align = float(args.rollout_aligned_lambda_align)
+    if args.rollout_aligned_fixed_h:
+        a.rollout_aligned_fixed_h = True
 
 
 def configure_ptrpg_rollout_cli(args: argparse.Namespace) -> None:
@@ -309,6 +365,7 @@ def expected_target(mcts: C_MCTS, action: Any, args: argparse.Namespace) -> floa
     alias = HEURISTIC_ALIASES[args.heuristic]
     anode = mcts.root_node.children[action]
     current_time = anode.stn.get_current_end_time()
+    strategy = strategy_for_greedy_matched_expected(alias["temporal_heuristic_strategy"])
     return greedy_matched_value_target(
         mdp=mcts.mdp,
         state=mcts.root_node.state,
@@ -316,7 +373,7 @@ def expected_target(mcts: C_MCTS, action: Any, args: argparse.Namespace) -> floa
         current_time=current_time,
         heuristic_name=alias["heuristic_name"],
         temporal_heuristic_depth=args.heuristic_depth if args.heuristic_depth is not None else args.deadline,
-        temporal_heuristic_strategy=alias["temporal_heuristic_strategy"],
+        temporal_heuristic_strategy=strategy,
     )
 
 
@@ -447,6 +504,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     apply_heuristic_alias_overrides(args)
     configure_ptrpg_rollout_cli(args)
+    configure_rollout_aligned_cli(args)
     if args.resolution_alpha is not None:
         up.args.resolution_alpha = args.resolution_alpha
     if args.resolution_forced_minimum:
@@ -465,6 +523,14 @@ def main(argv: list[str] | None = None) -> None:
     print(
         f"Milestones (cumulative selection iterations): {milestones}  top_n={args.top_n}"
     )
+    if args.expected:
+        strat = HEURISTIC_ALIASES[args.heuristic]["temporal_heuristic_strategy"]
+        if is_option_a_strategy(strat):
+            suffix = option_a_ptrpg_suffix(strat)
+            print(
+                "[note] --expected column is greedy_matched one-step score using PTRPG "
+                f"suffix {suffix!r}; it is not the global Option-A aligned selection value."
+            )
 
     completed = 0
     for milestone in milestones:
