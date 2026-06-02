@@ -291,7 +291,6 @@ def run_domain_subprocess(
     ptrpg_guided_rollout_debug: bool = False,
     fixed_tail_h: int | None = None,
     fixed_tail_debug: bool = False,
-    fixed_tail_prefix_policy: str | None = None,
     garbage_amount: int = 0,
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
@@ -391,8 +390,6 @@ def run_domain_subprocess(
         cmd.extend(["--fixed-tail-h", str(fixed_tail_h)])
     if fixed_tail_debug:
         cmd.append("--fixed-tail-debug")
-    if fixed_tail_prefix_policy is not None:
-        cmd.extend(["--fixed-tail-prefix-policy", str(fixed_tail_prefix_policy)])
     if extra_args:
         cmd.extend(extra_args)
 

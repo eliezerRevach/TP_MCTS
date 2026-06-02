@@ -15,16 +15,9 @@ try:
     from unified_planning.engines.mdp import MDP
     from unified_planning.engines.solvers.mcts import C_MCTS, plan as mcts_plan
     from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
-        PREFIX_POLICY_PTRPG_GREEDY,
         FixedTailConfig,
-        FixedTailSafetyError,
-        MAX_SECONDS_PER_FIXED_TAIL_EVAL,
         fixed_tail_ptrpg_value,
         remaining_deadline,
-        reset_fixed_tail_profiler,
-    )
-    from unified_planning.engines.solvers.ptrpg_guided_rollout import (
-        resolve_rollout_policy,
     )
     from unified_planning.engines.utils import create_init_stn
 finally:
@@ -58,21 +51,13 @@ def _build_split_problem(duration: int, deadline: int):
 
 class TestFixedTailPtrpgRollout(unittest.TestCase):
     def setUp(self):
-        reset_fixed_tail_profiler()
         self.converted = _build_split_problem(duration=2, deadline=25)
         self.mdp = MDP(self.converted, discount_factor=1.0, reward_mode="terminal")
         self.stn = create_init_stn(self.mdp)
         self.state = self.mdp.initial_state()
         self.config = FixedTailConfig(
             fixed_tail_h=10,
-            policy_strategy=resolve_rollout_policy("atomic_exact_resolution"),
             tail_strategy="atom_backtrack_exact_resolution",
-        )
-        self.greedy_config = FixedTailConfig(
-            fixed_tail_h=10,
-            policy_strategy=resolve_rollout_policy("atomic_exact_resolution"),
-            tail_strategy="atom_backtrack_exact_resolution",
-            prefix_policy=PREFIX_POLICY_PTRPG_GREEDY,
         )
 
     def test_value_in_unit_interval(self):
@@ -86,7 +71,6 @@ class TestFixedTailPtrpgRollout(unittest.TestCase):
                 stn=self.stn,
                 previous_action_node=None,
                 config=self.config,
-                temporal_heuristic_depth=25,
             )
         self.assertGreaterEqual(value, 0.0)
         self.assertLessEqual(value, 1.0)
@@ -106,93 +90,73 @@ class TestFixedTailPtrpgRollout(unittest.TestCase):
                 stn=self.stn,
                 previous_action_node=None,
                 config=self.config,
-                temporal_heuristic_depth=25,
             )
             self.assertEqual(mock_tail.call_count, 1)
             self.assertEqual(mock_tail.call_args[0][3], short_r)
 
-    def test_long_horizon_tail_uses_fixed_h(self):
-        R = remaining_deadline(self.mdp, self.stn)
-        self.assertGreater(R, self.greedy_config.fixed_tail_h)
-        legal = self.mdp.legal_actions(self.state)
-        candidate_stn = mock.Mock()
-        candidate_stn.get_current_end_time.return_value = float(R - self.greedy_config.fixed_tail_h)
-
+    def test_long_horizon_single_tail_ptrpg(self):
         with mock.patch(
-            "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout.pick_best_action",
-            return_value=(1.0, legal[0], candidate_stn, None, False, {}),
-        ), mock.patch.object(
-            self.mdp,
-            "step",
-            return_value=(False, self.state, 0.0),
-        ), mock.patch(
+            "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout._run_prefix_rollout",
+        ) as mock_prefix, mock.patch(
             "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout._ptrpg_at_horizon",
             return_value=0.33,
         ) as mock_tail:
+            from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                _PrefixResult,
+            )
+
+            mock_prefix.return_value = _PrefixResult(
+                state=self.state,
+                stn=self.stn,
+                previous_action_node=None,
+                waited=False,
+                boundary_time=15.0,
+            )
             value = fixed_tail_ptrpg_value(
                 mdp=self.mdp,
                 state=self.state,
                 stn=self.stn,
                 previous_action_node=None,
-                config=self.greedy_config,
-                temporal_heuristic_depth=25,
+                config=self.config,
             )
         self.assertEqual(value, 0.33)
         mock_tail.assert_called_once()
-        self.assertEqual(mock_tail.call_args[0][3], self.greedy_config.fixed_tail_h)
+        self.assertEqual(mock_tail.call_args[0][3], self.config.fixed_tail_h)
 
-    def test_boundary_wait_no_overshoot_step(self):
-        R = 25
-        H = 10
-        delta = R - H
+    def test_goal_during_prefix_returns_one(self):
         with mock.patch(
-            "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout.remaining_deadline",
-            return_value=R,
-        ):
-            legal = self.mdp.legal_actions(self.state)
-            self.assertTrue(legal)
+            "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout._run_prefix_rollout",
+        ) as mock_prefix:
+            from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+                _PrefixResult,
+            )
 
-            def fake_pick(*_args, **_kwargs):
-                candidate_stn = mock.Mock()
-                candidate_stn.get_current_end_time.return_value = 30.0
-                return (1.0, legal[0], candidate_stn, None, False, {})
-
-            current_stn = mock.Mock()
-            current_stn.get_current_end_time.return_value = 0.0
-            current_stn.is_consistent.return_value = True
-
-            with mock.patch(
-                "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout.pick_best_action",
-                side_effect=fake_pick,
-            ), mock.patch.object(self.mdp, "step") as mock_step, mock.patch(
-                "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout._ptrpg_at_horizon",
-                return_value=0.25,
-            ) as mock_tail:
-                fixed_tail_ptrpg_value(
-                    mdp=self.mdp,
-                    state=self.state,
-                    stn=current_stn,
-                    previous_action_node=None,
-                    config=self.greedy_config,
-                    temporal_heuristic_depth=25,
-                )
-        mock_step.assert_not_called()
-        self.assertEqual(mock_tail.call_args[0][2], float(delta))
-        self.assertEqual(mock_tail.call_args[0][3], H)
+            mock_prefix.return_value = _PrefixResult(
+                state=self.state,
+                stn=self.stn,
+                previous_action_node=None,
+                waited=False,
+                boundary_time=3.0,
+                goal_reached=True,
+                terminal_value=1.0,
+            )
+            value = fixed_tail_ptrpg_value(
+                mdp=self.mdp,
+                state=self.state,
+                stn=self.stn,
+                previous_action_node=None,
+                config=self.config,
+            )
+        self.assertEqual(value, 1.0)
 
     def test_single_eval_deadline_25_h_22(self):
         converted = _build_split_problem(duration=2, deadline=25)
         mdp = MDP(converted, discount_factor=1.0, reward_mode="terminal")
         stn = create_init_stn(mdp)
         state = mdp.initial_state()
-        config = FixedTailConfig(
-            fixed_tail_h=22,
-            policy_strategy=resolve_rollout_policy("atomic_exact_resolution"),
-            tail_strategy="atom_backtrack_exact_resolution",
-        )
+        config = FixedTailConfig(fixed_tail_h=22)
         R = remaining_deadline(mdp, stn)
         self.assertEqual(R, 25)
-        self.assertEqual(R - config.fixed_tail_h, 3)
 
         t0 = time.time()
         with mock.patch(
@@ -205,32 +169,12 @@ class TestFixedTailPtrpgRollout(unittest.TestCase):
                 stn=stn,
                 previous_action_node=None,
                 config=config,
-                temporal_heuristic_depth=25,
             )
-        elapsed = time.time() - t0
-        self.assertGreaterEqual(value, 0.0)
-        self.assertLessEqual(value, 1.0)
+        self.assertLess(time.time() - t0, 2.0)
         self.assertEqual(mock_tail.call_count, 1)
         self.assertEqual(mock_tail.call_args[0][3], 22)
-        self.assertLess(elapsed, 2.0)
-
-    def test_safety_timeout(self):
-        with mock.patch(
-            "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout.MAX_SECONDS_PER_FIXED_TAIL_EVAL",
-            0.001,
-        ), mock.patch(
-            "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout._ptrpg_at_horizon",
-            side_effect=lambda *_a, **_k: time.sleep(0.05) or 0.5,
-        ):
-            with self.assertRaises(FixedTailSafetyError):
-                fixed_tail_ptrpg_value(
-                    mdp=self.mdp,
-                    state=self.state,
-                    stn=self.stn,
-                    previous_action_node=None,
-                    config=self.config,
-                    temporal_heuristic_depth=25,
-                )
+        self.assertGreaterEqual(value, 0.0)
+        self.assertLessEqual(value, 1.0)
 
     def test_mcts_leaf_does_not_call_heuristic(self):
         with mock.patch.object(C_MCTS, "heuristic", autospec=True) as mock_h:

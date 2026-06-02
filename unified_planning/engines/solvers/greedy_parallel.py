@@ -172,47 +172,6 @@ def rank_actions_by_score(
     return ranked
 
 
-def pick_first_legal_fitting_action(
-    mdp: "up.engines.MDP",
-    state: "up.engines.State",
-    stn: "up.plans.stn.STNPlan",
-    previous_action_node: "up.plans.stn.STNPlanNode",
-    max_duration: float,
-) -> Optional[ActionScoreEntry]:
-    """
-    Choose the first legal action (stable name order) whose STN dispatch duration
-    is positive and does not exceed max_duration. No heuristic scoring.
-    """
-    legal_actions = mdp.legal_actions(state)
-    if not legal_actions:
-        return None
-    ranked = sorted(legal_actions, key=_action_name_key)
-    for action in ranked:
-        candidate_stn = stn.clone()
-        candidate_prev = previous_action_node
-        try:
-            candidate_prev = update_stn(
-                candidate_stn,
-                action,
-                candidate_prev,
-                type="SetTime",
-            )
-        except Exception:
-            continue
-        if not candidate_stn.is_consistent():
-            continue
-        if candidate_stn.get_current_end_time() > mdp.deadline():
-            continue
-        dur = float(candidate_stn.get_current_end_time()) - float(
-            stn.get_current_end_time()
-        )
-        if dur <= 0.0:
-            continue
-        if dur <= max_duration + 1e-9:
-            return (0.0, action, candidate_stn, candidate_prev, False, {})
-    return None
-
-
 def pick_best_action(
     mdp: "up.engines.MDP",
     state: "up.engines.State",

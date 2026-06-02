@@ -342,14 +342,7 @@ parser.add_argument(
     dest='fixed_tail_debug',
     action='store_true',
     default=False,
-    help='fixed_tail_ptrpg_rollout: log the first 5 leaf evaluations per MCTS search.',
-)
-parser.add_argument(
-    '--fixed-tail-prefix-policy',
-    dest='fixed_tail_prefix_policy',
-    default='first_legal_fitting',
-    choices=('first_legal_fitting', 'ptrpg_greedy'),
-    help='fixed_tail_ptrpg_rollout: prefix action policy (default first_legal_fitting).',
+    help='Deprecated (no effect). Kept for backward-compatible experiment scripts.',
 )
 parser.add_argument(
     '--ptrpg-guided-rollout-policy',
