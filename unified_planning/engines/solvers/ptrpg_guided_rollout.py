@@ -153,7 +153,8 @@ def ptrpg_guided_terminal_rollout(
     heuristic_weight: float = GREEDY_HEURISTIC_WEIGHT,
     debug_emit: bool = False,
 ) -> float:
-    del config.epsilon  # reserved for future epsilon-greedy ablations
+    # epsilon reserved for future epsilon-greedy; pure greedy when 0.0
+    _ = getattr(config, "epsilon", 0.0)
 
     current_state = state
     current_stn = stn
