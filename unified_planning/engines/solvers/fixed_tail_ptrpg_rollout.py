@@ -53,6 +53,10 @@ def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
 class FixedTailConfig:
     prefix_frac: float = 0.10
     tail_strategy: str = "atom_backtrack_exact_resolution"
+    prefix_policy: str = "mcts_sampled"
+    max_expectimax_nodes: int = 5000
+    max_expectimax_depth: int = 64
+    max_expectimax_time_sec: float = 0.0
 
     def __post_init__(self) -> None:
         frac = float(self.prefix_frac)
@@ -62,6 +66,10 @@ class FixedTailConfig:
             self.prefix_frac = 1.0
         else:
             self.prefix_frac = frac
+        self.prefix_policy = str(self.prefix_policy).strip().lower()
+        self.max_expectimax_nodes = max(1, int(self.max_expectimax_nodes))
+        self.max_expectimax_depth = max(1, int(self.max_expectimax_depth))
+        self.max_expectimax_time_sec = max(0.0, float(self.max_expectimax_time_sec))
 
 
 @dataclass(frozen=True)
@@ -76,9 +84,23 @@ class FixedTailSearchContext:
 def fixed_tail_config_from_args(args=None) -> FixedTailConfig:
     cli = args if args is not None else getattr(up, "args", None)
     prefix_frac = 0.10
+    prefix_policy = "mcts_sampled"
+    max_nodes = 5000
+    max_depth = 64
+    max_time = 0.0
     if cli is not None:
         prefix_frac = float(getattr(cli, "fixed_tail_prefix_frac", prefix_frac))
-    return FixedTailConfig(prefix_frac=prefix_frac)
+        prefix_policy = str(getattr(cli, "fixed_tail_prefix_policy", prefix_policy))
+        max_nodes = int(getattr(cli, "fixed_tail_expectimax_max_nodes", max_nodes))
+        max_depth = int(getattr(cli, "fixed_tail_expectimax_max_depth", max_depth))
+        max_time = float(getattr(cli, "fixed_tail_expectimax_max_time_sec", max_time))
+    return FixedTailConfig(
+        prefix_frac=prefix_frac,
+        prefix_policy=prefix_policy,
+        max_expectimax_nodes=max_nodes,
+        max_expectimax_depth=max_depth,
+        max_expectimax_time_sec=max_time,
+    )
 
 
 def build_fixed_tail_search_context(

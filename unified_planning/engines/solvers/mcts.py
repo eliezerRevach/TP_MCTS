@@ -609,6 +609,9 @@ class Base_MCTS:
             self._ptrpg_rollout_debug_done = False
         if hasattr(self, "_fixed_tail_debug_count"):
             self._fixed_tail_debug_count = 0
+        if getattr(self, "_fixed_tail_expectimax", None) is not None:
+            self._fixed_tail_expectimax.reset_search()
+        self._fixed_tail_root_debug_done = False
         avg_variants = {'avg', 'avg_topk', 'avg_pw'}
         selection = (
             self.selection
@@ -858,11 +861,18 @@ class C_MCTS(Base_MCTS):
 
         self._fixed_tail_config = None
         self._fixed_tail_ctx = None
+        self._fixed_tail_expectimax = None
         self._fixed_tail_debug_count = 0
+        self._fixed_tail_root_debug_done = False
         if _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode):
             from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
                 build_fixed_tail_search_context,
                 fixed_tail_config_from_args,
+            )
+            from unified_planning.engines.solvers.fixed_tail_expectimax import (
+                FixedTailExpectimaxEvaluator,
+                FixedTailExpectimaxGuards,
+                uses_expectimax_prefix,
             )
 
             self._fixed_tail_config = fixed_tail_config_from_args()
@@ -870,6 +880,17 @@ class C_MCTS(Base_MCTS):
             self._fixed_tail_ctx = build_fixed_tail_search_context(
                 mdp, root_state, stn, self._fixed_tail_config
             )
+            if uses_expectimax_prefix(self._fixed_tail_config):
+                self._fixed_tail_expectimax = FixedTailExpectimaxEvaluator(
+                    mdp=mdp,
+                    ctx=self._fixed_tail_ctx,
+                    strategy=temporal_heuristic_strategy,
+                    guards=FixedTailExpectimaxGuards(
+                        max_nodes=self._fixed_tail_config.max_expectimax_nodes,
+                        max_depth=self._fixed_tail_config.max_expectimax_depth,
+                        max_time_sec=self._fixed_tail_config.max_expectimax_time_sec,
+                    ),
+                )
 
         self._next_option_a_node_id = 1
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
@@ -919,6 +940,119 @@ class C_MCTS(Base_MCTS):
 
     def _uses_fixed_tail_ptrpg_rollout(self) -> bool:
         return _uses_fixed_tail_ptrpg_rollout_value_mode(self.value_mode)
+
+    def _uses_fixed_tail_expectimax(self) -> bool:
+        from unified_planning.engines.solvers.fixed_tail_expectimax import (
+            uses_expectimax_prefix,
+        )
+
+        return (
+            self._uses_fixed_tail_ptrpg_rollout()
+            and self._fixed_tail_config is not None
+            and uses_expectimax_prefix(self._fixed_tail_config)
+            and self._fixed_tail_expectimax is not None
+        )
+
+    def _fixed_tail_previous_stn_node(
+        self, snode: "up.engines.C_SNode"
+    ) -> "up.plans.stn.STNPlanNode":
+        if snode.parent is not None:
+            return snode.parent.STNNode
+        return self._previous_chosen_action_node
+
+    def _fixed_tail_expectimax_v_at_snode(self, snode: "up.engines.C_SNode") -> float:
+        stn = self._fixed_tail_snode_stn(snode)
+        prev = self._fixed_tail_previous_stn_node(snode)
+        actions = list(snode.children.keys())
+        return self._fixed_tail_expectimax.value_for_feasible_actions(
+            snode.state,
+            stn,
+            prev,
+            actions,
+        )
+
+    def _fixed_tail_seed_expectimax_q(self, snode: "up.engines.C_SNode") -> None:
+        if getattr(snode, "_expectimax_seeded", False):
+            return
+        stn = self._fixed_tail_snode_stn(snode)
+        prev = self._fixed_tail_previous_stn_node(snode)
+        evaluator = self._fixed_tail_expectimax
+        q_by_action = {}
+        for action, anode in snode.children.items():
+            q_val, outcomes = evaluator.q_value_with_outcomes(
+                snode.state, stn, prev, action
+            )
+            anode._expectimax_q = q_val
+            anode._expectimax_outcomes = outcomes
+            q_by_action[action] = q_val
+            if anode.count == 0:
+                anode.update(q_val)
+        snode._expectimax_seeded = True
+        if snode.depth == 0:
+            self._fixed_tail_maybe_debug_root(snode, q_by_action)
+
+    def _fixed_tail_maybe_debug_root(
+        self,
+        snode: "up.engines.C_SNode",
+        q_by_action: dict,
+    ) -> None:
+        cli = getattr(up, "args", None)
+        if cli is None or not getattr(cli, "fixed_tail_debug", False):
+            return
+        if getattr(self, "_fixed_tail_root_debug_done", False):
+            return
+        self._fixed_tail_root_debug_done = True
+
+        from unified_planning.engines.solvers.greedy_parallel import pick_best_action
+
+        stn = self._fixed_tail_snode_stn(snode)
+        prev = self._fixed_tail_previous_stn_node(snode)
+        legal = list(snode.children.keys())
+        greedy_action = pick_best_action(
+            mdp=self.mdp,
+            state=snode.state,
+            stn=stn,
+            previous_action_node=prev,
+            legal_actions=legal,
+            heuristic_name=self.heuristic_name,
+            temporal_heuristic_depth=self.temporal_heuristic_depth,
+            temporal_heuristic_strategy=self.temporal_heuristic_strategy,
+        )
+        best_q = -float("inf")
+        best_actions = []
+        for action, q_val in q_by_action.items():
+            if q_val > best_q:
+                best_q = q_val
+                best_actions = [action]
+            elif q_val == best_q:
+                best_actions.append(action)
+        expectimax_action = best_actions[0] if best_actions else None
+
+        ctx = self._fixed_tail_ctx
+        print(
+            f"[fixed_tail expectimax root] prefix_frac={ctx.prefix_frac} "
+            f"prefix_budget={ctx.prefix_budget} root_remaining={ctx.root_remaining}",
+            flush=True,
+        )
+        for action in legal:
+            anode = snode.children[action]
+            q_val = getattr(anode, "_expectimax_q", q_by_action.get(action, 0.0))
+            outcomes = getattr(anode, "_expectimax_outcomes", [])
+            oc_str = ",".join(f"p={p:.3f}:v={v:.4f}" for p, v in outcomes)
+            selected = "yes" if action in best_actions else "no"
+            name = getattr(action, "name", action)
+            print(
+                f"  action={name} Q_expectimax={q_val:.6f} outcomes=[{oc_str}] "
+                f"selected={selected}",
+                flush=True,
+            )
+        gname = getattr(greedy_action, "name", greedy_action) if greedy_action else "none"
+        ename = getattr(expectimax_action, "name", expectimax_action) if expectimax_action else "none"
+        match = greedy_action == expectimax_action
+        print(
+            f"  greedy_first={gname} expectimax_first={ename} match={'yes' if match else 'no'}",
+            flush=True,
+        )
 
     def _fixed_tail_snode_stn(self, snode: "up.engines.C_SNode") -> "up.plans.stn.STNPlan":
         if snode.parent is not None:
@@ -987,6 +1121,9 @@ class C_MCTS(Base_MCTS):
         return crossed_cutoff(self._fixed_tail_ctx, self._fixed_tail_elapsed_at_snode(snode))
 
     def _leaf_fixed_tail_value(self, snode: "up.engines.C_SNode") -> float:
+        if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
+            self._fixed_tail_seed_expectimax_q(snode)
+            return self._fixed_tail_expectimax_v_at_snode(snode)
         return self._fixed_tail_bootstrap_at_snode(snode, label="depth_or_leaf")
 
     def _leaf_rollout_value_from_anode(
@@ -1583,6 +1720,8 @@ class C_MCTS(Base_MCTS):
                         leaf_val = self._fixed_tail_post_step_child_value(
                             snode, child_snode, anode_child
                         )
+                    elif self._uses_fixed_tail_expectimax():
+                        leaf_val = self._fixed_tail_expectimax_v_at_snode(child_snode)
                     else:
                         leaf_val = self.selection_max(child_snode)
                     reward += self.mdp.discount_factor * leaf_val
@@ -1649,6 +1788,9 @@ class C_MCTS(Base_MCTS):
         if self._uses_fixed_tail_ptrpg_rollout() and self._fixed_tail_at_cutoff(snode):
             return self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
 
+        if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
+            self._fixed_tail_seed_expectimax_q(snode)
+
         explore_constant = self.exploration_constant
 
         action = self.uct(snode, explore_constant)
@@ -1681,6 +1823,10 @@ class C_MCTS(Base_MCTS):
                         )
                         reward += self.mdp.discount_factor * leaf_val
                         anode.add_child(next_snode)
+                    elif self._uses_fixed_tail_expectimax():
+                        anode.add_child(next_snode)
+                        leaf_val = self._fixed_tail_expectimax_v_at_snode(next_snode)
+                        reward += self.mdp.discount_factor * leaf_val
                     else:
                         anode.add_child(next_snode)
                         reward += self.mdp.discount_factor * self.selection(next_snode)
@@ -1719,6 +1865,9 @@ class C_MCTS(Base_MCTS):
         if self._uses_fixed_tail_ptrpg_rollout() and self._fixed_tail_at_cutoff(snode):
             return self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
 
+        if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
+            self._fixed_tail_seed_expectimax_q(snode)
+
         explore_constant = self.exploration_constant
 
         action = self.uct(snode, explore_constant)
@@ -1751,6 +1900,9 @@ class C_MCTS(Base_MCTS):
                         leaf_val = self._fixed_tail_post_step_child_value(
                             snode, next_snode, anode
                         )
+                        reward += self.mdp.discount_factor * leaf_val
+                    elif self._uses_fixed_tail_expectimax():
+                        leaf_val = self._fixed_tail_expectimax_v_at_snode(next_snode)
                         reward += self.mdp.discount_factor * leaf_val
                     else:
                         reward += self.mdp.discount_factor * self.selection_max(next_snode)
@@ -1793,6 +1945,9 @@ class C_MCTS(Base_MCTS):
             val = self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
             return val, *snode.parent.stn.get_legal_interval(root_STNnode)
 
+        if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
+            self._fixed_tail_seed_expectimax_q(snode)
+
         explore_constant = self.exploration_constant
         action = self.uct(snode, explore_constant)
         terminal, next_state, reward = self.mdp.step(snode.state, action)
@@ -1834,6 +1989,10 @@ class C_MCTS(Base_MCTS):
                         )
                         reward += leaf_val * self.mdp.discount_factor
                         anode.add_child(next_snode)
+                    elif self._uses_fixed_tail_expectimax():
+                        anode.add_child(next_snode)
+                        leaf_val = self._fixed_tail_expectimax_v_at_snode(next_snode)
+                        reward += leaf_val * self.mdp.discount_factor
                     else:
                         anode.add_child(next_snode)
                         next_reward, lower, upper = self.selection_root_interval(

@@ -322,6 +322,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Forwarded to run_domain: log first 5 fixed-tail leaf evaluations per search.",
     )
     p.add_argument(
+        "--fixed-tail-prefix-policy",
+        dest="fixed_tail_prefix_policy",
+        default=None,
+        choices=("mcts_sampled", "expectimax"),
+        help="Forwarded to run_domain: fixed-tail prefix policy (default mcts_sampled).",
+    )
+    p.add_argument(
+        "--fixed-tail-expectimax-max-nodes",
+        dest="fixed_tail_expectimax_max_nodes",
+        type=int,
+        default=None,
+        help="Forwarded to run_domain: expectimax guard max nodes per search.",
+    )
+    p.add_argument(
+        "--fixed-tail-expectimax-max-depth",
+        dest="fixed_tail_expectimax_max_depth",
+        type=int,
+        default=None,
+        help="Forwarded to run_domain: expectimax guard max recursion depth.",
+    )
+    p.add_argument(
+        "--fixed-tail-expectimax-max-time-sec",
+        dest="fixed_tail_expectimax_max_time_sec",
+        type=float,
+        default=None,
+        help="Forwarded to run_domain: expectimax guard wall time per search (0=off).",
+    )
+    p.add_argument(
         "--final_selection",
         choices=["q", "robust"],
         default=DEFAULT_FINAL_SELECTION,
@@ -447,7 +475,11 @@ def run_experiment(
     ptrpg_guided_rollout_epsilon: float | None = None,
     ptrpg_guided_rollout_debug: bool = False,
     fixed_tail_prefix_frac: float | None = None,
+    fixed_tail_prefix_policy: str | None = None,
     fixed_tail_debug: bool = False,
+    fixed_tail_expectimax_max_nodes: int | None = None,
+    fixed_tail_expectimax_max_depth: int | None = None,
+    fixed_tail_expectimax_max_time_sec: float | None = None,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     effective_value_mode = alias.get("value_mode", value_mode)
@@ -457,6 +489,9 @@ def run_experiment(
         effective_fixed_tail_prefix_frac = alias.get("fixed_tail_prefix_frac")
     if effective_fixed_tail_prefix_frac is not None:
         effective_fixed_tail_prefix_frac = float(effective_fixed_tail_prefix_frac)
+    effective_fixed_tail_prefix_policy = fixed_tail_prefix_policy
+    if effective_fixed_tail_prefix_policy is None:
+        effective_fixed_tail_prefix_policy = alias.get("fixed_tail_prefix_policy")
     depth = heuristic_depth if heuristic_depth is not None else deadline
 
     label = f"[{domain} obj={object_amount} dl={deadline}] heuristic={heuristic_key}"
@@ -497,7 +532,11 @@ def run_experiment(
         ptrpg_guided_rollout_epsilon=ptrpg_guided_rollout_epsilon,
         ptrpg_guided_rollout_debug=ptrpg_guided_rollout_debug,
         fixed_tail_prefix_frac=effective_fixed_tail_prefix_frac,
+        fixed_tail_prefix_policy=effective_fixed_tail_prefix_policy,
         fixed_tail_debug=fixed_tail_debug,
+        fixed_tail_expectimax_max_nodes=fixed_tail_expectimax_max_nodes,
+        fixed_tail_expectimax_max_depth=fixed_tail_expectimax_max_depth,
+        fixed_tail_expectimax_max_time_sec=fixed_tail_expectimax_max_time_sec,
         resolution_alpha=resolution_alpha,
         resolution_forced_minimum=resolution_forced_minimum,
         resolution_reference_t=resolution_reference_t,
@@ -635,7 +674,11 @@ def main(argv: list[str] | None = None) -> None:
                 ptrpg_guided_rollout_epsilon=args.ptrpg_guided_rollout_epsilon,
                 ptrpg_guided_rollout_debug=args.ptrpg_guided_rollout_debug,
                 fixed_tail_prefix_frac=args.fixed_tail_prefix_frac,
+                fixed_tail_prefix_policy=args.fixed_tail_prefix_policy,
                 fixed_tail_debug=args.fixed_tail_debug,
+                fixed_tail_expectimax_max_nodes=args.fixed_tail_expectimax_max_nodes,
+                fixed_tail_expectimax_max_depth=args.fixed_tail_expectimax_max_depth,
+                fixed_tail_expectimax_max_time_sec=args.fixed_tail_expectimax_max_time_sec,
                 verbose=args.verbose,
                 resolution_alpha=args.resolution_alpha,
                 resolution_forced_minimum=args.resolution_forced_minimum,

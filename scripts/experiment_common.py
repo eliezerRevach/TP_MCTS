@@ -219,6 +219,14 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "ptrpg_guided_rollout_policy": "atomic_exact_resolution",
         "label": "fixed_tail_atomic_exact_resolution",
     },
+    "fixed_tail_expectimax_atomic_exact_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
+        "value_mode": "fixed_tail_ptrpg_rollout",
+        "fixed_tail_prefix_frac": 0.05,
+        "fixed_tail_prefix_policy": "expectimax",
+        "label": "fixed_tail_expectimax_atomic_exact_resolution",
+    },
 }
 
 ALL_HEURISTICS = list(HEURISTIC_ALIASES.keys())
@@ -289,7 +297,11 @@ def run_domain_subprocess(
     ptrpg_guided_rollout_epsilon: float | None = None,
     ptrpg_guided_rollout_debug: bool = False,
     fixed_tail_prefix_frac: float | None = None,
+    fixed_tail_prefix_policy: str | None = None,
     fixed_tail_debug: bool = False,
+    fixed_tail_expectimax_max_nodes: int | None = None,
+    fixed_tail_expectimax_max_depth: int | None = None,
+    fixed_tail_expectimax_max_time_sec: float | None = None,
     garbage_amount: int = 0,
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
@@ -387,8 +399,16 @@ def run_domain_subprocess(
         cmd.append("--ptrpg-guided-rollout-debug")
     if fixed_tail_prefix_frac is not None:
         cmd.extend(["--fixed-tail-prefix-frac", str(fixed_tail_prefix_frac)])
+    if fixed_tail_prefix_policy is not None:
+        cmd.extend(["--fixed-tail-prefix-policy", str(fixed_tail_prefix_policy)])
     if fixed_tail_debug:
         cmd.append("--fixed-tail-debug")
+    if fixed_tail_expectimax_max_nodes is not None:
+        cmd.extend(["--fixed-tail-expectimax-max-nodes", str(fixed_tail_expectimax_max_nodes)])
+    if fixed_tail_expectimax_max_depth is not None:
+        cmd.extend(["--fixed-tail-expectimax-max-depth", str(fixed_tail_expectimax_max_depth)])
+    if fixed_tail_expectimax_max_time_sec is not None:
+        cmd.extend(["--fixed-tail-expectimax-max-time-sec", str(fixed_tail_expectimax_max_time_sec)])
     if extra_args:
         cmd.extend(extra_args)
 

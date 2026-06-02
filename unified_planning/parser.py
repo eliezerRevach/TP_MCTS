@@ -345,6 +345,35 @@ parser.add_argument(
     help='Log the first 5 fixed-tail bootstrap evaluations per MCTS search.',
 )
 parser.add_argument(
+    '--fixed-tail-prefix-policy',
+    dest='fixed_tail_prefix_policy',
+    default='mcts_sampled',
+    choices=('mcts_sampled', 'expectimax'),
+    help='fixed_tail_ptrpg_rollout: prefix evaluation before cutoff — '
+         'mcts_sampled (default) or expectimax (max/expectation, no sampling in prefix).',
+)
+parser.add_argument(
+    '--fixed-tail-expectimax-max-nodes',
+    dest='fixed_tail_expectimax_max_nodes',
+    type=int,
+    default=5000,
+    help='expectimax prefix: max V/Q evaluations per MCTS search (guard fallback to PTRPG).',
+)
+parser.add_argument(
+    '--fixed-tail-expectimax-max-depth',
+    dest='fixed_tail_expectimax_max_depth',
+    type=int,
+    default=64,
+    help='expectimax prefix: max recursion depth (guard fallback to PTRPG).',
+)
+parser.add_argument(
+    '--fixed-tail-expectimax-max-time-sec',
+    dest='fixed_tail_expectimax_max_time_sec',
+    type=float,
+    default=0.0,
+    help='expectimax prefix: wall-time budget per search in seconds (0 = disabled).',
+)
+parser.add_argument(
     '--ptrpg-guided-rollout-policy',
     dest='ptrpg_guided_rollout_policy',
     default='baseline_survival_resolution',

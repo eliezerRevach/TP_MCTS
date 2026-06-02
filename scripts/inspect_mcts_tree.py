@@ -156,6 +156,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Log the first 5 fixed-tail leaf evaluations per MCTS search.",
     )
     p.add_argument(
+        "--fixed-tail-prefix-policy",
+        dest="fixed_tail_prefix_policy",
+        default=None,
+        choices=("mcts_sampled", "expectimax"),
+        help="fixed_tail_ptrpg_rollout: prefix policy before cutoff.",
+    )
+    p.add_argument(
+        "--fixed-tail-expectimax-max-nodes",
+        dest="fixed_tail_expectimax_max_nodes",
+        type=int,
+        default=None,
+        help="expectimax prefix: max V/Q evaluations per search.",
+    )
+    p.add_argument(
+        "--fixed-tail-expectimax-max-depth",
+        dest="fixed_tail_expectimax_max_depth",
+        type=int,
+        default=None,
+        help="expectimax prefix: max recursion depth.",
+    )
+    p.add_argument(
+        "--fixed-tail-expectimax-max-time-sec",
+        dest="fixed_tail_expectimax_max_time_sec",
+        type=float,
+        default=None,
+        help="expectimax prefix: wall-time budget per search (0=off).",
+    )
+    p.add_argument(
         "--heuristic",
         default="atomic_exact",
         choices=sorted(HEURISTIC_ALIASES),
@@ -260,6 +288,8 @@ def apply_heuristic_alias_overrides(args: argparse.Namespace) -> None:
         args.ptrpg_guided_rollout_policy = alias.get("ptrpg_guided_rollout_policy")
     if getattr(args, "fixed_tail_prefix_frac", None) is None and "fixed_tail_prefix_frac" in alias:
         args.fixed_tail_prefix_frac = float(alias["fixed_tail_prefix_frac"])
+    if getattr(args, "fixed_tail_prefix_policy", None) is None:
+        args.fixed_tail_prefix_policy = alias.get("fixed_tail_prefix_policy")
 
 
 def strategy_for_greedy_matched_expected(strategy: str) -> str:
@@ -307,6 +337,14 @@ def configure_fixed_tail_cli(args: argparse.Namespace) -> None:
         a.fixed_tail_prefix_frac = float(args.fixed_tail_prefix_frac)
     if getattr(args, "fixed_tail_debug", False):
         a.fixed_tail_debug = True
+    if getattr(args, "fixed_tail_prefix_policy", None) is not None:
+        a.fixed_tail_prefix_policy = str(args.fixed_tail_prefix_policy)
+    if getattr(args, "fixed_tail_expectimax_max_nodes", None) is not None:
+        a.fixed_tail_expectimax_max_nodes = int(args.fixed_tail_expectimax_max_nodes)
+    if getattr(args, "fixed_tail_expectimax_max_depth", None) is not None:
+        a.fixed_tail_expectimax_max_depth = int(args.fixed_tail_expectimax_max_depth)
+    if getattr(args, "fixed_tail_expectimax_max_time_sec", None) is not None:
+        a.fixed_tail_expectimax_max_time_sec = float(args.fixed_tail_expectimax_max_time_sec)
 
 
 def build_mcts(args: argparse.Namespace) -> C_MCTS:
