@@ -196,6 +196,21 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline",  # unused for trpg
         "label": "ptrpg_old (trpg)",
     },
+    # MCTS leaf: real stochastic rollout to terminal 0/1; PTRPG only guides action choice.
+    "ptrpg_guided_rollout_baseline_survival_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_survival_resolution",
+        "value_mode": "ptrpg_guided_terminal_rollout",
+        "ptrpg_guided_rollout_policy": "baseline_survival_resolution",
+        "label": "ptrpg_guided_rollout_baseline_survival_resolution",
+    },
+    "ptrpg_guided_rollout_atomic_exact_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
+        "value_mode": "ptrpg_guided_terminal_rollout",
+        "ptrpg_guided_rollout_policy": "atomic_exact_resolution",
+        "label": "ptrpg_guided_rollout_atomic_exact_resolution",
+    },
 }
 
 ALL_HEURISTICS = list(HEURISTIC_ALIASES.keys())
@@ -261,6 +276,10 @@ def run_domain_subprocess(
     step_penalty: float = -0.05,
     value_mode: str = "tp_mcts",
     final_selection: str = "q",
+    ptrpg_guided_rollout_policy: str | None = None,
+    ptrpg_guided_rollout_max_steps: int | None = None,
+    ptrpg_guided_rollout_epsilon: float | None = None,
+    ptrpg_guided_rollout_debug: bool = False,
     garbage_amount: int = 0,
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
@@ -348,6 +367,14 @@ def run_domain_subprocess(
         cmd.extend(["--rollout-aligned-lambda-align", str(rollout_aligned_lambda_align)])
     if frontier_option_a_debug:
         cmd.append("--frontier-option-a-debug")
+    if ptrpg_guided_rollout_policy is not None:
+        cmd.extend(["--ptrpg-guided-rollout-policy", str(ptrpg_guided_rollout_policy)])
+    if ptrpg_guided_rollout_max_steps is not None:
+        cmd.extend(["--ptrpg-guided-rollout-max-steps", str(ptrpg_guided_rollout_max_steps)])
+    if ptrpg_guided_rollout_epsilon is not None:
+        cmd.extend(["--ptrpg-guided-rollout-epsilon", str(ptrpg_guided_rollout_epsilon)])
+    if ptrpg_guided_rollout_debug:
+        cmd.append("--ptrpg-guided-rollout-debug")
     if extra_args:
         cmd.extend(extra_args)
 

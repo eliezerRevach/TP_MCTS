@@ -266,9 +266,41 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--value_mode",
-        choices=["tp_mcts", "greedy_matched"],
+        choices=["tp_mcts", "greedy_matched", "ptrpg_guided_terminal_rollout"],
         default=DEFAULT_VALUE_MODE,
         help=f"MCTS backup target mode. Default: {DEFAULT_VALUE_MODE}",
+    )
+    p.add_argument(
+        "--ptrpg-guided-rollout-policy",
+        dest="ptrpg_guided_rollout_policy",
+        default=None,
+        choices=(
+            "baseline_survival_resolution",
+            "atomic_exact_resolution",
+            "atom_backtrack_exact_resolution",
+        ),
+        help="Forwarded to run_domain: PTRPG policy for ptrpg_guided_terminal_rollout.",
+    )
+    p.add_argument(
+        "--ptrpg-guided-rollout-max-steps",
+        dest="ptrpg_guided_rollout_max_steps",
+        type=int,
+        default=None,
+        help="Forwarded to run_domain: cap rollout steps.",
+    )
+    p.add_argument(
+        "--ptrpg-guided-rollout-epsilon",
+        dest="ptrpg_guided_rollout_epsilon",
+        type=float,
+        default=None,
+        help="Forwarded to run_domain: rollout epsilon (0 = greedy).",
+    )
+    p.add_argument(
+        "--ptrpg-guided-rollout-debug",
+        dest="ptrpg_guided_rollout_debug",
+        action="store_true",
+        default=False,
+        help="Forwarded to run_domain: log first rollout per search.",
     )
     p.add_argument(
         "--final_selection",
@@ -391,8 +423,14 @@ def run_experiment(
     rollout_aligned_fallback_if_small: str | None = None,
     rollout_aligned_lambda_align: float | None = None,
     frontier_option_a_debug: bool = False,
+    ptrpg_guided_rollout_policy: str | None = None,
+    ptrpg_guided_rollout_max_steps: int | None = None,
+    ptrpg_guided_rollout_epsilon: float | None = None,
+    ptrpg_guided_rollout_debug: bool = False,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
+    effective_value_mode = alias.get("value_mode", value_mode)
+    effective_rollout_policy = alias.get("ptrpg_guided_rollout_policy", ptrpg_guided_rollout_policy)
     depth = heuristic_depth if heuristic_depth is not None else deadline
 
     label = f"[{domain} obj={object_amount} dl={deadline}] heuristic={heuristic_key}"
@@ -402,7 +440,7 @@ def run_experiment(
         f"  heuristic_depth={depth}  search_time={search_time}  search_depth={search_depth}  "
         f"k={k}  runs={runs}  seed={seed}  C={exploration_constant}  "
         f"selection={selection_type}  gamma={discount_factor}  step_penalty={step_penalty}  "
-        f"reward_mode={reward_mode}  value_mode={value_mode}  final_selection={final_selection}",
+        f"reward_mode={reward_mode}  value_mode={effective_value_mode}  final_selection={final_selection}",
         flush=True,
     )
     print(f"{'─'*60}", flush=True)
@@ -426,8 +464,12 @@ def run_experiment(
         reward_mode=reward_mode,
         discount_factor=discount_factor,
         step_penalty=step_penalty,
-        value_mode=value_mode,
+        value_mode=effective_value_mode,
         final_selection=final_selection,
+        ptrpg_guided_rollout_policy=effective_rollout_policy,
+        ptrpg_guided_rollout_max_steps=ptrpg_guided_rollout_max_steps,
+        ptrpg_guided_rollout_epsilon=ptrpg_guided_rollout_epsilon,
+        ptrpg_guided_rollout_debug=ptrpg_guided_rollout_debug,
         resolution_alpha=resolution_alpha,
         resolution_forced_minimum=resolution_forced_minimum,
         resolution_reference_t=resolution_reference_t,
@@ -485,7 +527,7 @@ def run_experiment(
         "discount_factor": discount_factor,
         "step_penalty": step_penalty,
         "reward_mode": reward_mode,
-        "value_mode": value_mode,
+        "value_mode": effective_value_mode,
         "heuristic_depth": depth,
         "returncode": returncode,
         **metrics,
@@ -560,6 +602,10 @@ def main(argv: list[str] | None = None) -> None:
                 step_penalty=args.step_penalty,
                 value_mode=args.value_mode,
                 final_selection=args.final_selection,
+                ptrpg_guided_rollout_policy=args.ptrpg_guided_rollout_policy,
+                ptrpg_guided_rollout_max_steps=args.ptrpg_guided_rollout_max_steps,
+                ptrpg_guided_rollout_epsilon=args.ptrpg_guided_rollout_epsilon,
+                ptrpg_guided_rollout_debug=args.ptrpg_guided_rollout_debug,
                 verbose=args.verbose,
                 resolution_alpha=args.resolution_alpha,
                 resolution_forced_minimum=args.resolution_forced_minimum,

@@ -1,5 +1,5 @@
 import math
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 
 import unified_planning as up
 from unified_planning.engines.solvers.mcts import _temporal_heuristic, _uses_tprpg_family
@@ -119,6 +119,118 @@ def _score_action(
     return score, None, candidate_stn, candidate_prev, any_terminal, transition_cache_by_state
 
 
+def _action_name_key(action: "up.engines.Action") -> str:
+    name = getattr(action, "name", None)
+    return name if name is not None else str(action)
+
+
+ActionScoreEntry = Tuple[
+    float,
+    "up.engines.Action",
+    "up.plans.stn.STNPlan",
+    "up.plans.stn.STNPlanNode",
+    bool,
+    Dict,
+]
+
+
+def rank_actions_by_score(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
+    previous_action_node: "up.plans.stn.STNPlanNode",
+    legal_actions: List["up.engines.Action"],
+    heuristic_name: str,
+    temporal_heuristic_depth: int,
+    temporal_heuristic_strategy: str,
+    heuristic_weight: float,
+    temporal_cache_table=None,
+    tie_break: str = "stable",
+) -> List[ActionScoreEntry]:
+    ranked: List[ActionScoreEntry] = []
+    for action in legal_actions:
+        score, _, candidate_stn, candidate_prev, any_terminal, transition_cache = _score_action(
+            mdp=mdp,
+            state=state,
+            stn=stn,
+            previous_action_node=previous_action_node,
+            action=action,
+            heuristic_name=heuristic_name,
+            temporal_heuristic_depth=temporal_heuristic_depth,
+            temporal_heuristic_strategy=temporal_heuristic_strategy,
+            heuristic_weight=heuristic_weight,
+            temporal_cache_table=temporal_cache_table,
+        )
+        if math.isfinite(score):
+            ranked.append(
+                (score, action, candidate_stn, candidate_prev, any_terminal, transition_cache)
+            )
+    if tie_break == "stable":
+        ranked.sort(key=lambda item: (-item[0], _action_name_key(item[1])))
+    return ranked
+
+
+def pick_best_action(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
+    previous_action_node: "up.plans.stn.STNPlanNode",
+    heuristic_name: str,
+    temporal_heuristic_depth: int,
+    temporal_heuristic_strategy: str,
+    heuristic_weight: float = GREEDY_HEURISTIC_WEIGHT,
+    temporal_cache_table=None,
+    tie_break: str = "stable",
+    legal_actions: Optional[List["up.engines.Action"]] = None,
+) -> Optional[ActionScoreEntry]:
+    if legal_actions is None:
+        legal_actions = mdp.legal_actions(state)
+    if not legal_actions:
+        return None
+    if tie_break == "stable":
+        ranked = rank_actions_by_score(
+            mdp=mdp,
+            state=state,
+            stn=stn,
+            previous_action_node=previous_action_node,
+            legal_actions=legal_actions,
+            heuristic_name=heuristic_name,
+            temporal_heuristic_depth=temporal_heuristic_depth,
+            temporal_heuristic_strategy=temporal_heuristic_strategy,
+            heuristic_weight=heuristic_weight,
+            temporal_cache_table=temporal_cache_table,
+            tie_break="stable",
+        )
+        return ranked[0] if ranked else None
+
+    best: Optional[ActionScoreEntry] = None
+    best_score = -math.inf
+    for action in legal_actions:
+        candidate = _score_action(
+            mdp=mdp,
+            state=state,
+            stn=stn,
+            previous_action_node=previous_action_node,
+            action=action,
+            heuristic_name=heuristic_name,
+            temporal_heuristic_depth=temporal_heuristic_depth,
+            temporal_heuristic_strategy=temporal_heuristic_strategy,
+            heuristic_weight=heuristic_weight,
+            temporal_cache_table=temporal_cache_table,
+        )
+        if candidate[0] > best_score:
+            best_score = candidate[0]
+            best = (
+                candidate[0],
+                action,
+                candidate[2],
+                candidate[3],
+                candidate[4],
+                candidate[5],
+            )
+    return best
+
+
 def greedy_matched_value_target(
     mdp: "up.engines.MDP",
     state: "up.engines.State",
@@ -200,29 +312,25 @@ def plan(
             if not legal_actions:
                 break
 
-            best = None
-            best_score = -math.inf
-            for action in legal_actions:
-                candidate = _score_action(
-                    mdp=mdp,
-                    state=root_state,
-                    stn=stn,
-                    previous_action_node=previous_action_node,
-                    action=action,
-                    heuristic_name=heuristic_name,
-                    temporal_heuristic_depth=temporal_heuristic_depth,
-                    temporal_heuristic_strategy=temporal_heuristic_strategy,
-                    heuristic_weight=heuristic_weight,
-                    temporal_cache_table=temporal_cache_table,
-                )
-                if candidate[0] > best_score:
-                    best_score = candidate[0]
-                    best = (action, candidate)
-
-            if best is None or not math.isfinite(best_score):
+            picked = pick_best_action(
+                mdp=mdp,
+                state=root_state,
+                stn=stn,
+                previous_action_node=previous_action_node,
+                heuristic_name=heuristic_name,
+                temporal_heuristic_depth=temporal_heuristic_depth,
+                temporal_heuristic_strategy=temporal_heuristic_strategy,
+                heuristic_weight=heuristic_weight,
+                temporal_cache_table=temporal_cache_table,
+                tie_break="legacy",
+                legal_actions=legal_actions,
+            )
+            if picked is None:
                 break
 
-            action, (_, _, next_stn, next_prev, _, transition_cache_by_state) = best
+            best_score, action, next_stn, next_prev, _, transition_cache_by_state = picked
+            if not math.isfinite(best_score):
+                break
             print(f"Current state is {root_state}")
             print(f"The chosen action is {action.name}")
 

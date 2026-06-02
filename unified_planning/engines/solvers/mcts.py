@@ -179,6 +179,28 @@ _FRONTIER_ALIGNED_SUFFIX = {
 _ALIGNED_SUFFIX = {**_ROLLOUT_ALIGNED_SUFFIX, **_FRONTIER_ALIGNED_SUFFIX}
 
 
+def _uses_ptrpg_guided_rollout_value_mode(value_mode: str) -> bool:
+    return value_mode == "ptrpg_guided_terminal_rollout"
+
+
+def validate_ptrpg_guided_rollout_config(
+    value_mode: str,
+    temporal_heuristic_strategy: str,
+) -> None:
+    if not _uses_ptrpg_guided_rollout_value_mode(value_mode):
+        return
+    if temporal_heuristic_strategy in _ALIGNED_SUFFIX:
+        raise ValueError(
+            "value_mode=ptrpg_guided_terminal_rollout cannot be combined with "
+            f"rollout_aligned / frontier_aligned strategy {temporal_heuristic_strategy!r}"
+        )
+    if _is_option_a_strategy(temporal_heuristic_strategy):
+        raise ValueError(
+            "value_mode=ptrpg_guided_terminal_rollout cannot be combined with "
+            f"frontier_aligned_option_a strategy {temporal_heuristic_strategy!r}"
+        )
+
+
 def _rollout_aligned_config_from_cli():
     """Build a RolloutAlignedConfig from unified_planning.parser CLI args."""
     from comdp_plus_no_deadline.engines.rollout_aligned import RolloutAlignedConfig
@@ -551,6 +573,8 @@ class Base_MCTS:
         start_time = time.time()
         current_time = time.time()
         i = 0
+        if hasattr(self, "_ptrpg_rollout_debug_done"):
+            self._ptrpg_rollout_debug_done = False
         avg_variants = {'avg', 'avg_topk', 'avg_pw'}
         selection = (
             self.selection
@@ -775,11 +799,27 @@ class C_MCTS(Base_MCTS):
         self.temporal_heuristic_strategy = temporal_heuristic_strategy
         self._root_baseline_cache = root_baseline_cache
         self.value_mode = value_mode
+        validate_ptrpg_guided_rollout_config(value_mode, temporal_heuristic_strategy)
         self._uct_initial_k = max(1, int(uct_initial_k))
         self._uct_filter_mode = {
             'avg_topk': 'topk',
             'avg_pw': 'pw',
         }.get(selection_type)
+        self._ptrpg_rollout_config = None
+        self._ptrpg_rollout_debug_done = False
+        if _uses_ptrpg_guided_rollout_value_mode(value_mode):
+            from unified_planning.engines.solvers.ptrpg_guided_rollout import (
+                rollout_config_from_args,
+                resolve_rollout_policy,
+            )
+
+            self._ptrpg_rollout_config = rollout_config_from_args(mdp)
+            try:
+                self._ptrpg_rollout_config.policy_strategy = resolve_rollout_policy(
+                    temporal_heuristic_strategy
+                )
+            except ValueError:
+                pass
 
         create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
         snode, _ = create_snode(root_state, 0, stn,
@@ -824,7 +864,45 @@ class C_MCTS(Base_MCTS):
             temporal_heuristic_strategy=self.temporal_heuristic_strategy,
         )
 
+    def _uses_ptrpg_guided_rollout(self) -> bool:
+        return _uses_ptrpg_guided_rollout_value_mode(self.value_mode)
+
+    def _leaf_rollout_value_from_anode(
+        self,
+        state: "up.engines.State",
+        anode: "up.engines.C_ANode",
+    ) -> float:
+        from unified_planning.engines.solvers.ptrpg_guided_rollout import (
+            ptrpg_guided_terminal_rollout,
+        )
+
+        debug_emit = False
+        if (
+            self._ptrpg_rollout_config is not None
+            and self._ptrpg_rollout_config.debug_first_rollout
+            and not self._ptrpg_rollout_debug_done
+        ):
+            debug_emit = True
+            self._ptrpg_rollout_debug_done = True
+        return ptrpg_guided_terminal_rollout(
+            mdp=self.mdp,
+            state=state,
+            stn=anode.stn,
+            previous_action_node=anode.STNNode,
+            config=self._ptrpg_rollout_config,
+            heuristic_name=self.heuristic_name,
+            temporal_heuristic_depth=self.temporal_heuristic_depth,
+            debug_emit=debug_emit,
+        )
+
+    def _leaf_rollout_value(self, snode: "up.engines.C_SNode") -> float:
+        if snode.parent is None:
+            return 0.0
+        return self._leaf_rollout_value_from_anode(snode.state, snode.parent)
+
     def _depth_cutoff_value(self, snode: "up.engines.C_Snode"):
+        if self._uses_ptrpg_guided_rollout():
+            return self._leaf_rollout_value(snode)
         if self.value_mode != "greedy_matched":
             return self.heuristic(snode)
 
@@ -1329,6 +1407,11 @@ class C_MCTS(Base_MCTS):
             if self.value_mode == "greedy_matched":
                 if not terminal:
                     reward = self._greedy_matched_action_target(snode, action)
+            elif self._uses_ptrpg_guided_rollout():
+                if not terminal:
+                    reward += self.mdp.discount_factor * self._leaf_rollout_value_from_anode(
+                        next_state, snode.children[action]
+                    )
             else:
                 reward += self.mdp.discount_factor * self.heuristic_init(
                     next_state, snode.children[action].stn, parent_snode=snode
@@ -1372,6 +1455,8 @@ class C_MCTS(Base_MCTS):
                 next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
                 if self.value_mode == "greedy_matched":
                     reward = self._greedy_matched_action_target(snode, action)
+                elif self._uses_ptrpg_guided_rollout():
+                    reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
                 else:
                     # Standard PTRPG value — this is what gets backpropagated.
                     h_val = self.heuristic(next_snode)
@@ -1418,6 +1503,9 @@ class C_MCTS(Base_MCTS):
                 if self.value_mode == "greedy_matched":
                     next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
                     reward = self._greedy_matched_action_target(snode, action)
+                elif self._uses_ptrpg_guided_rollout():
+                    next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
+                    reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
                 else:
                     next_snode, snode_reward = self.create_Snode_max(next_state, snode.depth + 1, anode.stn, anode)
                     reward += snode_reward
@@ -1467,6 +1555,8 @@ class C_MCTS(Base_MCTS):
                 lower, upper = anode.stn.get_legal_interval(root_STNnode)
                 if self.value_mode == "greedy_matched":
                     reward = self._greedy_matched_action_target(snode, action)
+                elif self._uses_ptrpg_guided_rollout():
+                    reward += self._leaf_rollout_value(next_snode) * self.mdp.discount_factor
                 else:
                     reward += self.heuristic(next_snode) * self.mdp.discount_factor
                 anode.add_child(next_snode)

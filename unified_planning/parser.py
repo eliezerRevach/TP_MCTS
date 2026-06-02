@@ -321,10 +321,43 @@ parser.add_argument(
 )
 parser.add_argument(
     '--value_mode',
-    help='MCTS leaf/backup target mode: tp_mcts (default) or greedy_matched',
+    help='MCTS leaf/backup target mode: tp_mcts (default), greedy_matched, or '
+         'ptrpg_guided_terminal_rollout (stochastic rollout backup, PTRPG policy only)',
     nargs='?',
     default='tp_mcts',
-    choices=('tp_mcts', 'greedy_matched'),
+    choices=('tp_mcts', 'greedy_matched', 'ptrpg_guided_terminal_rollout'),
+)
+parser.add_argument(
+    '--ptrpg-guided-rollout-policy',
+    dest='ptrpg_guided_rollout_policy',
+    default='baseline_survival_resolution',
+    choices=(
+        'baseline_survival_resolution',
+        'atomic_exact_resolution',
+        'atom_backtrack_exact_resolution',
+    ),
+    help='PTRPG strategy used only for greedy action choice inside ptrpg_guided_terminal_rollout.',
+)
+parser.add_argument(
+    '--ptrpg-guided-rollout-max-steps',
+    dest='ptrpg_guided_rollout_max_steps',
+    type=int,
+    default=None,
+    help='Cap rollout simulation steps (default: problem deadline).',
+)
+parser.add_argument(
+    '--ptrpg-guided-rollout-epsilon',
+    dest='ptrpg_guided_rollout_epsilon',
+    type=float,
+    default=0.0,
+    help='Reserved for future epsilon-greedy rollout policy (0 = pure greedy).',
+)
+parser.add_argument(
+    '--ptrpg-guided-rollout-debug',
+    dest='ptrpg_guided_rollout_debug',
+    action='store_true',
+    default=False,
+    help='Log the first ptrpg_guided_terminal_rollout per MCTS search.',
 )
 parser.add_argument(
     '--final_selection',
