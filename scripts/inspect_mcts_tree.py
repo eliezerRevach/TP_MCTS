@@ -143,6 +143,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Log the first rollout per search.",
     )
     p.add_argument(
+        "--fixed-tail-h",
+        dest="fixed_tail_h",
+        type=int,
+        default=None,
+        help="fixed_tail_ptrpg_rollout: common PTRPG suffix horizon H (defaults from alias).",
+    )
+    p.add_argument(
+        "--fixed-tail-debug",
+        dest="fixed_tail_debug",
+        action="store_true",
+        help="Log the first 5 fixed-tail leaf evaluations per MCTS search.",
+    )
+    p.add_argument(
         "--heuristic",
         default="atomic_exact",
         choices=sorted(HEURISTIC_ALIASES),
