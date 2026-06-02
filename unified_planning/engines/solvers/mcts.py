@@ -9,6 +9,18 @@ from unified_planning.engines.utils import (
     update_stn,
 )
 from unified_planning.engines.linked_list import LinkedListNode
+from comdp_plus_no_deadline.engines.frontier_aligned_option_a import (
+    OPTION_A_STRATEGIES as _FRONTIER_ALIGNED_OPTION_A,
+    aligned_value_for_node as _option_a_aligned_value,
+    build_option_a_evaluator as _build_option_a_evaluator,
+    collect_global_frontier as _collect_global_frontier,
+    compute_H_frontier as _compute_H_frontier,
+    format_option_a_debug_row as _format_option_a_debug_row,
+    is_option_a_strategy as _is_option_a_strategy,
+    option_a_ptrpg_suffix as _option_a_ptrpg_suffix,
+    remaining_horizon as _option_a_remaining_horizon,
+    select_frontier_node as _select_frontier_node,
+)
 
 
 def _effective_temporal_depth(configured_depth: int, current_time: float, deadline: float) -> int:
@@ -545,14 +557,21 @@ class Base_MCTS:
             if selection_type in avg_variants
             else (self.selection_root_interval if selection_type == 'rootInterval' else self.selection_max)
         )
-        # Option A: frontier_aligned_* uses a GLOBAL open-leaf frontier driver
-        # instead of recursive parent-local UCT descent.
+        # Option A: frontier_aligned_* / frontier_aligned_option_a_* use a GLOBAL
+        # open-leaf frontier driver instead of recursive parent-local UCT descent.
+        strategy = getattr(self, "temporal_heuristic_strategy", None)
         use_frontier_driver = (
-            getattr(self, "temporal_heuristic_strategy", None) in _FRONTIER_ALIGNED_SUFFIX
+            strategy in _FRONTIER_ALIGNED_SUFFIX
             and hasattr(self, "_frontier_iteration")
         )
+        use_option_a_driver = (
+            _is_option_a_strategy(strategy)
+            and hasattr(self, "_option_a_frontier_iteration")
+        )
         while current_time < start_time + timeout:
-            if use_frontier_driver:
+            if use_option_a_driver:
+                self._option_a_frontier_iteration()
+            elif use_frontier_driver:
                 self._frontier_iteration()
             else:
                 selection(self.root_node)
@@ -767,6 +786,16 @@ class C_MCTS(Base_MCTS):
                                 previous_chosen_action_node=previous_chosen_action_node)
         self.set_root_node(root_node if root_node is not None else snode)
         self._stn = stn
+        self._next_option_a_node_id = 1
+        if _is_option_a_strategy(temporal_heuristic_strategy):
+            self._assign_option_a_node_id(self.root_node, parent_snode=None)
+
+    def _assign_option_a_node_id(self, snode, parent_snode=None):
+        snode._option_a_node_id = self._next_option_a_node_id
+        snode._option_a_parent_id = (
+            None if parent_snode is None else getattr(parent_snode, "_option_a_node_id", None)
+        )
+        self._next_option_a_node_id += 1
 
     @property
     def previous_chosen_action_node(self):
@@ -1026,6 +1055,121 @@ class C_MCTS(Base_MCTS):
         if best is not None:
             self._expand_and_backprop(best)
 
+    # ---- frontier_aligned_option_a: clean global Option A driver ------------
+
+    def _option_a_debug_enabled(self) -> bool:
+        import os
+        if os.environ.get("FRONTIER_OPTION_A_DEBUG"):
+            return True
+        a = getattr(up, "args", None)
+        return bool(getattr(a, "frontier_option_a_debug", False)) if a is not None else False
+
+    def _get_option_a_evaluator(self):
+        from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
+            TemporalProbabilisticRPGHeuristic,
+        )
+
+        heuristic = getattr(self.mdp, "_temporal_probabilistic_rpg_heuristic", None)
+        if heuristic is None:
+            heuristic = TemporalProbabilisticRPGHeuristic.from_problem(self.mdp.problem)
+            setattr(self.mdp, "_temporal_probabilistic_rpg_heuristic", heuristic)
+        suffix = _option_a_ptrpg_suffix(self.temporal_heuristic_strategy)
+        return _build_option_a_evaluator(
+            self.mdp,
+            heuristic,
+            suffix,
+            aggregation=_aggregation_for_strategy(suffix),
+            resolution_kwargs=_resolution_heuristic_kwargs_from_cli(),
+        )
+
+    def _option_a_raw_ptrpg(self, snode, elapsed: float, remaining: int) -> float:
+        suffix = _option_a_ptrpg_suffix(self.temporal_heuristic_strategy)
+        score, _ = _tprpg_heuristic_value(
+            self.mdp,
+            snode.state,
+            elapsed,
+            self.temporal_heuristic_depth,
+            suffix,
+            cached_table=self._root_baseline_cache,
+            leaf_heuristic_name=self.heuristic_name,
+        )
+        return score
+
+    def _option_a_frontier_iteration(self):
+        """Global frontier Option A: argmax aligned_value, expand selected node only."""
+        deadline = self.mdp.deadline()
+        frontier = _collect_global_frontier(
+            self.root_node,
+            search_depth=self.search_depth,
+            deadline=deadline,
+            root_stn=self._stn,
+        )
+        if not frontier:
+            return
+        deepest_elapsed, H_frontier, elapsed_map = _compute_H_frontier(
+            frontier, deadline, root_stn=self._stn
+        )
+        evaluator = self._get_option_a_evaluator()
+        scores: dict = {}
+        rows = []
+        for n in frontier:
+            elapsed = elapsed_map[id(n)]
+            remaining = _option_a_remaining_horizon(
+                deadline, elapsed, self.temporal_heuristic_depth
+            )
+            delta = deepest_elapsed - elapsed
+            raw = self._option_a_raw_ptrpg(n, elapsed, remaining)
+            aligned = _option_a_aligned_value(
+                evaluator,
+                n.state,
+                remaining=remaining,
+                H_frontier=H_frontier,
+                deepest_elapsed=deepest_elapsed,
+                elapsed=elapsed,
+            )
+            scores[id(n)] = aligned
+            rows.append((n, elapsed, remaining, delta, raw, aligned))
+
+        best = _select_frontier_node(frontier, scores)
+        same_elapsed = all(abs(e - deepest_elapsed) < 1e-9 for e in elapsed_map.values())
+
+        if self._option_a_debug_enabled():
+            budget = getattr(self.mdp, "_option_a_debug_remaining", 3)
+            if budget > 0:
+                setattr(self.mdp, "_option_a_debug_remaining", budget - 1)
+                note = (
+                    "  (DEGENERATE: all frontier nodes share elapsed)"
+                    if same_elapsed
+                    else ""
+                )
+                print(
+                    f"\n[frontier_aligned_option_a] frontier_size={len(frontier)} "
+                    f"deadline={deadline} deepest_elapsed={deepest_elapsed} "
+                    f"H_frontier={H_frontier}{note}",
+                    flush=True,
+                )
+                for n, elapsed, remaining, delta, raw, aligned in rows:
+                    print(
+                        "  "
+                        + _format_option_a_debug_row(
+                            node_id=getattr(n, "_option_a_node_id", id(n)),
+                            parent_id=getattr(n, "_option_a_parent_id", None),
+                            depth=n.depth,
+                            elapsed=elapsed,
+                            remaining=float(remaining),
+                            deepest_elapsed=deepest_elapsed,
+                            H_frontier=H_frontier,
+                            delta=delta,
+                            raw_ptrpg=raw,
+                            aligned_value=aligned,
+                            selected=(n is best),
+                        ),
+                        flush=True,
+                    )
+
+        if best is not None:
+            self._expand_and_backprop(best)
+
     def _uct_frontier_aligned(self, snode: "up.engines.Snode", explore_constant: float):
         """Option A: pick the child to descend/expand by a frontier-aligned score.
 
@@ -1116,6 +1260,8 @@ class C_MCTS(Base_MCTS):
         return best_action if best_action is not None else super().uct(snode, explore_constant)
 
     def uct(self, snode: "up.engines.Snode", explore_constant: float):
+        if _is_option_a_strategy(self.temporal_heuristic_strategy):
+            return super().uct(snode, explore_constant)
         if self.temporal_heuristic_strategy in _FRONTIER_ALIGNED_SUFFIX:
             return self._uct_frontier_aligned(snode, explore_constant)
         if self._uct_filter_mode is None:
@@ -1146,8 +1292,14 @@ class C_MCTS(Base_MCTS):
                      parent: "up.engines.C_ANode" = None,
                      previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None, isInterval=False):
         """ Create a new Snode for the state `state` with parent `parent`"""
-        return up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent,
-                                  previous_chosen_action_node, isInterval), None
+        snode = up.engines.C_SNode(
+            state, depth, self.mdp.legal_actions(state), stn, parent,
+            previous_chosen_action_node, isInterval,
+        )
+        if _is_option_a_strategy(self.temporal_heuristic_strategy):
+            parent_snode = parent.parent if parent is not None else None
+            self._assign_option_a_node_id(snode, parent_snode=parent_snode)
+        return snode, None
 
     def create_Snode_root_interval(self, state: "up.engines.State", depth: int, stn: "up.plans.stn.STNPlan",
                      parent: "up.engines.C_ANode" = None,
@@ -1374,7 +1526,10 @@ class C_MCTS(Base_MCTS):
         if _uses_tprpg_family(self.heuristic_name):
             strategy_for_value = self.temporal_heuristic_strategy
             aligned_override = None
-            if self.temporal_heuristic_strategy in _FRONTIER_ALIGNED_SUFFIX:
+            if _is_option_a_strategy(self.temporal_heuristic_strategy):
+                # frontier_aligned_option_a_*: backprop uses raw suffix PTRPG only.
+                strategy_for_value = _option_a_ptrpg_suffix(self.temporal_heuristic_strategy)
+            elif self.temporal_heuristic_strategy in _FRONTIER_ALIGNED_SUFFIX:
                 # Option A: the node's backed-up value is STANDARD PTRPG (the raw
                 # suffix strategy), NOT the aligned value. The frontier-aligned
                 # value is computed separately via _frontier_aligned_value and is
@@ -1407,14 +1562,17 @@ class C_MCTS(Base_MCTS):
         current_time = stn.get_current_end_time()
         if _uses_tprpg_family(self.heuristic_name):
             aligned_override = None
-            if self.temporal_heuristic_strategy in _ALIGNED_SUFFIX:
+            strategy = self.temporal_heuristic_strategy
+            if _is_option_a_strategy(strategy):
+                strategy = _option_a_ptrpg_suffix(strategy)
+            elif strategy in _ALIGNED_SUFFIX:
                 aligned_override = _dynamic_aligned_horizon(self.mdp, parent_snode)
             score, _ = _tprpg_heuristic_value(
                 self.mdp,
                 state,
                 current_time,
                 self.temporal_heuristic_depth,
-                self.temporal_heuristic_strategy,
+                strategy,
                 cached_table=self._root_baseline_cache,
                 leaf_heuristic_name=self.heuristic_name,
                 aligned_h_override=aligned_override,

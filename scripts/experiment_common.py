@@ -124,6 +124,23 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "frontier_aligned_resolution_survival",
         "label": "frontier_aligned_resolution_survival",
     },
+    # Fresh global Option A (selection-only aligned value; no lambda blend).
+    # First-test CLI: --rollout-aligned-redo 1 --rollout-aligned-boundary-mode wait_no_overshoot
+    "frontier_aligned_option_a": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "frontier_aligned_option_a",
+        "label": "frontier_aligned_option_a",
+    },
+    "frontier_aligned_option_a_survival": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "frontier_aligned_option_a_survival",
+        "label": "frontier_aligned_option_a_survival",
+    },
+    "frontier_aligned_option_a_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "frontier_aligned_option_a_resolution",
+        "label": "frontier_aligned_option_a_resolution",
+    },
     "atomic_exact": {
         "heuristic_name": "temporal_probabilistic_rpg",
         "temporal_heuristic_strategy": "atom_backtrack_exact",
@@ -262,6 +279,7 @@ def run_domain_subprocess(
     rollout_aligned_min_dynamic_horizon: int | None = None,
     rollout_aligned_fallback_if_small: str | None = None,
     rollout_aligned_lambda_align: float | None = None,
+    frontier_option_a_debug: bool = False,
     extra_args: list[str] | None = None,
     verbose: bool = False,
 ) -> tuple[str, int]:
@@ -328,6 +346,8 @@ def run_domain_subprocess(
         cmd.extend(["--rollout-aligned-fallback-if-small", str(rollout_aligned_fallback_if_small)])
     if rollout_aligned_lambda_align is not None:
         cmd.extend(["--rollout-aligned-lambda-align", str(rollout_aligned_lambda_align)])
+    if frontier_option_a_debug:
+        cmd.append("--frontier-option-a-debug")
     if extra_args:
         cmd.extend(extra_args)
 

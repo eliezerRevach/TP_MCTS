@@ -23,6 +23,9 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "17": "frontier_aligned_baseline",
         "18": "frontier_aligned_survival",
         "19": "frontier_aligned_resolution_survival",
+        "20": "frontier_aligned_option_a",
+        "21": "frontier_aligned_option_a_survival",
+        "22": "frontier_aligned_option_a_resolution",
         "baseline": "baseline",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -42,6 +45,9 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "frontier_aligned_baseline": "frontier_aligned_baseline",
         "frontier_aligned_survival": "frontier_aligned_survival",
         "frontier_aligned_resolution_survival": "frontier_aligned_resolution_survival",
+        "frontier_aligned_option_a": "frontier_aligned_option_a",
+        "frontier_aligned_option_a_survival": "frontier_aligned_option_a_survival",
+        "frontier_aligned_option_a_resolution": "frontier_aligned_option_a_resolution",
     }
     if normalized not in aliases:
         raise argparse.ArgumentTypeError(
@@ -60,7 +66,10 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "16|rollout_aligned_resolution_survival, "
             "17|frontier_aligned_baseline, "
             "18|frontier_aligned_survival, "
-            "19|frontier_aligned_resolution_survival"
+            "19|frontier_aligned_resolution_survival, "
+            "20|frontier_aligned_option_a, "
+            "21|frontier_aligned_option_a_survival, "
+            "22|frontier_aligned_option_a_resolution"
         )
     return aliases[normalized]
 
@@ -294,6 +303,13 @@ parser.add_argument(
     action='store_true',
     default=False,
     help='frontier_aligned_*: print a per-candidate trace for the first few MCTS decisions.',
+)
+parser.add_argument(
+    '--frontier-option-a-debug',
+    dest='frontier_option_a_debug',
+    action='store_true',
+    default=False,
+    help='frontier_aligned_option_a_*: print global frontier trace for first 3 selections.',
 )
 
 parser.add_argument(

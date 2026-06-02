@@ -344,6 +344,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Forwarded to run_domain: behavior when H_p < min-dynamic-horizon.")
     p.add_argument("--rollout-aligned-lambda-align", type=float, default=None,
                    help="Forwarded to run_domain: frontier_aligned_* selection blend lambda.")
+    p.add_argument("--frontier-option-a-debug", action="store_true", default=False,
+                   help="Forwarded to run_domain: frontier_aligned_option_a_* global frontier trace.")
     return p.parse_args(argv)
 
 
@@ -388,6 +390,7 @@ def run_experiment(
     rollout_aligned_min_dynamic_horizon: int | None = None,
     rollout_aligned_fallback_if_small: str | None = None,
     rollout_aligned_lambda_align: float | None = None,
+    frontier_option_a_debug: bool = False,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     depth = heuristic_depth if heuristic_depth is not None else deadline
@@ -442,6 +445,7 @@ def run_experiment(
         rollout_aligned_min_dynamic_horizon=rollout_aligned_min_dynamic_horizon,
         rollout_aligned_fallback_if_small=rollout_aligned_fallback_if_small,
         rollout_aligned_lambda_align=rollout_aligned_lambda_align,
+        frontier_option_a_debug=frontier_option_a_debug,
         verbose=verbose,
     )
     elapsed = time.perf_counter() - t0
@@ -574,6 +578,7 @@ def main(argv: list[str] | None = None) -> None:
                 rollout_aligned_min_dynamic_horizon=args.rollout_aligned_min_dynamic_horizon,
                 rollout_aligned_fallback_if_small=args.rollout_aligned_fallback_if_small,
                 rollout_aligned_lambda_align=args.rollout_aligned_lambda_align,
+                frontier_option_a_debug=args.frontier_option_a_debug,
             )
             rows.append(row)
 
