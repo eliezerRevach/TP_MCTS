@@ -1,7 +1,8 @@
 """
 PTRPG-guided terminal rollout for MCTS leaf evaluation.
 
-Uses greedy PTRPG action scoring only as a rollout policy; backs up terminal 0/1.
+Uses the same greedy MDP dispatcher as ``greedy_parallel.plan()``; backs up
+terminal 0/1 only (goal before deadline = 1.0, else 0.0).
 """
 
 from __future__ import annotations
@@ -9,13 +10,18 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import unified_planning as up
 from unified_planning.engines.solvers.greedy_parallel import (
+    GREEDY_DEFAULT_TIME_SLICES,
     GREEDY_HEURISTIC_WEIGHT,
+    GREEDY_MAX_PARALLEL_SET_SIZE,
     pick_best_action,
+    simulate_greedy_mdp_until_terminal,
+    terminal_success_value,
 )
+
 logger = logging.getLogger(__name__)
 
 PTRPG_GUIDED_POLICY_ALIASES = {
@@ -38,29 +44,34 @@ def resolve_rollout_policy(policy: str) -> str:
 @dataclass
 class RolloutConfig:
     policy_strategy: str
-    max_steps: int
+    max_time_slices: int = GREEDY_DEFAULT_TIME_SLICES
+    max_parallel_set_size: int = GREEDY_MAX_PARALLEL_SET_SIZE
+    max_mdp_steps: Optional[int] = None
     epsilon: float = 0.0
-    loop_repeat_limit: int = 3
     debug_first_rollout: bool = False
 
 
 def rollout_config_from_args(mdp: "up.engines.MDP", args=None) -> RolloutConfig:
     cli = args if args is not None else getattr(up, "args", None)
     policy = "baseline_survival_resolution"
-    max_steps = None
+    max_mdp_steps = None
+    max_time_slices = GREEDY_DEFAULT_TIME_SLICES
     epsilon = 0.0
     debug = False
     if cli is not None:
         policy = getattr(cli, "ptrpg_guided_rollout_policy", policy)
-        max_steps = getattr(cli, "ptrpg_guided_rollout_max_steps", None)
+        max_mdp_steps = getattr(cli, "ptrpg_guided_rollout_max_steps", None)
+        max_time_slices = getattr(
+            cli, "ptrpg_guided_rollout_max_time_slices", max_time_slices
+        )
         epsilon = float(getattr(cli, "ptrpg_guided_rollout_epsilon", 0.0))
         debug = bool(getattr(cli, "ptrpg_guided_rollout_debug", False))
-    if max_steps is None:
-        deadline = mdp.deadline()
-        max_steps = int(deadline) if deadline is not None else 500
+    if max_mdp_steps is None:
+        max_mdp_steps = GREEDY_MAX_PARALLEL_SET_SIZE * max(1, int(max_time_slices))
     return RolloutConfig(
         policy_strategy=resolve_rollout_policy(policy),
-        max_steps=max(1, int(max_steps)),
+        max_time_slices=max(1, int(max_time_slices)),
+        max_mdp_steps=max(1, int(max_mdp_steps)),
         epsilon=epsilon,
         debug_first_rollout=debug,
     )
@@ -78,18 +89,6 @@ def state_time_key(state: "up.engines.State", remaining: int) -> Tuple[object, i
     if preds is not None:
         return (frozenset(preds), remaining)
     return (id(state), remaining)
-
-
-def terminal_success_value(
-    mdp: "up.engines.MDP",
-    state: "up.engines.State",
-    stn: "up.plans.stn.STNPlan",
-) -> float:
-    if not mdp.is_terminal(state):
-        return 0.0
-    if stn.get_current_end_time() > mdp.deadline():
-        return 0.0
-    return 1.0
 
 
 def pick_greedy_rollout_action(
@@ -111,34 +110,22 @@ def pick_greedy_rollout_action(
         temporal_heuristic_depth=temporal_heuristic_depth,
         temporal_heuristic_strategy=policy_strategy,
         heuristic_weight=heuristic_weight,
-        tie_break="stable",
+        tie_break="legacy",
     )
 
 
 def _log_rollout_step(
     step_idx: int,
     remaining: int,
-    legal_count: int,
     action_name: str,
-    action_score: float,
-    top_scores: list,
     terminal: bool,
-    stn_infeasible: bool,
-    dead_end: bool,
 ):
-    top_str = ", ".join(f"{name}={score:.4f}" for name, score in top_scores)
     logger.info(
-        "ptrpg_guided_rollout step=%d remaining=%d legal=%d selected=%s score=%.4f "
-        "top5=[%s] terminal=%s stn_infeasible=%s dead_end=%s",
+        "ptrpg_guided_rollout step=%d remaining=%d selected=%s terminal=%s",
         step_idx,
         remaining,
-        legal_count,
         action_name,
-        action_score,
-        top_str,
         terminal,
-        stn_infeasible,
-        dead_end,
     )
 
 
@@ -153,119 +140,55 @@ def ptrpg_guided_terminal_rollout(
     heuristic_weight: float = GREEDY_HEURISTIC_WEIGHT,
     debug_emit: bool = False,
 ) -> float:
-    # epsilon reserved for future epsilon-greedy; pure greedy when 0.0
     _ = getattr(config, "epsilon", 0.0)
-
-    current_state = state
-    current_stn = stn
-    current_prev = previous_action_node
-    visited: Dict[Tuple[object, int], int] = {}
     policy_strategy = config.policy_strategy
+    step_log: list = []
 
-    for step_idx in range(config.max_steps):
-        if mdp.is_terminal(current_state):
-            final_v = terminal_success_value(mdp, current_state, current_stn)
-            if debug_emit:
-                logger.info("ptrpg_guided_rollout final_value=%.1f goal_reached=yes", final_v)
-            return final_v
-
-        remaining = remaining_deadline(mdp, current_stn)
-        if remaining <= 0:
-            final_v = terminal_success_value(mdp, current_state, current_stn)
-            if debug_emit:
-                logger.info(
-                    "ptrpg_guided_rollout final_value=%.1f goal_reached=%s remaining=0",
-                    final_v,
-                    final_v >= 1.0,
-                )
-            return final_v
-
-        loop_key = state_time_key(current_state, remaining)
-        visited[loop_key] = visited.get(loop_key, 0) + 1
-        if visited[loop_key] >= config.loop_repeat_limit:
-            if debug_emit:
-                logger.info("ptrpg_guided_rollout final_value=0.0 loop_guard=yes")
-            return 0.0
-
-        legal_actions = mdp.legal_actions(current_state)
-        if not legal_actions:
-            if debug_emit:
-                logger.info("ptrpg_guided_rollout final_value=0.0 dead_end=yes legal=0")
-            return 0.0
-
-        from unified_planning.engines.solvers.greedy_parallel import rank_actions_by_score
-
-        ranked = rank_actions_by_score(
-            mdp=mdp,
-            state=current_state,
-            stn=current_stn,
-            previous_action_node=current_prev,
-            legal_actions=legal_actions,
-            heuristic_name=heuristic_name,
-            temporal_heuristic_depth=temporal_heuristic_depth,
-            temporal_heuristic_strategy=policy_strategy,
-            heuristic_weight=heuristic_weight,
-            tie_break="stable",
-        )
-        if not ranked:
-            if debug_emit:
-                logger.info("ptrpg_guided_rollout final_value=0.0 no_feasible_action=yes")
-            return 0.0
-
-        best_score, best_action, next_stn, next_prev, _, _ = ranked[0]
+    def on_mdp_step(mdp_step, _state, current_stn, action, terminal):
         if debug_emit:
-            top_scores = [
-                (getattr(a, "name", str(a)), s) for s, a, *_ in ranked[:5]
-            ]
-            _log_rollout_step(
-                step_idx=step_idx,
-                remaining=remaining,
-                legal_count=len(legal_actions),
-                action_name=getattr(best_action, "name", str(best_action)),
-                action_score=best_score,
-                top_scores=top_scores,
-                terminal=False,
-                stn_infeasible=False,
-                dead_end=False,
-            )
+            step_log.append((mdp_step, action, terminal, current_stn))
 
-        terminal, next_state, _reward = mdp.step(current_state, best_action)
-        if not next_stn.is_consistent() or next_stn.get_current_end_time() > mdp.deadline():
-            if debug_emit:
-                logger.info(
-                    "ptrpg_guided_rollout final_value=0.0 stn_infeasible=yes "
-                    "stochastic_outcome terminal=%s",
-                    terminal,
-                )
-            return 0.0
+    value, final_stn = simulate_greedy_mdp_until_terminal(
+        mdp=mdp,
+        state=state,
+        stn=stn,
+        previous_action_node=previous_action_node,
+        heuristic_name=heuristic_name,
+        temporal_heuristic_depth=temporal_heuristic_depth,
+        temporal_heuristic_strategy=policy_strategy,
+        max_time_slices=config.max_time_slices,
+        max_parallel_set_size=config.max_parallel_set_size,
+        max_mdp_steps=config.max_mdp_steps,
+        tie_break="legacy",
+        heuristic_weight=heuristic_weight,
+        on_mdp_step=on_mdp_step if debug_emit else None,
+    )
 
-        if debug_emit:
-            logger.info(
-                "ptrpg_guided_rollout stochastic_outcome terminal=%s goal=%s",
-                terminal,
-                mdp.is_terminal(next_state),
-            )
-
-        current_state = next_state
-        current_stn = next_stn
-        current_prev = next_prev
-
-        if terminal:
-            final_v = terminal_success_value(mdp, current_state, current_stn)
-            if debug_emit:
-                logger.info("ptrpg_guided_rollout final_value=%.1f goal_reached=%s", final_v, final_v >= 1.0)
-            return final_v
-
-        if not mdp.legal_actions(current_state) and not mdp.is_terminal(current_state):
-            if debug_emit:
-                logger.info("ptrpg_guided_rollout final_value=0.0 dead_end=yes")
-            return 0.0
-
-    final_v = terminal_success_value(mdp, current_state, current_stn)
     if debug_emit:
+        for mdp_step, action, terminal, current_stn in step_log:
+            _log_rollout_step(
+                step_idx=mdp_step,
+                remaining=remaining_deadline(mdp, current_stn),
+                action_name=getattr(action, "name", str(action)),
+                terminal=terminal,
+            )
         logger.info(
-            "ptrpg_guided_rollout final_value=%.1f max_steps_reached=yes goal_reached=%s",
-            final_v,
-            final_v >= 1.0,
+            "ptrpg_guided_rollout final_value=%.1f goal_reached=%s",
+            value,
+            value >= 1.0,
         )
-    return final_v
+
+    return value
+
+
+__all__ = [
+    "RolloutConfig",
+    "PTRPG_GUIDED_POLICY_ALIASES",
+    "pick_greedy_rollout_action",
+    "ptrpg_guided_terminal_rollout",
+    "remaining_deadline",
+    "resolve_rollout_policy",
+    "rollout_config_from_args",
+    "state_time_key",
+    "terminal_success_value",
+]

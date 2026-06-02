@@ -343,7 +343,8 @@ parser.add_argument(
     dest='ptrpg_guided_rollout_max_steps',
     type=int,
     default=None,
-    help='Cap rollout simulation steps (default: problem deadline).',
+    help='Safety cap on MDP transitions in ptrpg_guided_terminal_rollout '
+         '(default: 32 parallel slots × 90 time slices).',
 )
 parser.add_argument(
     '--ptrpg-guided-rollout-epsilon',

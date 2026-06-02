@@ -7,6 +7,8 @@ from unified_planning.engines.utils import create_init_stn, update_stn
 from unified_planning.engines.heuristic_timing import WrapperTimer, is_active
 
 GREEDY_HEURISTIC_WEIGHT = 0.2
+GREEDY_MAX_PARALLEL_SET_SIZE = 32
+GREEDY_DEFAULT_TIME_SLICES = 90
 
 
 def _heuristic_value(
@@ -274,6 +276,135 @@ def greedy_matched_value_target(
     return expected_reward + heuristic_weight * expected_h - 0.001 * current_time
 
 
+def terminal_success_value(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
+) -> float:
+    if not mdp.is_terminal(state):
+        return 0.0
+    if stn.get_current_end_time() > mdp.deadline():
+        return 0.0
+    return 1.0
+
+
+def simulate_greedy_mdp_until_terminal(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
+    previous_action_node: "up.plans.stn.STNPlanNode",
+    heuristic_name: str,
+    temporal_heuristic_depth: int,
+    temporal_heuristic_strategy: str,
+    *,
+    max_time_slices: int = GREEDY_DEFAULT_TIME_SLICES,
+    max_parallel_set_size: int = GREEDY_MAX_PARALLEL_SET_SIZE,
+    max_mdp_steps: Optional[int] = None,
+    tie_break: str = "legacy",
+    heuristic_weight: float = GREEDY_HEURISTIC_WEIGHT,
+    temporal_cache_table=None,
+    on_mdp_step=None,
+) -> Tuple[float, "up.plans.stn.STNPlan"]:
+    """Greedy MDP dispatcher (same as ``plan()``) until goal, dead end, or deadline.
+
+    Returns ``(terminal_success_value, final_stn)``. Optional ``on_mdp_step`` callback:
+    ``(mdp_step_index, state, stn, action, terminal)``.
+    """
+    if max_mdp_steps is None:
+        max_mdp_steps = max(1, max_parallel_set_size * max(1, max_time_slices))
+
+    current_state = state
+    current_stn = stn
+    current_prev = previous_action_node
+    cache = temporal_cache_table
+    mdp_step = 0
+    time_slice = 0
+
+    while current_stn.get_current_end_time() <= mdp.deadline() and time_slice < max_time_slices:
+        decision_time = current_stn.get_current_end_time()
+        chosen_in_set = 0
+
+        while chosen_in_set < max_parallel_set_size:
+            if mdp_step >= max_mdp_steps:
+                return (
+                    terminal_success_value(mdp, current_state, current_stn),
+                    current_stn,
+                )
+
+            if mdp.is_terminal(current_state):
+                return (
+                    terminal_success_value(mdp, current_state, current_stn),
+                    current_stn,
+                )
+
+            legal_actions = mdp.legal_actions(current_state)
+            if not legal_actions:
+                break
+
+            picked = pick_best_action(
+                mdp=mdp,
+                state=current_state,
+                stn=current_stn,
+                previous_action_node=current_prev,
+                heuristic_name=heuristic_name,
+                temporal_heuristic_depth=temporal_heuristic_depth,
+                temporal_heuristic_strategy=temporal_heuristic_strategy,
+                heuristic_weight=heuristic_weight,
+                temporal_cache_table=cache,
+                tie_break=tie_break,
+                legal_actions=legal_actions,
+            )
+            if picked is None:
+                break
+
+            best_score, action, next_stn, next_prev, _, transition_cache_by_state = picked
+            if not math.isfinite(best_score):
+                break
+
+            terminal, next_state, _reward = mdp.step(current_state, action)
+            if (
+                heuristic_name == "temporal_probabilistic_rpg"
+                and temporal_heuristic_strategy == "baseline_cached"
+            ):
+                cache_update = transition_cache_by_state.get(next_state)
+                if isinstance(cache_update, tuple):
+                    if cache is not None:
+                        temp_dict, new_state_facts = cache_update
+                        cache.apply_temp(temp_dict, new_state_facts)
+                else:
+                    cache = cache_update
+
+            if on_mdp_step is not None:
+                on_mdp_step(mdp_step, current_state, current_stn, action, terminal)
+
+            current_state = next_state
+            current_stn = next_stn
+            current_prev = next_prev
+            chosen_in_set += 1
+            mdp_step += 1
+
+            if terminal:
+                return (
+                    terminal_success_value(mdp, current_state, current_stn),
+                    current_stn,
+                )
+
+            if current_stn.get_current_end_time() > decision_time:
+                break
+
+        if chosen_in_set == 0:
+            return (
+                terminal_success_value(mdp, current_state, current_stn),
+                current_stn,
+            )
+        time_slice += 1
+
+    return (
+        terminal_success_value(mdp, current_state, current_stn),
+        current_stn,
+    )
+
+
 def plan(
     mdp: "up.engines.MDP",
     steps: int,
@@ -296,75 +427,30 @@ def plan(
 
     stn = create_init_stn(mdp)
     root_state = mdp.initial_state()
-    previous_action_node = None
-    max_parallel_set_size = 32
-    heuristic_weight = GREEDY_HEURISTIC_WEIGHT
-    step = 0
-    temporal_cache_table = None
 
-    while stn.get_current_end_time() <= mdp.deadline() and step < steps:
-        print(f"started step {step}")
-        decision_time = stn.get_current_end_time()
-        chosen_in_set = 0
+    def _log_step(_idx, _state, _stn, action, terminal):
+        print(f"Current state is {_state}")
+        print(f"The chosen action is {action.name}")
+        print(f"The time of the plan so far: {_stn.get_current_end_time()}")
+        if terminal:
+            print(f"Current state is {_state}")
+            print(f"The amount of time the plan took: {_stn.get_current_end_time()}")
 
-        while chosen_in_set < max_parallel_set_size:
-            legal_actions = mdp.legal_actions(root_state)
-            if not legal_actions:
-                break
-
-            picked = pick_best_action(
-                mdp=mdp,
-                state=root_state,
-                stn=stn,
-                previous_action_node=previous_action_node,
-                heuristic_name=heuristic_name,
-                temporal_heuristic_depth=temporal_heuristic_depth,
-                temporal_heuristic_strategy=temporal_heuristic_strategy,
-                heuristic_weight=heuristic_weight,
-                temporal_cache_table=temporal_cache_table,
-                tie_break="legacy",
-                legal_actions=legal_actions,
-            )
-            if picked is None:
-                break
-
-            best_score, action, next_stn, next_prev, _, transition_cache_by_state = picked
-            if not math.isfinite(best_score):
-                break
-            print(f"Current state is {root_state}")
-            print(f"The chosen action is {action.name}")
-
-            terminal, next_state, _ = mdp.step(root_state, action)
-            if (
-                heuristic_name == "temporal_probabilistic_rpg"
-                and temporal_heuristic_strategy == "baseline_cached"
-            ):
-                cache_update = transition_cache_by_state.get(next_state)
-                if isinstance(cache_update, tuple):
-                    if temporal_cache_table is not None:
-                        temp_dict, new_state_facts = cache_update
-                        temporal_cache_table.apply_temp(temp_dict, new_state_facts)
-                else:
-                    temporal_cache_table = cache_update
-            root_state = next_state
-            stn = next_stn
-            previous_action_node = next_prev
-            chosen_in_set += 1
-
-            print(f"The time of the plan so far: {stn.get_current_end_time()}")
-            if terminal:
-                print(f"Current state is {root_state}")
-                print(f"The amount of time the plan took: {stn.get_current_end_time()}")
-                return 1, stn.get_current_end_time()
-
-            # Keep each dispatch step as one parallel time slice.
-            if stn.get_current_end_time() > decision_time:
-                break
-
-        if chosen_in_set == 0:
-            print("A valid plan is not found")
-            return 0, -math.inf
-        step += 1
-
+    value, stn = simulate_greedy_mdp_until_terminal(
+        mdp=mdp,
+        state=root_state,
+        stn=stn,
+        previous_action_node=None,
+        heuristic_name=heuristic_name,
+        temporal_heuristic_depth=temporal_heuristic_depth,
+        temporal_heuristic_strategy=temporal_heuristic_strategy,
+        max_time_slices=steps,
+        max_parallel_set_size=GREEDY_MAX_PARALLEL_SET_SIZE,
+        tie_break="legacy",
+        heuristic_weight=GREEDY_HEURISTIC_WEIGHT,
+        on_mdp_step=_log_step,
+    )
+    if value >= 1.0:
+        return 1, stn.get_current_end_time()
     print("A valid plan is not found")
     return 0, -math.inf

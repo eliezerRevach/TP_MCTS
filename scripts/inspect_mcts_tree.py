@@ -118,7 +118,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="ptrpg_guided_rollout_max_steps",
         type=int,
         default=None,
-        help="Cap rollout steps (default: domain deadline).",
+        help="Safety cap on MDP transitions in rollout (default: 32×90).",
     )
     p.add_argument(
         "--ptrpg-guided-rollout-epsilon",

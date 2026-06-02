@@ -59,7 +59,8 @@ class TestPtrpgGuidedTerminalRollout(unittest.TestCase):
         self.state = self.mdp.initial_state()
         self.config = RolloutConfig(
             policy_strategy=resolve_rollout_policy("baseline_survival_resolution"),
-            max_steps=20,
+            max_time_slices=20,
+            max_mdp_steps=500,
         )
 
     def test_rollout_returns_binary(self):
@@ -73,46 +74,34 @@ class TestPtrpgGuidedTerminalRollout(unittest.TestCase):
         )
         self.assertIn(value, (0.0, 1.0))
 
-    def test_loop_guard_returns_zero(self):
-        config = RolloutConfig(
-            policy_strategy=self.config.policy_strategy,
-            max_steps=50,
-            loop_repeat_limit=3,
-        )
-        action = list(self.mdp.problem.actions)[0]
-        with mock.patch(
-            "unified_planning.engines.solvers.ptrpg_guided_rollout.pick_best_action"
-        ) as mock_pick:
-            mock_pick.return_value = (
-                1.0,
-                action,
-                self.stn.clone(),
-                None,
-                False,
-                {},
-            )
-            with mock.patch.object(self.mdp, "step") as mock_step:
-                mock_step.return_value = (False, self.state, 0.0)
-                value = ptrpg_guided_terminal_rollout(
-                    mdp=self.mdp,
-                    state=self.state,
-                    stn=self.stn,
-                    previous_action_node=None,
-                    config=config,
-                    temporal_heuristic_depth=8,
-                )
-        self.assertEqual(value, 0.0)
-
-    def test_first_action_matches_greedy_stable(self):
-        stable = pick_best_action(
+    def test_simulation_runs_until_terminal_on_easy_domain(self):
+        value = ptrpg_guided_terminal_rollout(
             mdp=self.mdp,
             state=self.state,
             stn=self.stn,
             previous_action_node=None,
+            config=RolloutConfig(
+                policy_strategy=self.config.policy_strategy,
+                max_time_slices=20,
+                max_mdp_steps=500,
+            ),
+            temporal_heuristic_depth=8,
+        )
+        self.assertEqual(value, 1.0)
+
+    def test_rollout_picker_matches_greedy_legacy(self):
+        from unified_planning.engines.solvers.ptrpg_guided_rollout import (
+            pick_greedy_rollout_action,
+        )
+
+        rollout_pick = pick_greedy_rollout_action(
+            mdp=self.mdp,
+            state=self.state,
+            stn=self.stn,
+            previous_action_node=None,
+            policy_strategy="baseline_survival_resolution",
             heuristic_name="temporal_probabilistic_rpg",
             temporal_heuristic_depth=8,
-            temporal_heuristic_strategy="baseline_survival_resolution",
-            tie_break="stable",
         )
         legacy = pick_best_action(
             mdp=self.mdp,
@@ -124,10 +113,10 @@ class TestPtrpgGuidedTerminalRollout(unittest.TestCase):
             temporal_heuristic_strategy="baseline_survival_resolution",
             tie_break="legacy",
         )
-        self.assertIsNotNone(stable)
+        self.assertIsNotNone(rollout_pick)
         self.assertIsNotNone(legacy)
-        self.assertEqual(stable[0], legacy[0])
-        self.assertEqual(stable[1].name, legacy[1].name)
+        self.assertEqual(rollout_pick[0], legacy[0])
+        self.assertEqual(rollout_pick[1].name, legacy[1].name)
 
     def test_mcts_leaf_does_not_call_heuristic(self):
         with mock.patch.object(C_MCTS, "heuristic", autospec=True) as mock_h:
@@ -154,7 +143,7 @@ class TestPtrpgGuidedTerminalRollout(unittest.TestCase):
     def test_debug_trace_emits_once(self):
         config = RolloutConfig(
             policy_strategy=self.config.policy_strategy,
-            max_steps=10,
+            max_time_slices=10,
             debug_first_rollout=True,
         )
         with self.assertLogs(
