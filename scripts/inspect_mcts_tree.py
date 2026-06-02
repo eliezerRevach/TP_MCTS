@@ -93,7 +93,46 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--discount_factor", "--gamma", type=float, default=1.0)
     p.add_argument("--step_penalty", type=float, default=-0.01)
     p.add_argument("--reward_mode", choices=["deadline", "terminal"], default="deadline")
-    p.add_argument("--value_mode", choices=["tp_mcts", "greedy_matched"], default="greedy_matched")
+    p.add_argument(
+        "--value_mode",
+        choices=["tp_mcts", "greedy_matched", "ptrpg_guided_terminal_rollout"],
+        default="greedy_matched",
+        help=(
+            "MCTS leaf/backup target: tp_mcts (PTRPG heuristic), greedy_matched, or "
+            "ptrpg_guided_terminal_rollout (stochastic rollout, PTRPG policy only)."
+        ),
+    )
+    p.add_argument(
+        "--ptrpg-guided-rollout-policy",
+        dest="ptrpg_guided_rollout_policy",
+        default=None,
+        choices=(
+            "baseline_survival_resolution",
+            "atomic_exact_resolution",
+            "atom_backtrack_exact_resolution",
+        ),
+        help="PTRPG policy for ptrpg_guided_terminal_rollout (defaults from heuristic alias).",
+    )
+    p.add_argument(
+        "--ptrpg-guided-rollout-max-steps",
+        dest="ptrpg_guided_rollout_max_steps",
+        type=int,
+        default=None,
+        help="Cap rollout steps (default: domain deadline).",
+    )
+    p.add_argument(
+        "--ptrpg-guided-rollout-epsilon",
+        dest="ptrpg_guided_rollout_epsilon",
+        type=float,
+        default=None,
+        help="Rollout epsilon (0 = greedy).",
+    )
+    p.add_argument(
+        "--ptrpg-guided-rollout-debug",
+        dest="ptrpg_guided_rollout_debug",
+        action="store_true",
+        help="Log the first rollout per search.",
+    )
     p.add_argument(
         "--heuristic",
         default="atomic_exact",
@@ -161,6 +200,26 @@ def build_mdp(args: argparse.Namespace) -> MDP:
         reward_mode=args.reward_mode,
         step_penalty=args.step_penalty,
     )
+
+
+def apply_heuristic_alias_overrides(args: argparse.Namespace) -> None:
+    """Resolve value_mode / PTRPG rollout policy from experiment_common aliases."""
+    alias = HEURISTIC_ALIASES[args.heuristic]
+    args.value_mode = alias.get("value_mode", args.value_mode)
+    if args.ptrpg_guided_rollout_policy is None:
+        args.ptrpg_guided_rollout_policy = alias.get("ptrpg_guided_rollout_policy")
+
+
+def configure_ptrpg_rollout_cli(args: argparse.Namespace) -> None:
+    """Mirror run_domain parser fields on up.args for direct C_MCTS construction."""
+    if args.ptrpg_guided_rollout_policy is not None:
+        up.args.ptrpg_guided_rollout_policy = args.ptrpg_guided_rollout_policy
+    if args.ptrpg_guided_rollout_max_steps is not None:
+        up.args.ptrpg_guided_rollout_max_steps = args.ptrpg_guided_rollout_max_steps
+    if args.ptrpg_guided_rollout_epsilon is not None:
+        up.args.ptrpg_guided_rollout_epsilon = args.ptrpg_guided_rollout_epsilon
+    if args.ptrpg_guided_rollout_debug:
+        up.args.ptrpg_guided_rollout_debug = True
 
 
 def build_mcts(args: argparse.Namespace) -> C_MCTS:
@@ -386,6 +445,8 @@ def print_snapshot(mcts: C_MCTS, args: argparse.Namespace, milestone: int) -> No
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    apply_heuristic_alias_overrides(args)
+    configure_ptrpg_rollout_cli(args)
     if args.resolution_alpha is not None:
         up.args.resolution_alpha = args.resolution_alpha
     if args.resolution_forced_minimum:
