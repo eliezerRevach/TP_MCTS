@@ -54,6 +54,11 @@ class Node:
         else:
             self._linkList.update(lower, upper, reward)
 
+    def seed_prior(self, prior: float) -> None:
+        """Set an initial value without counting a visit (for UCT priors)."""
+        if self._count == 0:
+            self._value = float(prior)
+
 
 class SNode(Node):
     """ State node """

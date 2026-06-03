@@ -547,17 +547,35 @@ class Base_MCTS:
         """ Choose a random action. Heustics can be used here to improve simulations. """
         return random.choice(self.mdp.legal_actions(state))
 
+    @staticmethod
+    def _uct_log_parent_visits(snode: "up.engines.Snode") -> float:
+        return math.log(max(1.0, float(snode.count)))
+
+    def _uct_pick_unvisited(self, snode: "up.engines.Snode"):
+        anodes = snode.children
+        unvisited = [a for a in snode.possible_actions if anodes[a].count == 0]
+        if not unvisited:
+            return None
+        if len(unvisited) == len(snode.possible_actions):
+            return max(
+                unvisited,
+                key=lambda a: getattr(anodes[a], "_expectimax_q", anodes[a].value),
+            )
+        return unvisited[0]
+
     def uct(self, snode: "up.engines.Snode", explore_constant: float):
         anodes = snode.children
         best_ub = -float('inf')
         best_action = -1
         possible_actions = snode.possible_actions
-        for action in possible_actions:
-            if anodes[action].count == 0:
-                return action
+        unvisited_action = self._uct_pick_unvisited(snode)
+        if unvisited_action is not None:
+            return unvisited_action
 
+        log_n = self._uct_log_parent_visits(snode)
+        for action in possible_actions:
             ub = anodes[action].value + (
-                    explore_constant * math.sqrt(math.log(snode.count) / anodes[action].count))
+                    explore_constant * math.sqrt(log_n / anodes[action].count))
             # ub = anodes[action].value + (
             #         explore_constant * math.sqrt(math.log(snode.count + 1) / anodes[action].count))
             if ub > best_ub:
@@ -986,7 +1004,7 @@ class C_MCTS(Base_MCTS):
             anode._expectimax_outcomes = outcomes
             q_by_action[action] = q_val
             if anode.count == 0:
-                anode.update(q_val)
+                anode.seed_prior(q_val)
         snode._expectimax_seeded = True
         if snode.depth == 0:
             self._fixed_tail_maybe_debug_root(snode, q_by_action)
@@ -1581,7 +1599,7 @@ class C_MCTS(Base_MCTS):
         diag["selections"] += 1
 
         lam = self._frontier_lambda_align()
-        log_n = math.log(snode.count) if snode.count > 0 else 0.0
+        log_n = self._uct_log_parent_visits(snode)
         best_score = -float("inf")
         best_action = None
         rows = []
@@ -1639,14 +1657,22 @@ class C_MCTS(Base_MCTS):
         if not candidate_actions:
             return super().uct(snode, explore_constant)
 
+        unvisited_candidates = [a for a in candidate_actions if anodes[a].count == 0]
+        if unvisited_candidates:
+            if len(unvisited_candidates) == len(candidate_actions):
+                return max(
+                    unvisited_candidates,
+                    key=lambda a: getattr(anodes[a], "_expectimax_q", anodes[a].value),
+                )
+            return unvisited_candidates[0]
+
         best_ub = -float('inf')
         best_action = None
+        log_n = self._uct_log_parent_visits(snode)
         for action in candidate_actions:
-            if anodes[action].count == 0:
-                return action
 
             ub = anodes[action].value + (
-                    explore_constant * math.sqrt(math.log(snode.count) / anodes[action].count))
+                    explore_constant * math.sqrt(log_n / anodes[action].count))
             if ub > best_ub:
                 best_ub = ub
                 best_action = action
