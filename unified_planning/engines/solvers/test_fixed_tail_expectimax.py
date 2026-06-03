@@ -239,6 +239,37 @@ class TestFixedTailExpectimaxMCTSSeed(unittest.TestCase):
             self.assertTrue(hasattr(anode, "_expectimax_q"))
             self.assertEqual(anode.count, 0)
 
+    def test_max_init_fixed_tail_has_root_stn_during_create(self):
+        up.args = mock.MagicMock()
+        up.args.fixed_tail_prefix_frac = 0.20
+        up.args.fixed_tail_prefix_policy = "expectimax"
+        up.args.fixed_tail_expectimax_max_nodes = 5000
+        up.args.fixed_tail_expectimax_max_depth = 64
+        up.args.fixed_tail_expectimax_max_time_sec = 0.0
+        up.args.fixed_tail_debug = False
+
+        converted = _build_split_problem(duration=2, deadline=25)
+        mdp = MDP(converted, discount_factor=1.0, reward_mode="terminal")
+        stn = create_init_stn(mdp)
+        root_state = mdp.initial_state()
+
+        mcts = C_MCTS(
+            mdp=mdp,
+            root_node=None,
+            root_state=root_state,
+            stn=stn,
+            heuristic_name="temporal_probabilistic_rpg",
+            temporal_heuristic_depth=25,
+            temporal_heuristic_strategy="atom_backtrack_exact_resolution",
+            value_mode="fixed_tail_ptrpg_rollout",
+            exploration_constant=0.5,
+            search_depth=4,
+            selection_type="max",
+            k=9999,
+        )
+        self.assertIs(mcts.stn, stn)
+        self.assertGreater(mcts.root_node.count, 0)
+
     def test_uct_after_expectimax_seed_no_log_domain_error(self):
         up.args = mock.MagicMock()
         up.args.fixed_tail_prefix_frac = 0.20

@@ -848,6 +848,7 @@ class C_MCTS(Base_MCTS):
                  root_baseline_cache=None, value_mode: str = "tp_mcts",
                  uct_initial_k: int = 3):
         super().__init__(mdp, search_depth, exploration_constant, k)
+        self._stn = stn
         self._previous_chosen_action_node = previous_chosen_action_node
         self.heuristic_name = heuristic_name
         self.temporal_heuristic_depth = temporal_heuristic_depth
@@ -915,7 +916,6 @@ class C_MCTS(Base_MCTS):
         snode, _ = create_snode(root_state, 0, stn,
                                 previous_chosen_action_node=previous_chosen_action_node)
         self.set_root_node(root_node if root_node is not None else snode)
-        self._stn = stn
 
     def _assign_option_a_node_id(self, snode, parent_snode=None):
         if not hasattr(self, "_next_option_a_node_id"):
