@@ -291,6 +291,7 @@ def run_domain_subprocess(
     runs: int,
     seed: int,
     solver: str,
+    domain_type: str = "regular",
     heuristic_name: str,
     temporal_heuristic_strategy: str,
     temporal_heuristic_depth: int,
@@ -367,6 +368,7 @@ def run_domain_subprocess(
         "--final_selection", final_selection,
         "--seed", str(seed),
         "--solver", solver,
+        "--domain_type", domain_type,
         "--heuristic_name", heuristic_name,
         "--temporal_heuristic_depth", str(temporal_heuristic_depth),
         "--temporal_heuristic_strategy", temporal_heuristic_strategy,
@@ -472,6 +474,36 @@ _METRIC_PATTERNS: dict[str, re.Pattern] = {
     "avg_success_time": re.compile(r"Average success time\s*=\s*(\S+)"),
     "std_success_time": re.compile(r"STD success time\s*=\s*(\S+)"),
 }
+
+
+def summarize_run_domain_output(output: str, *, max_lines: int = 24) -> None:
+    """Print high-signal run_domain.py lines (for Script 3 when verbose=False)."""
+    keys = (
+        "Solver =",
+        "Selection Type =",
+        "Domain Type =",
+        "Temporal Heuristic Strategy =",
+        "Max approx",
+        "Resolution alpha",
+        "Compilation Time",
+        "Action amount=",
+        "A valid plan",
+        "Amount of success",
+        "Traceback",
+        "Error",
+        "ModuleNotFoundError",
+    )
+    hits = [ln for ln in output.splitlines() if any(k in ln for k in keys)]
+    if hits:
+        print("  --- run_domain (key lines) ---")
+        for ln in hits[-max_lines:]:
+            print("  " + ln)
+        return
+    tail = [ln for ln in output.splitlines() if ln.strip()][-8:]
+    if tail:
+        print("  --- run_domain (tail; no key lines matched) ---")
+        for ln in tail:
+            print("  " + ln)
 
 
 def parse_run_metrics(output: str) -> dict[str, Any]:

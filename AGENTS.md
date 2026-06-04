@@ -62,7 +62,7 @@
 - API: `select_max_approximation_action_set(...)`, `build_heuristic_adapter(...)`, defaults `alpha=1.5`, `num_samples=32`
 - PTRPG action scores: `TemporalProbabilisticRPGHeuristic.action_contribution_scores()`; backtrack/resolution strategies use a cached companion forward profile when `action_support_by_layer` is empty
 - Tests: `python -m pytest comdp_plus_no_deadline/tests/test_max_approximation_selector.py -q`
-- **Not wired yet** (follow-up): `greedy_parallel.simulate_greedy_mdp_until_terminal` when `selection_type == "max_approximation"`; `unified_planning/parser.py` (`--selection_type`, `--max-approx-alpha`, `--max-approx-samples`); `experiments.ipynb` Script 3
+- **Wired**: `greedy_parallel` (`selection_type=max_approximation`), `parser.py` (`--max-approx-*`), `experiment_common.run_domain_subprocess`, Script 3 via `SELECTION_TYPE` + `MAX_APPROX_*`
 
 ## Commands
 - Run targeted tests when changing core logic:

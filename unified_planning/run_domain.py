@@ -254,7 +254,20 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
             temporal_heuristic_strategy,
         )
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.rtdp.plan, params)
-
+    elif solver == 'greedy_parallel':
+        greedy_params = (
+            mdp,
+            90,
+            search_time,
+            search_depth,
+            exploration_constant,
+            selection_type,
+            k,
+            heuristic_name,
+            temporal_heuristic_depth,
+            temporal_heuristic_strategy,
+        ) + _greedy_plan_tail_params()
+        up.engines.solvers.evaluate.evaluation_loop(runs, greedy_parallel_solver.plan, greedy_params)
     else:
         params = (
             mdp,
