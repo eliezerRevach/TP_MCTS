@@ -33,8 +33,14 @@ from unified_planning.engines.solvers.mcts import (
 
 @dataclass
 class MaxApproximationConfig:
-    alpha: float = 1.5
-    num_samples: int = 32
+    # Sampling exponent: P(pick a) ∝ marginal(a) ** alpha.
+    #   alpha=0  -> uniform over positive-marginal actions (max exploration)
+    #   alpha=1  -> proportional to contribution (default)
+    #   alpha>1  -> sharpened toward the top contributor (toward argmax)
+    alpha: float = 1.0
+    # Candidate action-sets built per decision. Sample 0 is the deterministic
+    # greedy build; samples 1.. are stochastic explorations. Best successor wins.
+    num_samples: int = 2
     seed: Optional[int] = None
     debug: bool = False
     # Minimal goal-probability lift for an action to be considered a positive

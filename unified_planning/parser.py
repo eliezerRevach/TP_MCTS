@@ -94,16 +94,17 @@ parser.add_argument(
 parser.add_argument(
     '--max-approx-alpha',
     dest='max_approx_alpha',
-    default=1.5,
+    default=1.0,
     type=float,
     help='max_approximation: sampling exponent P(a) ∝ score(a)^alpha (greedy_parallel only).',
 )
 parser.add_argument(
     '--max-approx-samples',
     dest='max_approx_num_samples',
-    default=32,
+    default=2,
     type=int,
-    help='max_approximation: random valid action sets sampled per parallel dispatch.',
+    help='max_approximation: candidate action sets per dispatch (1=deterministic greedy; '
+         '+1 stochastic exploration each). Each costs a full greedy build.',
 )
 parser.add_argument(
     '--max-approx-seed',
