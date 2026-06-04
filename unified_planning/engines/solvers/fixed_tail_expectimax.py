@@ -43,6 +43,20 @@ def _stn_key(stn: "up.plans.stn.STNPlan") -> float:
     return float(stn.get_current_end_time())
 
 
+def _feasible_actions(
+    mdp: "up.engines.MDP",
+    state: "up.engines.State",
+    stn: "up.plans.stn.STNPlan",
+    previous_action_node: "up.plans.stn.STNPlanNode",
+) -> List["up.engines.Action"]:
+    """STN-feasible legal actions (same filter as greedy_parallel / MCTS children)."""
+    out: List["up.engines.Action"] = []
+    for action in mdp.legal_actions(state):
+        if _fit_action_stn(mdp, stn, previous_action_node, action) is not None:
+            out.append(action)
+    return out
+
+
 def _fit_action_stn(
     mdp: "up.engines.MDP",
     stn: "up.plans.stn.STNPlan",
@@ -88,15 +102,35 @@ class FixedTailExpectimaxEvaluator:
     _v_cache: Dict[Tuple, float] = field(default_factory=dict)
     _q_cache: Dict[Tuple, float] = field(default_factory=dict)
     _nodes_evaluated: int = 0
+    _ptrpg_calls: int = 0
     _guard_tripped: bool = False
     _search_start: float = field(default_factory=time.perf_counter)
+    _ptrpg_warned: bool = False
 
     def reset_search(self) -> None:
         self._v_cache.clear()
         self._q_cache.clear()
         self._nodes_evaluated = 0
+        self._ptrpg_calls = 0
         self._guard_tripped = False
+        self._ptrpg_warned = False
         self._search_start = time.perf_counter()
+
+    def _ptrpg_leaf_value(
+        self,
+        state: "up.engines.State",
+        stn: "up.plans.stn.STNPlan",
+    ) -> float:
+        rem = node_remaining(self.mdp, state, stn)
+        self._ptrpg_calls += 1
+        return ptrpg_at_horizon(self.mdp, state, stn, rem, self.strategy)
+
+    def _prefix_recursion_exhausted(self, depth: int, child_elapsed: int) -> bool:
+        """Stop expanding expectimax when time budget or step depth is reached."""
+        if crossed_cutoff(self.ctx, child_elapsed):
+            return True
+        cap = int(self.ctx.prefix_budget)
+        return cap >= 0 and depth >= cap
 
     def _guard_ok(self, depth: int) -> bool:
         if self._guard_tripped:
@@ -143,8 +177,7 @@ class FixedTailExpectimaxEvaluator:
         state: "up.engines.State",
         stn: "up.plans.stn.STNPlan",
     ) -> float:
-        rem = node_remaining(self.mdp, state, stn)
-        return ptrpg_at_horizon(self.mdp, state, stn, rem, self.strategy)
+        return _clamp01(self._ptrpg_leaf_value(state, stn))
 
     def value(
         self,
@@ -153,50 +186,10 @@ class FixedTailExpectimaxEvaluator:
         previous_action_node: "up.plans.stn.STNPlanNode",
         depth: int = 0,
     ) -> float:
-        key = self._v_cache_key(state, stn)
-        if key in self._v_cache:
-            return self._v_cache[key]
-
-        if not self._guard_ok(depth):
-            val = _clamp01(self._ptrpg_fallback(state, stn))
-            self._v_cache[key] = val
-            return val
-
-        self._nodes_evaluated += 1
-
-        if _goal_reached(self.mdp, state):
-            val = 1.0
-        elif fixed_tail_dead_end_value(self.mdp, state, stn):
-            val = 0.0
-        else:
-            rem = node_remaining(self.mdp, state, stn)
-            el = elapsed_from_root(self.ctx, rem)
-            if crossed_cutoff(self.ctx, el):
-                val = ptrpg_at_horizon(self.mdp, state, stn, rem, self.strategy)
-            else:
-                legal = list(self.mdp.legal_actions(state))
-                if not legal:
-                    val = 0.0
-                else:
-                    best_q = -float("inf")
-                    for action in legal:
-                        fitted = _fit_action_stn(self.mdp, stn, previous_action_node, action)
-                        if fitted is None:
-                            continue
-                        q_val = self.q_value(
-                            state,
-                            stn,
-                            previous_action_node,
-                            action,
-                            depth=depth,
-                        )
-                        if q_val > best_q:
-                            best_q = q_val
-                    val = 0.0 if best_q == -float("inf") else best_q
-
-        val = _clamp01(val)
-        self._v_cache[key] = val
-        return val
+        feasible = _feasible_actions(self.mdp, state, stn, previous_action_node)
+        return self.value_for_feasible_actions(
+            state, stn, previous_action_node, feasible, depth=depth
+        )
 
     def value_for_feasible_actions(
         self,
@@ -225,8 +218,8 @@ class FixedTailExpectimaxEvaluator:
         else:
             rem = node_remaining(self.mdp, state, stn)
             el = elapsed_from_root(self.ctx, rem)
-            if crossed_cutoff(self.ctx, el):
-                val = ptrpg_at_horizon(self.mdp, state, stn, rem, self.strategy)
+            if self._prefix_recursion_exhausted(depth, el):
+                val = self._ptrpg_leaf_value(state, stn)
             elif not feasible_actions:
                 val = 0.0
             else:
@@ -277,16 +270,19 @@ class FixedTailExpectimaxEvaluator:
             p_o = float(prob)
             child_rem = node_remaining(self.mdp, next_state, stn_a)
             child_el = elapsed_from_root(self.ctx, child_rem)
-            if crossed_cutoff(self.ctx, child_el):
-                child_value = ptrpg_at_horizon(
-                    self.mdp, next_state, stn_a, child_rem, self.strategy
-                )
+            child_depth = depth + 1
+            if self._prefix_recursion_exhausted(child_depth, child_el):
+                child_value = self._ptrpg_leaf_value(next_state, stn_a)
             else:
-                child_value = self.value(
+                child_feasible = _feasible_actions(
+                    self.mdp, next_state, stn_a, prev_a
+                )
+                child_value = self.value_for_feasible_actions(
                     next_state,
                     stn_a,
                     prev_a,
-                    depth=depth + 1,
+                    child_feasible,
+                    depth=child_depth,
                 )
             expected += p_o * child_value
             if collect_outcomes:

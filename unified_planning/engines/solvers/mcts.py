@@ -630,6 +630,7 @@ class Base_MCTS:
         if getattr(self, "_fixed_tail_expectimax", None) is not None:
             self._fixed_tail_expectimax.reset_search()
         self._fixed_tail_root_debug_done = False
+        self._fixed_tail_ptrpg_warned = False
         avg_variants = {'avg', 'avg_topk', 'avg_pw'}
         selection = (
             self.selection
@@ -883,6 +884,7 @@ class C_MCTS(Base_MCTS):
         self._fixed_tail_expectimax = None
         self._fixed_tail_debug_count = 0
         self._fixed_tail_root_debug_done = False
+        self._fixed_tail_ptrpg_warned = False
         if _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode):
             from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
                 build_fixed_tail_search_context,
@@ -1008,6 +1010,26 @@ class C_MCTS(Base_MCTS):
         snode._expectimax_seeded = True
         if snode.depth == 0:
             self._fixed_tail_maybe_debug_root(snode, q_by_action)
+            self._fixed_tail_maybe_warn_expectimax_cost(evaluator)
+
+    def _fixed_tail_maybe_warn_expectimax_cost(
+        self, evaluator: "FixedTailExpectimaxEvaluator"
+    ) -> None:
+        ptrpg_calls = int(getattr(evaluator, "_ptrpg_calls", 0))
+        nodes = int(getattr(evaluator, "_nodes_evaluated", 0))
+        if ptrpg_calls <= 30 and nodes <= 500:
+            return
+        cli = getattr(up, "args", None)
+        if cli is not None and not getattr(cli, "fixed_tail_debug", False):
+            if getattr(self, "_fixed_tail_ptrpg_warned", False):
+                return
+            self._fixed_tail_ptrpg_warned = True
+        print(
+            f"[fixed_tail expectimax] prefix eval used ptrpg_calls={ptrpg_calls} "
+            f"expectimax_nodes={nodes} (not a single rollout; each ptrpg ~one heuristic). "
+            f"Reduce prefix_frac, actions, or use mcts_sampled for sampled prefix.",
+            flush=True,
+        )
 
     def _fixed_tail_maybe_debug_root(
         self,
@@ -1047,9 +1069,12 @@ class C_MCTS(Base_MCTS):
         expectimax_action = best_actions[0] if best_actions else None
 
         ctx = self._fixed_tail_ctx
+        ev = self._fixed_tail_expectimax
         print(
             f"[fixed_tail expectimax root] prefix_frac={ctx.prefix_frac} "
-            f"prefix_budget={ctx.prefix_budget} root_remaining={ctx.root_remaining}",
+            f"prefix_budget={ctx.prefix_budget} root_remaining={ctx.root_remaining} "
+            f"ptrpg_calls={getattr(ev, '_ptrpg_calls', 0)} "
+            f"expectimax_nodes={getattr(ev, '_nodes_evaluated', 0)}",
             flush=True,
         )
         for action in legal:
