@@ -1,9 +1,10 @@
 """
 Fixed-tail PTRPG evaluation for MCTS leaf backup.
 
-Per search: prefix_budget = floor(prefix_frac * root_remaining), measured as elapsed
-time from the MCTS root. Nodes at or past the budget bootstrap with PTRPG(remaining);
-one expansion may overshoot the budget, evaluating PTRPG on the child after the action.
+Per search: prefix_budget = floor(prefix_frac * root_remaining), tail_horizon =
+root_remaining - prefix_budget. Ephemeral prefix rollouts run while remaining > tail_horizon,
+then PTRPG(tail_horizon). Nodes already in the tail zone (remaining <= tail_horizon) skip
+rollout and use PTRPG(actual remaining). MCTS does not expand when remaining <= tail_horizon.
 """
 
 from __future__ import annotations
@@ -83,6 +84,11 @@ class FixedTailSearchContext:
     root_remaining: int
     prefix_budget: int
     prefix_frac: float
+
+    @property
+    def tail_horizon(self) -> int:
+        """Fixed PTRPG horizon for this search: root_remaining - prefix_budget."""
+        return max(0, int(self.root_remaining) - int(self.prefix_budget))
 
 
 def fixed_tail_config_from_args(args=None) -> FixedTailConfig:
@@ -176,6 +182,16 @@ def crossed_cutoff(ctx: FixedTailSearchContext, elapsed: int) -> bool:
     return elapsed >= ctx.prefix_budget
 
 
+def at_or_past_tail_horizon(ctx: FixedTailSearchContext, node_rem: int) -> bool:
+    """True when the node is in the tail zone (no further MCTS expansion)."""
+    return int(node_rem) <= ctx.tail_horizon
+
+
+def fixed_tail_ptrpg_horizon(ctx: FixedTailSearchContext, node_rem: int) -> int:
+    """Horizon passed to PTRPG at tail evaluation (fixed for the search)."""
+    return ctx.tail_horizon
+
+
 def fixed_tail_dead_end_value(
     mdp: "up.engines.MDP",
     state: "up.engines.State",
@@ -254,8 +270,15 @@ def fixed_tail_bootstrap_value(
         horizon_used = 0
     else:
         rem = node_remaining(mdp, state, stn)
-        horizon_used = rem
-        value = ptrpg_at_horizon(mdp, state, stn, rem, strategy)
+        if ctx is not None:
+            if rem <= ctx.tail_horizon:
+                horizon_used = rem
+            else:
+                horizon_used = ctx.tail_horizon
+            value = ptrpg_at_horizon(mdp, state, stn, horizon_used, strategy)
+        else:
+            horizon_used = rem
+            value = ptrpg_at_horizon(mdp, state, stn, rem, strategy)
 
     if debug_emit and ctx is not None:
         node_rem = node_remaining(mdp, state, stn)
@@ -294,6 +317,7 @@ def _emit_fixed_tail_debug(
         f"root_remaining={ctx.root_remaining}",
         f"prefix_frac={ctx.prefix_frac}",
         f"prefix_budget={ctx.prefix_budget}",
+        f"tail_horizon={ctx.tail_horizon}",
         f"node_remaining={node_remaining}",
         f"elapsed_from_root={elapsed_from_root}",
     ]
@@ -313,8 +337,10 @@ __all__ = [
     "FixedTailConfig",
     "FixedTailSearchContext",
     "build_fixed_tail_search_context",
+    "at_or_past_tail_horizon",
     "crossed_cutoff",
     "elapsed_from_root",
+    "fixed_tail_ptrpg_horizon",
     "fixed_tail_bootstrap_value",
     "fixed_tail_config_from_args",
     "fixed_tail_dead_end_value",

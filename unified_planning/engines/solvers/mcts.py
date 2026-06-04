@@ -880,6 +880,7 @@ class C_MCTS(Base_MCTS):
         self.temporal_heuristic_strategy = temporal_heuristic_strategy
         self._root_baseline_cache = root_baseline_cache
         self.value_mode = value_mode
+        self._selection_type = selection_type
         validate_ptrpg_guided_rollout_config(value_mode, temporal_heuristic_strategy)
         validate_fixed_tail_ptrpg_rollout_config(value_mode, temporal_heuristic_strategy)
         self._uct_initial_k = max(1, int(uct_initial_k))
@@ -970,9 +971,7 @@ class C_MCTS(Base_MCTS):
                 )
 
         self._next_option_a_node_id = 1
-        if selection_type == "max" and _uses_fixed_tail_random_rollout_eval(value_mode):
-            create_snode = self.create_Snode
-        elif selection_type == "max":
+        if selection_type == "max":
             create_snode = self.create_Snode_max
         elif selection_type == "rootInterval":
             create_snode = self.create_Snode_root_interval
@@ -1027,6 +1026,74 @@ class C_MCTS(Base_MCTS):
     def _uses_fixed_tail_random_rollout_eval(self) -> bool:
         return _uses_fixed_tail_random_rollout_eval(self.value_mode)
 
+    def _uses_fixed_tail_max_init(self) -> bool:
+        return (
+            self._uses_fixed_tail_random_rollout_eval()
+            and getattr(self, "_selection_type", "avg") == "max"
+        )
+
+    def _fixed_tail_action_leaf_value(
+        self,
+        parent_snode: "up.engines.C_SNode",
+        action: "up.engines.Action",
+        *,
+        attach_child: bool,
+    ) -> float:
+        terminal, next_state, reward = self.mdp.step(parent_snode.state, action)
+        reward = self._terminal_backup_reward(terminal, next_state, reward)
+        anode = parent_snode.children[action]
+        if not terminal:
+            if attach_child:
+                child_snode, _ = self.create_Snode(
+                    next_state,
+                    parent_snode.depth + 1,
+                    anode.stn,
+                    anode,
+                )
+                anode.add_child(child_snode)
+                leaf_val = self._fixed_tail_leaf_eval_value(child_snode)
+            else:
+                leaf_val = self._fixed_tail_random_rollout.evaluate_leaf(
+                    next_state,
+                    anode.stn,
+                    anode.STNNode,
+                )
+            reward += self.mdp.discount_factor * leaf_val
+        return reward
+
+    def _fixed_tail_max_init_at_snode(
+        self,
+        snode: "up.engines.C_SNode",
+        *,
+        attach_children: bool,
+    ) -> float:
+        """Max over k sampled actions; each child gets fixed-tail leaf eval (K rollouts inside)."""
+        if not self._uses_fixed_tail_random_rollout_eval():
+            return self._fixed_tail_leaf_eval_value(snode)
+
+        best = -math.inf
+        actions = list(snode.children.keys())
+        if not actions:
+            return self._fixed_tail_leaf_eval_value(snode)
+
+        actions_idx = list(range(len(actions)))
+        if self.k < len(actions):
+            actions_idx = random.sample(actions_idx, self.k)
+
+        for action_idx in actions_idx:
+            action = actions[action_idx]
+            reward = self._fixed_tail_action_leaf_value(
+                snode, action, attach_child=attach_children
+            )
+            if attach_children:
+                snode.children[action].update(reward)
+            if reward > best:
+                best = reward
+
+        if best == -math.inf:
+            return self._fixed_tail_leaf_eval_value(snode)
+        return best
+
     def _uses_fixed_tail_mcts_sampled(self) -> bool:
         if self.value_mode == "fixed_tail_mcts_sampled":
             return True
@@ -1066,6 +1133,8 @@ class C_MCTS(Base_MCTS):
         return self._fixed_tail_bootstrap_at_snode(snode, label="depth_or_leaf")
 
     def _fixed_tail_cutoff_value(self, snode: "up.engines.C_SNode") -> float:
+        if self._uses_fixed_tail_max_init():
+            return self._fixed_tail_max_init_at_snode(snode, attach_children=False)
         if self._uses_fixed_tail_random_rollout_eval():
             return self._fixed_tail_leaf_eval_value(snode)
         return self._fixed_tail_bootstrap_at_snode(
@@ -1258,9 +1327,15 @@ class C_MCTS(Base_MCTS):
         return elapsed_from_root(self._fixed_tail_ctx, rem)
 
     def _fixed_tail_at_cutoff(self, snode: "up.engines.C_SNode") -> bool:
-        from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import crossed_cutoff
+        from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
+            at_or_past_tail_horizon,
+            node_remaining,
+        )
 
-        return crossed_cutoff(self._fixed_tail_ctx, self._fixed_tail_elapsed_at_snode(snode))
+        rem = node_remaining(
+            self.mdp, snode.state, self._fixed_tail_snode_stn(snode)
+        )
+        return at_or_past_tail_horizon(self._fixed_tail_ctx, rem)
 
     def _leaf_fixed_tail_value(self, snode: "up.engines.C_SNode") -> float:
         return self._fixed_tail_leaf_eval_value(snode)
@@ -1301,6 +1376,8 @@ class C_MCTS(Base_MCTS):
     def _depth_cutoff_value(self, snode: "up.engines.C_Snode"):
         if self._uses_ptrpg_guided_rollout():
             return self._leaf_rollout_value(snode)
+        if self._uses_fixed_tail_max_init():
+            return self._fixed_tail_max_init_at_snode(snode, attach_children=False)
         if self._uses_fixed_tail_value_mode():
             return self._leaf_fixed_tail_value(snode)
         if self.value_mode != "greedy_matched":
@@ -1848,6 +1925,22 @@ class C_MCTS(Base_MCTS):
                     reward += self.mdp.discount_factor * self._leaf_rollout_value_from_anode(
                         next_state, snode.children[action]
                     )
+            elif self._uses_fixed_tail_random_rollout_eval():
+                if not terminal:
+                    anode_child = snode.children[action]
+                    leaf_val = self._fixed_tail_random_rollout.evaluate_leaf(
+                        next_state,
+                        anode_child.stn,
+                        anode_child.STNNode,
+                    )
+                    reward += self.mdp.discount_factor * leaf_val
+                    child_snode, _ = self.create_Snode(
+                        next_state,
+                        snode.depth + 1,
+                        anode_child.stn,
+                        anode_child,
+                    )
+                    anode_child.add_child(child_snode)
             elif self._uses_fixed_tail_mcts_sampled():
                 if not terminal:
                     anode_child = snode.children[action]
@@ -2038,9 +2131,10 @@ class C_MCTS(Base_MCTS):
                     next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
                     reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
                 elif self._uses_fixed_tail_random_rollout_eval():
-                    next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
-                    leaf_val = self._fixed_tail_leaf_eval_value(next_snode)
-                    reward += self.mdp.discount_factor * leaf_val
+                    next_snode, snode_reward = self.create_Snode_max(
+                        next_state, snode.depth + 1, anode.stn, anode
+                    )
+                    reward += snode_reward
                     anode.add_child(next_snode)
                 elif self._uses_fixed_tail_mcts_sampled():
                     next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)

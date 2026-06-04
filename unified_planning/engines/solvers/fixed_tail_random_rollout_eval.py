@@ -20,7 +20,6 @@ from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
     FixedTailSearchContext,
     _clamp01,
     _goal_reached,
-    crossed_cutoff,
     elapsed_from_root,
     fixed_tail_dead_end_value,
     node_remaining,
@@ -159,8 +158,22 @@ class FixedTailRandomRolloutEvaluator:
         el = elapsed_from_root(self.ctx, rem)
         max_steps = max(1, self.ctx.prefix_budget + 10)
         steps = 0
+        tail_h = self.ctx.tail_horizon
 
-        while el < self.ctx.prefix_budget and steps < max_steps:
+        # Already in tail zone (e.g. rem=38 when tail_h=40): no prefix rollout.
+        if rem <= tail_h:
+            trace.final_remaining = rem
+            trace.final_elapsed = el
+            trace.ptrpg_horizon = rem
+            if fixed_tail_dead_end_value(self.mdp, current_state, current_stn):
+                trace.sample_value = 0.0
+                return 0.0, trace
+            trace.sample_value = ptrpg_at_horizon(
+                self.mdp, current_state, current_stn, rem, self.strategy
+            )
+            return trace.sample_value, trace
+
+        while rem > tail_h and steps < max_steps:
             steps += 1
             if _goal_reached(self.mdp, current_state):
                 trace.sample_value = 1.0
@@ -220,17 +233,20 @@ class FixedTailRandomRolloutEvaluator:
             rem = node_remaining(self.mdp, current_state, current_stn)
             el = elapsed_from_root(self.ctx, rem)
 
-            if crossed_cutoff(self.ctx, el):
-                break
-
         rem = node_remaining(self.mdp, current_state, current_stn)
         el = elapsed_from_root(self.ctx, rem)
         trace.final_remaining = rem
         trace.final_elapsed = el
-        trace.ptrpg_horizon = rem
-        trace.sample_value = ptrpg_at_horizon(
-            self.mdp, current_state, current_stn, rem, self.strategy
-        )
+        if rem <= tail_h:
+            trace.ptrpg_horizon = rem
+            trace.sample_value = ptrpg_at_horizon(
+                self.mdp, current_state, current_stn, rem, self.strategy
+            )
+        else:
+            trace.ptrpg_horizon = tail_h
+            trace.sample_value = ptrpg_at_horizon(
+                self.mdp, current_state, current_stn, tail_h, self.strategy
+            )
         return trace.sample_value, trace
 
     def evaluate_leaf(
@@ -283,6 +299,7 @@ class FixedTailRandomRolloutEvaluator:
             f"K={self.config.num_samples} "
             f"root_remaining={self.ctx.root_remaining} "
             f"prefix_budget={self.ctx.prefix_budget} "
+            f"tail_horizon={self.ctx.tail_horizon} "
             f"leaf_remaining={leaf_remaining} "
             f"leaf_elapsed_from_root={leaf_elapsed} "
             f"rollout_policy={self.config.rollout_policy} "

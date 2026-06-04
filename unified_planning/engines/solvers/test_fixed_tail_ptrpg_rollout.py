@@ -95,7 +95,7 @@ class TestFixedTailPrefixFrac(unittest.TestCase):
         self.assertLessEqual(value, 1.0)
         self.assertAlmostEqual(value, 0.42)
 
-    def test_bootstrap_uses_node_remaining_as_horizon(self):
+    def test_bootstrap_uses_fixed_tail_horizon(self):
         with mock.patch(
             "unified_planning.engines.solvers.fixed_tail_ptrpg_rollout.ptrpg_at_horizon",
             return_value=0.5,
@@ -107,8 +107,7 @@ class TestFixedTailPrefixFrac(unittest.TestCase):
                 strategy=self.config.tail_strategy,
                 ctx=self.ctx,
             )
-            rem = node_remaining(self.mdp, self.state, self.stn)
-            self.assertEqual(mock_tail.call_args[0][3], rem)
+            self.assertEqual(mock_tail.call_args[0][3], self.ctx.tail_horizon)
 
     def test_prefix_budget_constant_per_search_context(self):
         ctx2 = FixedTailSearchContext(

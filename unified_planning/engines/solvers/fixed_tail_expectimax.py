@@ -123,7 +123,10 @@ class FixedTailExpectimaxEvaluator:
     ) -> float:
         rem = node_remaining(self.mdp, state, stn)
         self._ptrpg_calls += 1
-        return ptrpg_at_horizon(self.mdp, state, stn, rem, self.strategy)
+        horizon = (
+            rem if rem <= self.ctx.tail_horizon else self.ctx.tail_horizon
+        )
+        return ptrpg_at_horizon(self.mdp, state, stn, horizon, self.strategy)
 
     def _prefix_recursion_exhausted(self, depth: int, child_elapsed: int) -> bool:
         """Stop expanding expectimax when time budget or step depth is reached."""
