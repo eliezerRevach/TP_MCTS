@@ -24,6 +24,7 @@ import argparse
 import math
 import random
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -216,7 +217,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="+",
         type=int,
         default=[0, 1, 2, 5, 10],
-        help="Cumulative selection-iteration counts to print.",
+        help="Cumulative selection-iteration counts to print (ignored when --search-time is set).",
+    )
+    p.add_argument(
+        "--search-time",
+        dest="search_time",
+        type=float,
+        default=None,
+        help=(
+            "Wall-clock search budget in seconds (same as run_domain --search_time). "
+            "Runs one timed search like C_MCTS.search(), prints iteration 0 then the "
+            "final tree snapshot when the budget expires, including the action that "
+            "would be returned. Milestones are not used."
+        ),
+    )
+    p.add_argument(
+        "--final-selection",
+        dest="final_selection",
+        choices=["q", "robust"],
+        default="q",
+        help="Action returned after a timed search: q=argmax Q, robust=argmax visits.",
     )
     p.add_argument("--top_n", type=int, default=12)
     p.add_argument(
@@ -533,7 +553,25 @@ def fmt_float(value: float | None, width: int = 9) -> str:
     return f"{value:{width}.4f}"
 
 
-def print_snapshot(mcts: C_MCTS, args: argparse.Namespace, milestone: int) -> None:
+def returned_action_name(mcts: C_MCTS, final_selection: str) -> str:
+    if final_selection == "robust":
+        action = mcts.best_action_robust(mcts.root_node)
+    else:
+        action = mcts.best_action(mcts.root_node)
+    if action is None or action == -1:
+        return "<none>"
+    return action.name
+
+
+def print_snapshot(
+    mcts: C_MCTS,
+    args: argparse.Namespace,
+    milestone: int,
+    *,
+    label: str | None = None,
+    elapsed_sec: float | None = None,
+    returned_action: str | None = None,
+) -> None:
     root = mcts.root_node
     all_anodes = list(root.children.values())
     unvisited = sum(1 for anode in all_anodes if anode.count == 0)
@@ -549,11 +587,22 @@ def print_snapshot(mcts: C_MCTS, args: argparse.Namespace, milestone: int) -> No
         else 0.0
     )
 
+    snapshot_label = label if label is not None else f"after_iterations={milestone}"
+    timing_suffix = (
+        f"  elapsed_sec={elapsed_sec:.4f}" if elapsed_sec is not None else ""
+    )
+    returned_suffix = (
+        f"  returned_action={returned_action}"
+        if returned_action is not None
+        else ""
+    )
+
     print()
     print("=" * 110)
     print(
-        f"after_iterations={milestone}  root_visits={int(root.count)}  "
+        f"{snapshot_label}  root_visits={int(root.count)}  "
         f"best_action={best}  next_uct_action={next_uct}"
+        f"{timing_suffix}{returned_suffix}"
     )
     print(
         f"root_actions={len(all_anodes)}  unvisited={unvisited}  "
@@ -624,9 +673,15 @@ def main(argv: list[str] | None = None) -> None:
             else ""
         )
     )
-    print(
-        f"Milestones (cumulative selection iterations): {milestones}  top_n={args.top_n}"
-    )
+    if args.search_time is not None:
+        print(
+            f"Timed search: budget={args.search_time}s  final_selection={args.final_selection}  "
+            f"top_n={args.top_n}"
+        )
+    else:
+        print(
+            f"Milestones (cumulative selection iterations): {milestones}  top_n={args.top_n}"
+        )
     if args.expected:
         strat = HEURISTIC_ALIASES[args.heuristic]["temporal_heuristic_strategy"]
         if is_option_a_strategy(strat):
@@ -635,6 +690,26 @@ def main(argv: list[str] | None = None) -> None:
                 "[note] --expected column is greedy_matched one-step score using PTRPG "
                 f"suffix {suffix!r}; it is not the global Option-A aligned selection value."
             )
+
+    if args.search_time is not None:
+        print_snapshot(mcts, args, 0, label="before_search")
+        start = time.time()
+        chosen = mcts.search(
+            args.search_time,
+            args.selection_type,
+            args.final_selection,
+        )
+        elapsed = time.time() - start
+        returned = chosen.name if chosen is not None and chosen != -1 else "<none>"
+        print_snapshot(
+            mcts,
+            args,
+            int(mcts.root_node.count),
+            label=f"after_search_time={args.search_time}s",
+            elapsed_sec=elapsed,
+            returned_action=returned,
+        )
+        return
 
     completed = 0
     for milestone in milestones:
