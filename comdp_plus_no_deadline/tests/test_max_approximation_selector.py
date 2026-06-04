@@ -76,26 +76,33 @@ class TestActionContributionScoring(unittest.TestCase):
         this action 0, which collapsed the selector to the empty set.
         """
         heuristic = _chain_heuristic()
-        # Time-graded area score (what the selector uses): rewards achieving the
-        # goal earlier, so seeding B (what starting a_to_b achieves) lifts it.
+        # Selector scoring = resolution/product marginal. While the goal product
+        # has slack (knife-edge horizon), seeding B (what starting a_to_b
+        # achieves) strictly raises P(G) — i.e. the indirect action gets credit.
+        base = heuristic.heuristic_score(
+            {"A"}, {"G"}, aggregation="product", fixed_depth=1,
+            strategy="atom_backtrack_exact_resolution",
+        )
+        with_b = heuristic.heuristic_score(
+            {"A", "B"}, {"G"}, aggregation="product", fixed_depth=1,
+            strategy="atom_backtrack_exact_resolution",
+        )
+        self.assertGreater(with_b, base, msg="resolution/product gave no indirect credit")
+
+        # Time-graded area is the saturation fallback: it keeps a gradient at
+        # every horizon, including generous ones where product saturates to 1.0.
         for depth in (2, 6, 20):
-            base = heuristic.heuristic_score(
-                {"A"}, {"G"}, aggregation="area", fixed_depth=depth, strategy="baseline"
-            )
-            with_b = heuristic.heuristic_score(
-                {"A", "B"},
-                {"G"},
-                aggregation="area",
-                fixed_depth=depth,
-                strategy="baseline",
-            )
             self.assertGreater(
-                with_b,
-                base,
-                msg=f"depth={depth}: seeding B did not raise the area score",
+                heuristic.heuristic_score(
+                    {"A", "B"}, {"G"}, aggregation="area", fixed_depth=depth, strategy="baseline"
+                ),
+                heuristic.heuristic_score(
+                    {"A"}, {"G"}, aggregation="area", fixed_depth=depth, strategy="baseline"
+                ),
+                msg=f"depth={depth}: area lost its gradient",
             )
-        # And the saturating product score is exactly why the old scorer failed:
-        # at a generous horizon it gives no gradient.
+        # Product saturates at a generous horizon (why a single readout is not
+        # enough on trivially-solvable instances).
         self.assertEqual(
             heuristic.heuristic_score(
                 {"A"}, {"G"}, aggregation="product", fixed_depth=6, strategy="baseline"
