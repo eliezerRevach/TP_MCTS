@@ -52,6 +52,11 @@
 - Do not delete generated results, logs, notebooks, or pickle domains unless the user explicitly asks.
 - Be careful with existing local modifications; treat them as user work.
 
+## GCP experiments (64-core CPU VM)
+- Setup guide: `gcp/README.md` — Compute Engine, clone from GitHub, `experiments.ipynb` with `RUN_ENV = "gce"`.
+- Create VM: `gcp/create-vm.sh` (after `cp gcp/config.env.example gcp/config.env`).
+- Fetch results to Windows: `gcp/fetch-results.ps1`.
+
 ## Commands
 - Run targeted tests when changing core logic:
   - `python -m pytest unified_planning/tests`

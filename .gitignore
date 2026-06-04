@@ -2,3 +2,6 @@ __pycache__/
 
 # Local Claude memory (uncommitted)
 CLAUDE.local.md
+
+# GCP local settings (project id)
+gcp/config.env
