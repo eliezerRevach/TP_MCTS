@@ -106,14 +106,15 @@ class _TprpgHeuristicAdapter:
     temporal_heuristic_depth: int
     resolution_kwargs: Dict[str, object]
     variant_label: str = ""
-    # Scoring uses a TIME-GRADED measure (area = mean P_t(goal) over layers) on
-    # the forward baseline table. The configured strategy (e.g. resolution) only
-    # fills layers {0, depth} and its product value saturates to 1.0 at generous
-    # horizons, giving every action a zero marginal. The area integral rewards
-    # achieving the goal EARLIER, so it keeps a usable gradient for ranking; the
-    # final set is still scored with the configured strategy in ``evaluate``.
-    score_strategy: str = "baseline"
-    score_aggregation: str = "area"
+    # Scoring strategy/aggregation. Defaults to the configured strategy with the
+    # standard product aggregation: on real problems the goal product is NOT
+    # saturated (P(goal) < 1 because the goal is hard within the horizon), so it
+    # gives a clean, cheap gradient (resolution ~6ms vs baseline-area ~200ms).
+    # ``baseline``/``area`` remains available as a time-graded fallback for
+    # problems where the product *does* saturate to 1.0 (trivially-solvable
+    # instances), which would otherwise flatten every marginal to zero.
+    score_strategy: Optional[str] = None
+    score_aggregation: str = "product"
 
     def __post_init__(self) -> None:
         if not self.variant_label:
@@ -150,14 +151,21 @@ class _TprpgHeuristicAdapter:
     ) -> float:
         heuristic = self._heuristic()
         depth = self._effective_depth(current_time, remaining_deadline)
+        strategy = self.score_strategy or self.temporal_heuristic_strategy
+        kwargs = dict(
+            aggregation=self.score_aggregation,
+            fixed_depth=depth,
+            start_time=current_time,
+            strategy=strategy,
+        )
+        # Resolution strategies need their schedule kwargs; baseline ignores them.
+        if "resolution" in strategy:
+            kwargs.update(self.resolution_kwargs)
         return float(
             heuristic.heuristic_score(
                 set(fact_set),
                 list(self.mdp.problem.goals),
-                aggregation=self.score_aggregation,
-                fixed_depth=depth,
-                start_time=current_time,
-                strategy=self.score_strategy,
+                **kwargs,
             )
         )
 
