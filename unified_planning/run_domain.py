@@ -77,6 +77,25 @@ def print_stats():
         print(f'Resolution forced_minimum = {getattr(up.args, "resolution_forced_minimum", False)}')
         print(f'Resolution reference_t = {getattr(up.args, "resolution_reference_t", None)}')
     print(f'Value Mode = {up.args.value_mode}')
+    if up.args.selection_type == 'max_approximation':
+        print(f'Max approx alpha = {getattr(up.args, "max_approx_alpha", 1.5)}')
+        print(f'Max approx samples = {getattr(up.args, "max_approx_num_samples", 32)}')
+        _mas = getattr(up.args, 'max_approx_seed', None)
+        print(f'Max approx seed = {_mas if _mas is not None else up.args.seed}')
+        print(f'Max approx debug = {getattr(up.args, "max_approx_debug", False)}')
+
+
+def _greedy_plan_tail_params():
+    """Extra kwargs tuple for greedy_parallel.plan (max_approximation selector)."""
+    max_approx_seed = getattr(up.args, 'max_approx_seed', None)
+    if max_approx_seed is None:
+        max_approx_seed = up.args.seed
+    return (
+        float(getattr(up.args, 'max_approx_alpha', 1.5)),
+        int(getattr(up.args, 'max_approx_num_samples', 32)),
+        max_approx_seed,
+        bool(getattr(up.args, 'max_approx_debug', False)),
+    )
 
 
 def set_seed():
@@ -141,7 +160,8 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
         temporal_heuristic_strategy,
     )
     if up.args.solver == 'greedy_parallel':
-        up.engines.solvers.evaluate.evaluation_loop(runs, greedy_parallel_solver.plan, params)
+        greedy_params = params + _greedy_plan_tail_params()
+        up.engines.solvers.evaluate.evaluation_loop(runs, greedy_parallel_solver.plan, greedy_params)
     elif up.args.solver == 'heuristic_tree':
         tree_params = params + (tree_depth,)
         up.engines.solvers.evaluate.evaluation_loop(runs, heuristic_tree_solver.plan, tree_params)

@@ -320,6 +320,10 @@ def run_domain_subprocess(
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
     resolution_reference_t: int | None = None,
+    max_approx_alpha: float | None = None,
+    max_approx_num_samples: int | None = None,
+    max_approx_seed: int | None = None,
+    max_approx_debug: bool = False,
     and_gamma_rollout_calibration: bool = False,
     rollout_aligned_h: int | None = None,
     rollout_aligned_redo: int | None = None,
@@ -373,6 +377,14 @@ def run_domain_subprocess(
         cmd.append("--resolution-forced-minimum")
     if resolution_reference_t is not None:
         cmd.extend(["--resolution-reference-t", str(resolution_reference_t)])
+    if max_approx_alpha is not None:
+        cmd.extend(["--max-approx-alpha", str(max_approx_alpha)])
+    if max_approx_num_samples is not None:
+        cmd.extend(["--max-approx-samples", str(max_approx_num_samples)])
+    if max_approx_seed is not None:
+        cmd.extend(["--max-approx-seed", str(max_approx_seed)])
+    if max_approx_debug:
+        cmd.append("--max-approx-debug")
     if and_gamma_rollout_calibration:
         cmd.append("--and-gamma-rollout-calibration")
     if rollout_aligned_h is not None:

@@ -2,7 +2,11 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 import unified_planning as up
-from unified_planning.engines.solvers.mcts import _temporal_heuristic, _uses_tprpg_family
+from unified_planning.engines.solvers.mcts import (
+    _resolution_heuristic_kwargs_from_cli,
+    _temporal_heuristic,
+    _uses_tprpg_family,
+)
 from unified_planning.engines.utils import create_init_stn, update_stn
 from unified_planning.engines.heuristic_timing import WrapperTimer, is_active
 
@@ -297,6 +301,11 @@ def simulate_greedy_mdp_until_terminal(
     temporal_heuristic_depth: int,
     temporal_heuristic_strategy: str,
     *,
+    selection_type: str = "avg",
+    max_approx_alpha: float = 1.5,
+    max_approx_num_samples: int = 32,
+    max_approx_seed: Optional[int] = None,
+    max_approx_debug: bool = False,
     max_time_slices: int = GREEDY_DEFAULT_TIME_SLICES,
     max_parallel_set_size: int = GREEDY_MAX_PARALLEL_SET_SIZE,
     max_mdp_steps: Optional[int] = None,
@@ -319,6 +328,32 @@ def simulate_greedy_mdp_until_terminal(
     cache = temporal_cache_table
     mdp_step = 0
     time_slice = 0
+    use_max_approx = selection_type == "max_approximation"
+    max_approx_adapter = None
+    max_approx_config = None
+    if use_max_approx:
+        from unified_planning.engines.solvers.max_approximation_selector import (
+            MaxApproximationConfig,
+            build_heuristic_adapter,
+            select_max_approximation_action_set,
+        )
+
+        max_approx_adapter = build_heuristic_adapter(
+            mdp,
+            heuristic_name,
+            temporal_heuristic_strategy,
+            temporal_heuristic_depth,
+            resolution_kwargs=_resolution_heuristic_kwargs_from_cli(),
+        )
+        max_approx_config = MaxApproximationConfig(
+            alpha=float(max_approx_alpha),
+            num_samples=int(max_approx_num_samples),
+            seed=max_approx_seed,
+            debug=bool(max_approx_debug),
+        )
+        _select_max_approximation_action_set = select_max_approximation_action_set
+    else:
+        _select_max_approximation_action_set = None
 
     while current_stn.get_current_end_time() <= mdp.deadline() and time_slice < max_time_slices:
         decision_time = current_stn.get_current_end_time()
@@ -340,6 +375,65 @@ def simulate_greedy_mdp_until_terminal(
             legal_actions = mdp.legal_actions(current_state)
             if not legal_actions:
                 break
+
+            if use_max_approx:
+                remaining = max(
+                    0.0,
+                    float(mdp.deadline()) - float(current_stn.get_current_end_time()),
+                )
+                action_set, _dbg = _select_max_approximation_action_set(
+                    mdp,
+                    current_state,
+                    current_stn,
+                    current_prev,
+                    legal_actions,
+                    max_approx_adapter,
+                    remaining,
+                    max_approx_config,
+                )
+                if not action_set:
+                    break
+                advanced_time = False
+                for action in action_set:
+                    if mdp_step >= max_mdp_steps:
+                        return (
+                            terminal_success_value(mdp, current_state, current_stn),
+                            current_stn,
+                        )
+                    next_stn = current_stn.clone()
+                    next_prev = current_prev
+                    try:
+                        next_prev = update_stn(
+                            next_stn,
+                            action,
+                            next_prev,
+                            type="SetTime",
+                        )
+                    except Exception:
+                        break
+                    if not next_stn.is_consistent():
+                        break
+                    if next_stn.get_current_end_time() > mdp.deadline():
+                        break
+                    terminal, next_state, _reward = mdp.step(current_state, action)
+                    if on_mdp_step is not None:
+                        on_mdp_step(mdp_step, current_state, current_stn, action, terminal)
+                    current_state = next_state
+                    current_stn = next_stn
+                    current_prev = next_prev
+                    chosen_in_set += 1
+                    mdp_step += 1
+                    if terminal:
+                        return (
+                            terminal_success_value(mdp, current_state, current_stn),
+                            current_stn,
+                        )
+                    if current_stn.get_current_end_time() > decision_time:
+                        advanced_time = True
+                        break
+                if advanced_time:
+                    break
+                continue
 
             picked = pick_best_action(
                 mdp=mdp,
@@ -416,14 +510,19 @@ def plan(
     heuristic_name: str = "trpg",
     temporal_heuristic_depth: int = 25,
     temporal_heuristic_strategy: str = "baseline",
+    max_approx_alpha: float = 1.5,
+    max_approx_num_samples: int = 32,
+    max_approx_seed: Optional[int] = None,
+    max_approx_debug: bool = False,
 ):
     """
     Heuristic-only greedy dispatcher (no MCTS tree).
 
     At each decision step, greedily dispatches a feasible set of actions while
-    staying STN-consistent. Action scoring is immediate reward + heuristic value.
+    staying STN-consistent. Default scoring is immediate reward + heuristic value;
+    selection_type=\"max_approximation\" uses stochastic parallel set sampling.
     """
-    del search_time, search_depth, exploration_constant, selection_type, k
+    del search_time, search_depth, exploration_constant, k
 
     stn = create_init_stn(mdp)
     root_state = mdp.initial_state()
@@ -444,6 +543,11 @@ def plan(
         heuristic_name=heuristic_name,
         temporal_heuristic_depth=temporal_heuristic_depth,
         temporal_heuristic_strategy=temporal_heuristic_strategy,
+        selection_type=selection_type,
+        max_approx_alpha=max_approx_alpha,
+        max_approx_num_samples=max_approx_num_samples,
+        max_approx_seed=max_approx_seed,
+        max_approx_debug=max_approx_debug,
         max_time_slices=steps,
         max_parallel_set_size=GREEDY_MAX_PARALLEL_SET_SIZE,
         tie_break="legacy",

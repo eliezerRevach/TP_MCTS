@@ -81,7 +81,44 @@ parser = argparse.ArgumentParser(description='Description of your script')
 parser.add_argument('-d', '--deadline', help='deadline of the problem', nargs='?', default=None, type=int)
 parser.add_argument('-st', '--search_time', help='amount of time in each step', nargs='?', default=1, type=int)
 parser.add_argument('-sd', '--search_depth', help='search depth of ', nargs='?', default=40, type=int)
-parser.add_argument('-se', '--selection_type', help='selection type in MCTS algorithm', nargs='?', default='avg')
+parser.add_argument(
+    '-se',
+    '--selection_type',
+    help=(
+        'MCTS: avg|rootInterval|max. greedy_parallel: avg (default greedy) or '
+        'max_approximation (stochastic parallel action-set picker).'
+    ),
+    nargs='?',
+    default='avg',
+)
+parser.add_argument(
+    '--max-approx-alpha',
+    dest='max_approx_alpha',
+    default=1.5,
+    type=float,
+    help='max_approximation: sampling exponent P(a) ∝ score(a)^alpha (greedy_parallel only).',
+)
+parser.add_argument(
+    '--max-approx-samples',
+    dest='max_approx_num_samples',
+    default=32,
+    type=int,
+    help='max_approximation: random valid action sets sampled per parallel dispatch.',
+)
+parser.add_argument(
+    '--max-approx-seed',
+    dest='max_approx_seed',
+    default=None,
+    type=int,
+    help='max_approximation: RNG seed for set sampling (default: --seed).',
+)
+parser.add_argument(
+    '--max-approx-debug',
+    dest='max_approx_debug',
+    action='store_true',
+    default=False,
+    help='max_approximation: print sampled sets and rejections.',
+)
 parser.add_argument('-r', '--runs', help='how many runs to run the script', nargs='?', default=1, type=int)
 parser.add_argument('-dt', '--domain_type', help='combination, new approach or new approach same as the baseline', nargs='?', default='regular')
 parser.add_argument(

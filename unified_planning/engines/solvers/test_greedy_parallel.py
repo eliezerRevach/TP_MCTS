@@ -118,6 +118,34 @@ class TestGreedyParallel(unittest.TestCase):
         self.assertEqual(success, 1)
         self.assertLessEqual(makespan, 3)
 
+    def test_greedy_parallel_max_approximation_runs(self):
+        converted_problem = _build_split_problem(duration=2)
+        converted_problem.set_deadline(
+            up.model.timing.Timing(
+                delay=3,
+                timepoint=up.model.timing.Timepoint(up.model.timing.TimepointKind.START),
+            )
+        )
+        mdp = MDP(converted_problem, discount_factor=0.95, reward_mode="terminal")
+
+        success, makespan = greedy_parallel_plan(
+            mdp,
+            steps=20,
+            search_time=0,
+            search_depth=5,
+            exploration_constant=10,
+            selection_type="max_approximation",
+            heuristic_name="temporal_probabilistic_rpg",
+            temporal_heuristic_depth=10,
+            temporal_heuristic_strategy="atom_backtrack_exact_resolution",
+            max_approx_alpha=1.5,
+            max_approx_num_samples=8,
+            max_approx_seed=123,
+        )
+        self.assertIn(success, (0, 1))
+        if success == 1:
+            self.assertLessEqual(makespan, 3)
+
 
 if __name__ == "__main__":
     unittest.main()
