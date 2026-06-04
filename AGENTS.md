@@ -57,11 +57,19 @@
 - Create VM: `gcp/create-vm.sh` (after `cp gcp/config.env.example gcp/config.env`).
 - Fetch results to Windows: `gcp/fetch-results.ps1`.
 
+## max_approximation selector (standalone)
+- Module: `unified_planning/engines/solvers/max_approximation_selector.py`
+- API: `select_max_approximation_action_set(...)`, `build_heuristic_adapter(...)`, defaults `alpha=1.5`, `num_samples=32`
+- PTRPG action scores: `TemporalProbabilisticRPGHeuristic.action_contribution_scores()`; backtrack/resolution strategies use a cached companion forward profile when `action_support_by_layer` is empty
+- Tests: `python -m pytest comdp_plus_no_deadline/tests/test_max_approximation_selector.py -q`
+- **Not wired yet** (follow-up): `greedy_parallel.simulate_greedy_mdp_until_terminal` when `selection_type == "max_approximation"`; `unified_planning/parser.py` (`--selection_type`, `--max-approx-alpha`, `--max-approx-samples`); `experiments.ipynb` Script 3
+
 ## Commands
 - Run targeted tests when changing core logic:
   - `python -m pytest unified_planning/tests`
   - `python -m pytest unified_planning/engines/solvers`
   - `python -m pytest comdp_plus_no_deadline/tests`
+  - `python -m pytest comdp_plus_no_deadline/tests/test_max_approximation_selector.py -q`
 - Run no-deadline smoke experiments with:
   - `python -m comdp_plus_no_deadline.run_smoke`
 - Run a no-deadline scenario with:

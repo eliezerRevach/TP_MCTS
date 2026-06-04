@@ -62,6 +62,8 @@ class TemporalPropagationResult:
     cached_table: Optional["CachedPTRPGTable"] = None
     # Carries the (temp_dict, new_state_facts) pair from baseline_cached.
     temp_result: Optional[Tuple[Dict[int, Dict[Fact, float]], frozenset]] = None
+    # Per-layer precondition support R_t(a) from forward propagation (for action ranking).
+    action_support_by_layer: Dict[int, Dict[str, float]] = field(default_factory=dict)
 
 
 @dataclass
@@ -273,6 +275,8 @@ class TemporalProbabilisticRPGHeuristic:
         self._unbiased_name_to_model: Dict[str, TemporalRelaxedActionModel] = {}
         # Per (state_sig, target_sig, depth) cache of {lambda_total, lambda_breakdown, B_table}.
         self._unbiased_correction_cache: Dict[Tuple[frozenset[Fact], frozenset[Fact], int], Dict] = {}
+        # Companion forward profiles for action_contribution_scores on backtrack strategies.
+        self._action_scores_profile_cache: Dict[Tuple, TemporalPropagationResult] = {}
         # Lazy delete-probability table for the survival-aware baseline strategy.
         # name -> {fact: Pr_del(a, f)}; plus the set of facts that any action deletes.
         self._survival_table_built: bool = False
@@ -383,6 +387,12 @@ class TemporalProbabilisticRPGHeuristic:
                 cache_hit=True,
                 fact_cache_hits=cached.fact_cache_hits,
                 action_cache_hits=cached.action_cache_hits,
+                cached_table=cached.cached_table,
+                temp_result=cached.temp_result,
+                action_support_by_layer={
+                    layer: dict(supports)
+                    for layer, supports in cached.action_support_by_layer.items()
+                },
             )
 
         if chosen_strategy == "atom_half_split":
@@ -527,6 +537,7 @@ class TemporalProbabilisticRPGHeuristic:
         fact_cache_hits = 0
         action_cache_hits = 0
         traces: List[TemporalLayerTrace] = []
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
 
         def fact_support(fact: Fact, layer: int) -> float:
             nonlocal fact_cache_hits
@@ -600,6 +611,8 @@ class TemporalProbabilisticRPGHeuristic:
                     success = _clamp_probability(action_support_value * add_prob)
                     pending_successes.setdefault((arrival_layer, fact), []).append(success)
 
+            action_support_by_layer[layer] = dict(action_support)
+
             if debug:
                 traces.append(
                     TemporalLayerTrace(
@@ -617,6 +630,7 @@ class TemporalProbabilisticRPGHeuristic:
             cache_hit=False,
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
+            action_support_by_layer=action_support_by_layer,
             cached_table=CachedPTRPGTable(
                 probabilities_by_layer={
                     layer: dict(values) for layer, values in probabilities_by_layer.items()
@@ -808,6 +822,148 @@ class TemporalProbabilisticRPGHeuristic:
                 )
             return score, None
         return score
+
+    _FORWARD_STRATEGIES_WITH_ACTION_SUPPORT = frozenset({
+        "baseline",
+        "baseline_cached",
+        "baseline_survival",
+        "baseline_survival_meanvar",
+        "baseline_survival_and_gamma",
+        "baseline_survival_resolution",
+        "atom_half_split",
+    })
+
+    def _companion_strategy_for_action_scores(self, strategy: str) -> str:
+        chosen = self._normalize_strategy(strategy)
+        if chosen in (
+            "baseline_survival",
+            "baseline_survival_meanvar",
+            "baseline_survival_and_gamma",
+            "baseline_survival_resolution",
+        ):
+            return "baseline_survival"
+        return "baseline"
+
+    def _companion_forward_for_action_scores(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        strategy: str,
+        *,
+        resolution_alpha: Optional[float] = None,
+        resolution_forced_minimum: bool = False,
+        resolution_reference_t: Optional[int] = None,
+    ) -> TemporalPropagationResult:
+        state_facts = _extract_state_facts(state)
+        start_layer = max(0, int(math.floor(start_time)))
+        companion = self._companion_strategy_for_action_scores(strategy)
+        cache_key = (
+            frozenset(state_facts),
+            int(fixed_depth),
+            start_layer,
+            companion,
+            "_action_scores",
+        )
+        cached = self._action_scores_profile_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        result = self.heuristic_propagate(
+            state=state,
+            goal_facts=goal_facts,
+            fixed_depth=fixed_depth,
+            start_time=start_time,
+            strategy=companion,
+            debug=False,
+            resolution_alpha=resolution_alpha,
+            resolution_forced_minimum=resolution_forced_minimum,
+            resolution_reference_t=resolution_reference_t,
+        )
+        self._action_scores_profile_cache[cache_key] = result
+        return result
+
+    def actions_are_mutex(self, name_a: str, name_b: str) -> bool:
+        """Relaxed action mutex for parallel set construction (not admissible)."""
+        self._ensure_unbiased_structural_extracted()
+        return self._unbiased_actions_are_mutex(name_a, name_b)
+
+    def action_contribution_scores(
+        self,
+        state,
+        goal_facts: Iterable[Fact],
+        fixed_depth: int = 25,
+        start_time: float = 0.0,
+        strategy: str = "baseline",
+        *,
+        resolution_alpha: Optional[float] = None,
+        resolution_forced_minimum: bool = False,
+        resolution_reference_t: Optional[int] = None,
+        legal_action_names: Optional[Iterable[str]] = None,
+    ) -> Dict[str, float]:
+        """
+        Non-negative per-action scores from forward-layer precondition support
+        and goal-relevant add probabilities. Backtrack/resolution strategies use
+        a cached companion forward profile when they do not populate the table.
+        """
+        chosen = self._normalize_strategy(strategy)
+        result = self.heuristic_propagate(
+            state=state,
+            goal_facts=goal_facts,
+            fixed_depth=fixed_depth,
+            start_time=start_time,
+            strategy=chosen,
+            debug=False,
+            resolution_alpha=resolution_alpha,
+            resolution_forced_minimum=resolution_forced_minimum,
+            resolution_reference_t=resolution_reference_t,
+        )
+        start_layer = max(0, int(math.floor(start_time)))
+        support_by_layer = result.action_support_by_layer
+        if not support_by_layer.get(start_layer):
+            if chosen in self._FORWARD_STRATEGIES_WITH_ACTION_SUPPORT:
+                support_by_layer = result.action_support_by_layer
+            else:
+                companion = self._companion_forward_for_action_scores(
+                    state=state,
+                    goal_facts=goal_facts,
+                    fixed_depth=fixed_depth,
+                    start_time=start_time,
+                    strategy=chosen,
+                    resolution_alpha=resolution_alpha,
+                    resolution_forced_minimum=resolution_forced_minimum,
+                    resolution_reference_t=resolution_reference_t,
+                )
+                support_by_layer = companion.action_support_by_layer
+
+        layer_support = support_by_layer.get(start_layer, {})
+        goals = set(goal_facts)
+        allowed = (
+            frozenset(legal_action_names)
+            if legal_action_names is not None
+            else None
+        )
+        scores: Dict[str, float] = {}
+        for action_model in self._action_models:
+            if allowed is not None and action_model.name not in allowed:
+                continue
+            precondition_support = _clamp_probability(
+                layer_support.get(action_model.name, 0.0)
+            )
+            if precondition_support <= 0.0:
+                scores[action_model.name] = 0.0
+                continue
+            goal_add = 0.0
+            for goal in goals:
+                if goal in action_model.add_probabilities:
+                    goal_add = max(
+                        goal_add,
+                        _clamp_probability(action_model.add_probabilities[goal]),
+                    )
+            scores[action_model.name] = _clamp_probability(
+                precondition_support * goal_add
+            )
+        return scores
 
     def pessimistic_heuristic(
         self,
@@ -1253,6 +1409,7 @@ class TemporalProbabilisticRPGHeuristic:
         fact_cache_hits = 0
         action_cache_hits = 0
         traces: List[TemporalLayerTrace] = []
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
 
         def fact_support(fact: Fact, layer: int) -> float:
             nonlocal fact_cache_hits
@@ -1362,6 +1519,8 @@ class TemporalProbabilisticRPGHeuristic:
                                 + action_support_value * del_prob
                             )
 
+            action_support_by_layer[layer] = dict(action_support)
+
             if debug:
                 traces.append(
                     TemporalLayerTrace(
@@ -1379,6 +1538,7 @@ class TemporalProbabilisticRPGHeuristic:
             cache_hit=False,
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
+            action_support_by_layer=action_support_by_layer,
         )
 
     # -------------------------------------------------------------------------
