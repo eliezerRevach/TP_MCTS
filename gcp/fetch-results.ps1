@@ -21,6 +21,7 @@ $LocalResults = if ($env:TP_MCTS_RESULTS_DIR) { $env:TP_MCTS_RESULTS_DIR } else 
 New-Item -ItemType Directory -Force -Path $LocalResults | Out-Null
 
 $Remote = "${VM_NAME}:/opt/tp_mcts/results/"
+# Uses ZONE and PROJECT_ID from config.env via gcloud flags below
 Write-Host "Fetching ${Remote} -> ${LocalResults}"
 gcloud compute scp --recurse --zone=$ZONE "${Remote}*" "${LocalResults}\" --project=$PROJECT_ID
 Write-Host "Done."

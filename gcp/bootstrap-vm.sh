@@ -35,7 +35,7 @@ if [[ ! -d "${VENV}" ]]; then
   python3 -m venv "${VENV}"
 fi
 "${VENV}/bin/pip" install -q --upgrade pip
-"${VENV}/bin/pip" install -q dill numpy pandas openpyxl jupyterlab ipykernel pytest
+"${VENV}/bin/pip" install -q dill numpy pandas openpyxl networkx jupyterlab ipykernel pytest
 
 # Kernel for Jupyter / VS Code Remote-SSH (install for every login user that exists)
 for U in debian "$(logname 2>/dev/null || true)" "$(whoami)"; do

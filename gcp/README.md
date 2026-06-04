@@ -39,15 +39,24 @@ gcloud services enable compute.googleapis.com
 
 ## One-time: create the VM
 
-From repo root (Git Bash, WSL, or Cloud Shell):
+**Windows (PowerShell):**
+
+```powershell
+cd gcp
+copy config.env.example config.env   # edit PROJECT_ID if needed
+..\gcp\create-vm.ps1
+```
+
+**Git Bash / WSL / Cloud Shell:**
 
 ```bash
 cd gcp
 cp config.env.example config.env
-# Edit config.env: PROJECT_ID, ZONE, optional REPO_BRANCH
 chmod +x create-vm.sh bootstrap-vm.sh startup.sh
 ./create-vm.sh
 ```
+
+If `n2-highcpu-64` fails (quota or zone capacity), use `e2-highcpu-8` and another zone in `config.env` (see Quota section below).
 
 On Windows you can use [Cloud Shell](https://console.cloud.google.com/cloudshell) (upload `gcp/` or clone your repo there) instead of local bash.
 
@@ -131,9 +140,18 @@ Request quota increase in Console → IAM & admin → Quotas if create fails.
 
 ## Quota / billing tips
 
-- Pick a zone close to you with available `N2_CPUS` quota (often `us-central1-a`).
+- **New trial projects** often have **`CPUS_ALL_REGIONS` = 12** globally. A 64-vCPU VM will fail until you [request a quota increase](https://console.cloud.google.com/iam-admin/quotas?project=YOUR_PROJECT_ID) for **Compute Engine API → CPUs (all regions)** (and optionally **N2 CPUs**). Ask for e.g. **128** CPUs for experiments.
+- Until approved, use **`e2-highcpu-8`** (8 vCPU) or **`n2-highcpu-8`** in an available zone (`us-east1-d` worked for this project).
+- Pick a zone close to you with available capacity (if create fails with `ZONE_RESOURCE_POOL_EXHAUSTED`, try another zone or machine family).
 - Use **stop** not **delete** between sessions if you will resume the same disk.
 - Trial credits apply to Compute; watch **Billing → Reports**.
+
+### Request 64-core quota (one-time)
+
+1. Console → **IAM & admin** → **Quotas**
+2. Filter: **Compute Engine API**, metric **CPUs (all regions)**
+3. **Edit quotas** → request **128** (or **96**)
+4. After approval, set `MACHINE_TYPE=n2-highcpu-64` in `config.env`, delete the small VM, run `create-vm.ps1` again (or resize — recreating is simpler).
 
 ## Troubleshooting
 

@@ -26,9 +26,13 @@ fi
 export REPO_URL REPO_BRANCH GCE_REPO_DIR
 bash "${GCE_REPO_DIR}/gcp/bootstrap-vm.sh"
 
-# Allow SSH user to write results (debian default login user varies)
-if id -u debian &>/dev/null; then
-  chown -R debian:debian "${GCE_REPO_DIR}"
-fi
+# Writable by gcloud SSH user (often local username, not always debian)
+for U in debian ubuntu "$(getent passwd | awk -F: '$3>=1000 && $3<65534 {print $1; exit}')"; do
+  if id -u "${U}" &>/dev/null 2>&1; then
+    chown -R "${U}:${U}" "${GCE_REPO_DIR}"
+    sudo -u "${U}" git config --global --add safe.directory "${GCE_REPO_DIR}" || true
+    break
+  fi
+done
 
 echo "=== startup finished $(date -Is) ==="
