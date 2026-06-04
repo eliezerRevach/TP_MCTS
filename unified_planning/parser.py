@@ -325,10 +325,19 @@ parser.add_argument(
 parser.add_argument(
     '--value_mode',
     help='MCTS leaf/backup target mode: tp_mcts (default), greedy_matched, '
-         'ptrpg_guided_terminal_rollout, or fixed_tail_ptrpg_rollout (prefix + fixed-horizon PTRPG tail)',
+         'ptrpg_guided_terminal_rollout, fixed_tail_mcts_sampled (in-tree UCT prefix), '
+         'fixed_tail_random_rollout_eval (ephemeral K-rollout leaf eval), or '
+         'fixed_tail_ptrpg_rollout (deprecated alias for mcts_sampled / expectimax)',
     nargs='?',
     default='tp_mcts',
-    choices=('tp_mcts', 'greedy_matched', 'ptrpg_guided_terminal_rollout', 'fixed_tail_ptrpg_rollout'),
+    choices=(
+        'tp_mcts',
+        'greedy_matched',
+        'ptrpg_guided_terminal_rollout',
+        'fixed_tail_ptrpg_rollout',
+        'fixed_tail_mcts_sampled',
+        'fixed_tail_random_rollout_eval',
+    ),
 )
 parser.add_argument(
     '--fixed-tail-prefix-frac',
@@ -372,6 +381,20 @@ parser.add_argument(
     type=float,
     default=0.0,
     help='expectimax prefix: wall-time budget per search in seconds (0 = disabled).',
+)
+parser.add_argument(
+    '--fixed-tail-rollout-samples',
+    dest='fixed_tail_rollout_samples',
+    type=int,
+    default=1,
+    help='fixed_tail_random_rollout_eval: ephemeral rollout samples K per leaf (default 1).',
+)
+parser.add_argument(
+    '--fixed-tail-rollout-policy',
+    dest='fixed_tail_rollout_policy',
+    default='random_legal_fitting',
+    choices=('random_legal_fitting', 'first_legal_fitting'),
+    help='fixed_tail_random_rollout_eval: action choice during ephemeral prefix rollout.',
 )
 parser.add_argument(
     '--ptrpg-guided-rollout-policy',

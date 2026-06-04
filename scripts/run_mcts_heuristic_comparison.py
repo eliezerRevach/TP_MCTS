@@ -271,6 +271,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "greedy_matched",
             "ptrpg_guided_terminal_rollout",
             "fixed_tail_ptrpg_rollout",
+            "fixed_tail_mcts_sampled",
+            "fixed_tail_random_rollout_eval",
         ],
         default=DEFAULT_VALUE_MODE,
         help=f"MCTS backup target mode. Default: {DEFAULT_VALUE_MODE}",
@@ -348,6 +350,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=None,
         help="Forwarded to run_domain: expectimax guard wall time per search (0=off).",
+    )
+    p.add_argument(
+        "--fixed-tail-rollout-samples",
+        dest="fixed_tail_rollout_samples",
+        type=int,
+        default=None,
+        help="Forwarded to run_domain: ephemeral rollout samples K per leaf.",
+    )
+    p.add_argument(
+        "--fixed-tail-rollout-policy",
+        dest="fixed_tail_rollout_policy",
+        default=None,
+        choices=("random_legal_fitting", "first_legal_fitting"),
+        help="Forwarded to run_domain: ephemeral rollout action policy.",
     )
     p.add_argument(
         "--final_selection",
@@ -480,6 +496,8 @@ def run_experiment(
     fixed_tail_expectimax_max_nodes: int | None = None,
     fixed_tail_expectimax_max_depth: int | None = None,
     fixed_tail_expectimax_max_time_sec: float | None = None,
+    fixed_tail_rollout_samples: int | None = None,
+    fixed_tail_rollout_policy: str | None = None,
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     effective_value_mode = alias.get("value_mode", value_mode)
@@ -537,6 +555,8 @@ def run_experiment(
         fixed_tail_expectimax_max_nodes=fixed_tail_expectimax_max_nodes,
         fixed_tail_expectimax_max_depth=fixed_tail_expectimax_max_depth,
         fixed_tail_expectimax_max_time_sec=fixed_tail_expectimax_max_time_sec,
+        fixed_tail_rollout_samples=fixed_tail_rollout_samples,
+        fixed_tail_rollout_policy=fixed_tail_rollout_policy,
         resolution_alpha=resolution_alpha,
         resolution_forced_minimum=resolution_forced_minimum,
         resolution_reference_t=resolution_reference_t,
@@ -679,6 +699,8 @@ def main(argv: list[str] | None = None) -> None:
                 fixed_tail_expectimax_max_nodes=args.fixed_tail_expectimax_max_nodes,
                 fixed_tail_expectimax_max_depth=args.fixed_tail_expectimax_max_depth,
                 fixed_tail_expectimax_max_time_sec=args.fixed_tail_expectimax_max_time_sec,
+                fixed_tail_rollout_samples=args.fixed_tail_rollout_samples,
+                fixed_tail_rollout_policy=args.fixed_tail_rollout_policy,
                 verbose=args.verbose,
                 resolution_alpha=args.resolution_alpha,
                 resolution_forced_minimum=args.resolution_forced_minimum,

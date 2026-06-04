@@ -104,6 +104,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "greedy_matched",
             "ptrpg_guided_terminal_rollout",
             "fixed_tail_ptrpg_rollout",
+            "fixed_tail_mcts_sampled",
+            "fixed_tail_random_rollout_eval",
         ],
         default="greedy_matched",
         help=(
@@ -182,6 +184,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=None,
         help="expectimax prefix: wall-time budget per search (0=off).",
+    )
+    p.add_argument(
+        "--fixed-tail-rollout-samples",
+        dest="fixed_tail_rollout_samples",
+        type=int,
+        default=None,
+        help="fixed_tail_random_rollout_eval: rollout samples K per leaf.",
+    )
+    p.add_argument(
+        "--fixed-tail-rollout-policy",
+        dest="fixed_tail_rollout_policy",
+        default=None,
+        choices=("random_legal_fitting", "first_legal_fitting"),
+        help="fixed_tail_random_rollout_eval: ephemeral rollout action policy.",
     )
     p.add_argument(
         "--heuristic",
@@ -345,6 +361,10 @@ def configure_fixed_tail_cli(args: argparse.Namespace) -> None:
         a.fixed_tail_expectimax_max_depth = int(args.fixed_tail_expectimax_max_depth)
     if getattr(args, "fixed_tail_expectimax_max_time_sec", None) is not None:
         a.fixed_tail_expectimax_max_time_sec = float(args.fixed_tail_expectimax_max_time_sec)
+    if getattr(args, "fixed_tail_rollout_samples", None) is not None:
+        a.fixed_tail_rollout_samples = int(args.fixed_tail_rollout_samples)
+    if getattr(args, "fixed_tail_rollout_policy", None) is not None:
+        a.fixed_tail_rollout_policy = str(args.fixed_tail_rollout_policy)
 
 
 def build_mcts(args: argparse.Namespace) -> C_MCTS:

@@ -4,6 +4,7 @@ import unified_planning as up
 import math
 import time
 import random
+import warnings
 from unified_planning.engines.utils import (
     create_init_stn,
     update_stn,
@@ -211,7 +212,28 @@ def validate_ptrpg_guided_rollout_config(
         )
 
 
-def _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode: str) -> bool:
+_FIXED_TAIL_VALUE_MODES = frozenset(
+    {
+        "fixed_tail_ptrpg_rollout",
+        "fixed_tail_mcts_sampled",
+        "fixed_tail_random_rollout_eval",
+    }
+)
+
+
+def _uses_fixed_tail_value_mode(value_mode: str) -> bool:
+    return value_mode in _FIXED_TAIL_VALUE_MODES
+
+
+def _uses_fixed_tail_random_rollout_eval(value_mode: str) -> bool:
+    return value_mode == "fixed_tail_random_rollout_eval"
+
+
+def _uses_fixed_tail_mcts_sampled_value_mode(value_mode: str) -> bool:
+    return value_mode in ("fixed_tail_mcts_sampled", "fixed_tail_ptrpg_rollout")
+
+
+def _uses_fixed_tail_deprecated_ptrpg_rollout(value_mode: str) -> bool:
     return value_mode == "fixed_tail_ptrpg_rollout"
 
 
@@ -219,16 +241,16 @@ def validate_fixed_tail_ptrpg_rollout_config(
     value_mode: str,
     temporal_heuristic_strategy: str,
 ) -> None:
-    if not _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode):
+    if not _uses_fixed_tail_value_mode(value_mode):
         return
     if temporal_heuristic_strategy in _ALIGNED_SUFFIX:
         raise ValueError(
-            "value_mode=fixed_tail_ptrpg_rollout cannot be combined with "
+            f"value_mode={value_mode!r} cannot be combined with "
             f"rollout_aligned / frontier_aligned strategy {temporal_heuristic_strategy!r}"
         )
     if _is_option_a_strategy(temporal_heuristic_strategy):
         raise ValueError(
-            "value_mode=fixed_tail_ptrpg_rollout cannot be combined with "
+            f"value_mode={value_mode!r} cannot be combined with "
             f"frontier_aligned_option_a strategy {temporal_heuristic_strategy!r}"
         )
 
@@ -629,6 +651,8 @@ class Base_MCTS:
             self._fixed_tail_debug_count = 0
         if getattr(self, "_fixed_tail_expectimax", None) is not None:
             self._fixed_tail_expectimax.reset_search()
+        if getattr(self, "_fixed_tail_random_rollout", None) is not None:
+            self._fixed_tail_random_rollout.reset_search()
         self._fixed_tail_root_debug_done = False
         self._fixed_tail_ptrpg_warned = False
         avg_variants = {'avg', 'avg_topk', 'avg_pw'}
@@ -882,10 +906,11 @@ class C_MCTS(Base_MCTS):
         self._fixed_tail_config = None
         self._fixed_tail_ctx = None
         self._fixed_tail_expectimax = None
+        self._fixed_tail_random_rollout = None
         self._fixed_tail_debug_count = 0
         self._fixed_tail_root_debug_done = False
         self._fixed_tail_ptrpg_warned = False
-        if _uses_fixed_tail_ptrpg_rollout_value_mode(value_mode):
+        if _uses_fixed_tail_value_mode(value_mode):
             from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
                 build_fixed_tail_search_context,
                 fixed_tail_config_from_args,
@@ -896,12 +921,43 @@ class C_MCTS(Base_MCTS):
                 uses_expectimax_prefix,
             )
 
+            if _uses_fixed_tail_deprecated_ptrpg_rollout(value_mode):
+                warnings.warn(
+                    "value_mode=fixed_tail_ptrpg_rollout is deprecated; use "
+                    "fixed_tail_mcts_sampled (in-tree prefix) or "
+                    "fixed_tail_random_rollout_eval (ephemeral leaf rollouts).",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
             self._fixed_tail_config = fixed_tail_config_from_args()
             self._fixed_tail_config.tail_strategy = temporal_heuristic_strategy
             self._fixed_tail_ctx = build_fixed_tail_search_context(
                 mdp, root_state, stn, self._fixed_tail_config
             )
-            if uses_expectimax_prefix(self._fixed_tail_config):
+
+            if value_mode == "fixed_tail_mcts_sampled" and uses_expectimax_prefix(
+                self._fixed_tail_config
+            ):
+                raise ValueError(
+                    "value_mode=fixed_tail_mcts_sampled does not support "
+                    "fixed_tail_prefix_policy=expectimax; use "
+                    "value_mode=fixed_tail_ptrpg_rollout until expectimax is migrated."
+                )
+
+            if _uses_fixed_tail_random_rollout_eval(value_mode):
+                from unified_planning.engines.solvers.fixed_tail_random_rollout_eval import (
+                    FixedTailRandomRolloutEvaluator,
+                    random_rollout_config_from_args,
+                )
+
+                self._fixed_tail_random_rollout = FixedTailRandomRolloutEvaluator(
+                    mdp=mdp,
+                    ctx=self._fixed_tail_ctx,
+                    config=random_rollout_config_from_args(),
+                    strategy=temporal_heuristic_strategy,
+                )
+            elif uses_expectimax_prefix(self._fixed_tail_config):
                 self._fixed_tail_expectimax = FixedTailExpectimaxEvaluator(
                     mdp=mdp,
                     ctx=self._fixed_tail_ctx,
@@ -914,7 +970,14 @@ class C_MCTS(Base_MCTS):
                 )
 
         self._next_option_a_node_id = 1
-        create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
+        if selection_type == "max" and _uses_fixed_tail_random_rollout_eval(value_mode):
+            create_snode = self.create_Snode
+        elif selection_type == "max":
+            create_snode = self.create_Snode_max
+        elif selection_type == "rootInterval":
+            create_snode = self.create_Snode_root_interval
+        else:
+            create_snode = self.create_Snode
         snode, _ = create_snode(root_state, 0, stn,
                                 previous_chosen_action_node=previous_chosen_action_node)
         self.set_root_node(root_node if root_node is not None else snode)
@@ -958,8 +1021,25 @@ class C_MCTS(Base_MCTS):
     def _uses_ptrpg_guided_rollout(self) -> bool:
         return _uses_ptrpg_guided_rollout_value_mode(self.value_mode)
 
-    def _uses_fixed_tail_ptrpg_rollout(self) -> bool:
-        return _uses_fixed_tail_ptrpg_rollout_value_mode(self.value_mode)
+    def _uses_fixed_tail_value_mode(self) -> bool:
+        return _uses_fixed_tail_value_mode(self.value_mode)
+
+    def _uses_fixed_tail_random_rollout_eval(self) -> bool:
+        return _uses_fixed_tail_random_rollout_eval(self.value_mode)
+
+    def _uses_fixed_tail_mcts_sampled(self) -> bool:
+        if self.value_mode == "fixed_tail_mcts_sampled":
+            return True
+        if self.value_mode != "fixed_tail_ptrpg_rollout":
+            return False
+        from unified_planning.engines.solvers.fixed_tail_expectimax import (
+            uses_expectimax_prefix,
+        )
+
+        return not (
+            self._fixed_tail_config is not None
+            and uses_expectimax_prefix(self._fixed_tail_config)
+        )
 
     def _uses_fixed_tail_expectimax(self) -> bool:
         from unified_planning.engines.solvers.fixed_tail_expectimax import (
@@ -967,10 +1047,29 @@ class C_MCTS(Base_MCTS):
         )
 
         return (
-            self._uses_fixed_tail_ptrpg_rollout()
+            self._uses_fixed_tail_value_mode()
             and self._fixed_tail_config is not None
             and uses_expectimax_prefix(self._fixed_tail_config)
             and self._fixed_tail_expectimax is not None
+        )
+
+    def _fixed_tail_leaf_eval_value(self, snode: "up.engines.C_SNode") -> float:
+        if self._uses_fixed_tail_random_rollout_eval():
+            return self._fixed_tail_random_rollout.evaluate_leaf(
+                snode.state,
+                self._fixed_tail_snode_stn(snode),
+                self._fixed_tail_previous_stn_node(snode),
+            )
+        if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
+            self._fixed_tail_seed_expectimax_q(snode)
+            return self._fixed_tail_expectimax_v_at_snode(snode)
+        return self._fixed_tail_bootstrap_at_snode(snode, label="depth_or_leaf")
+
+    def _fixed_tail_cutoff_value(self, snode: "up.engines.C_SNode") -> float:
+        if self._uses_fixed_tail_random_rollout_eval():
+            return self._fixed_tail_leaf_eval_value(snode)
+        return self._fixed_tail_bootstrap_at_snode(
+            snode, label="cutoff_node", crossed=True
         )
 
     def _fixed_tail_previous_stn_node(
@@ -1164,10 +1263,7 @@ class C_MCTS(Base_MCTS):
         return crossed_cutoff(self._fixed_tail_ctx, self._fixed_tail_elapsed_at_snode(snode))
 
     def _leaf_fixed_tail_value(self, snode: "up.engines.C_SNode") -> float:
-        if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
-            self._fixed_tail_seed_expectimax_q(snode)
-            return self._fixed_tail_expectimax_v_at_snode(snode)
-        return self._fixed_tail_bootstrap_at_snode(snode, label="depth_or_leaf")
+        return self._fixed_tail_leaf_eval_value(snode)
 
     def _leaf_rollout_value_from_anode(
         self,
@@ -1205,7 +1301,7 @@ class C_MCTS(Base_MCTS):
     def _depth_cutoff_value(self, snode: "up.engines.C_Snode"):
         if self._uses_ptrpg_guided_rollout():
             return self._leaf_rollout_value(snode)
-        if self._uses_fixed_tail_ptrpg_rollout():
+        if self._uses_fixed_tail_value_mode():
             return self._leaf_fixed_tail_value(snode)
         if self.value_mode != "greedy_matched":
             return self.heuristic(snode)
@@ -1752,7 +1848,7 @@ class C_MCTS(Base_MCTS):
                     reward += self.mdp.discount_factor * self._leaf_rollout_value_from_anode(
                         next_state, snode.children[action]
                     )
-            elif self._uses_fixed_tail_ptrpg_rollout():
+            elif self._uses_fixed_tail_mcts_sampled():
                 if not terminal:
                     anode_child = snode.children[action]
                     child_snode, _ = self.create_Snode(
@@ -1824,20 +1920,20 @@ class C_MCTS(Base_MCTS):
         """
                 Traverse the tree until reaching a leaf node.
          """
-        if self._uses_fixed_tail_ptrpg_rollout():
+        if self._uses_fixed_tail_mcts_sampled():
             if getattr(snode, "_fixed_tail_bootstrap", False):
                 return float(getattr(snode, "_fixed_tail_value", 0.0))
 
         if len(snode.possible_actions) == 0:
-            if self._uses_fixed_tail_ptrpg_rollout():
+            if self._uses_fixed_tail_value_mode():
                 return 0.0
             return -100
 
         if snode.depth > self.search_depth:
             return self._depth_cutoff_value(snode)
 
-        if self._uses_fixed_tail_ptrpg_rollout() and self._fixed_tail_at_cutoff(snode):
-            return self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
+        if self._uses_fixed_tail_value_mode() and self._fixed_tail_at_cutoff(snode):
+            return self._fixed_tail_cutoff_value(snode)
 
         if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
             self._fixed_tail_seed_expectimax_q(snode)
@@ -1859,7 +1955,11 @@ class C_MCTS(Base_MCTS):
                     reward = self._greedy_matched_action_target(snode, action)
                 elif self._uses_ptrpg_guided_rollout():
                     reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
-                elif self._uses_fixed_tail_ptrpg_rollout():
+                elif self._uses_fixed_tail_random_rollout_eval():
+                    leaf_val = self._fixed_tail_leaf_eval_value(next_snode)
+                    reward += self.mdp.discount_factor * leaf_val
+                    anode.add_child(next_snode)
+                elif self._uses_fixed_tail_mcts_sampled():
                     from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
                         crossed_cutoff,
                         elapsed_from_root,
@@ -1901,20 +2001,20 @@ class C_MCTS(Base_MCTS):
         Selection with max logic -
         average between states and maximum between possible actions
         """
-        if self._uses_fixed_tail_ptrpg_rollout():
+        if self._uses_fixed_tail_mcts_sampled():
             if getattr(snode, "_fixed_tail_bootstrap", False):
                 return float(getattr(snode, "_fixed_tail_value", 0.0))
 
         if len(snode.possible_actions) == 0:
-            if self._uses_fixed_tail_ptrpg_rollout():
+            if self._uses_fixed_tail_value_mode():
                 return 0.0
             return -100
 
         if snode.depth > self.search_depth:
             return self._depth_cutoff_value(snode)
 
-        if self._uses_fixed_tail_ptrpg_rollout() and self._fixed_tail_at_cutoff(snode):
-            return self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
+        if self._uses_fixed_tail_value_mode() and self._fixed_tail_at_cutoff(snode):
+            return self._fixed_tail_cutoff_value(snode)
 
         if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
             self._fixed_tail_seed_expectimax_q(snode)
@@ -1937,7 +2037,12 @@ class C_MCTS(Base_MCTS):
                 elif self._uses_ptrpg_guided_rollout():
                     next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
                     reward += self.mdp.discount_factor * self._leaf_rollout_value(next_snode)
-                elif self._uses_fixed_tail_ptrpg_rollout():
+                elif self._uses_fixed_tail_random_rollout_eval():
+                    next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
+                    leaf_val = self._fixed_tail_leaf_eval_value(next_snode)
+                    reward += self.mdp.discount_factor * leaf_val
+                    anode.add_child(next_snode)
+                elif self._uses_fixed_tail_mcts_sampled():
                     next_snode, _ = self.create_Snode(next_state, snode.depth + 1, anode.stn, anode)
                     from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
                         crossed_cutoff,
@@ -1975,7 +2080,7 @@ class C_MCTS(Base_MCTS):
         set the value per root action legal interval.
         The value is propagated and updated according the legal interval
         """
-        if self._uses_fixed_tail_ptrpg_rollout():
+        if self._uses_fixed_tail_mcts_sampled():
             if getattr(snode, "_fixed_tail_bootstrap", False):
                 val = float(getattr(snode, "_fixed_tail_value", 0.0))
                 if root_STNnode is None:
@@ -1984,16 +2089,16 @@ class C_MCTS(Base_MCTS):
 
         if len(snode.possible_actions) == 0:
             if root_STNnode is None:
-                return 0.0 if self._uses_fixed_tail_ptrpg_rollout() else 0
-            zero = 0.0 if self._uses_fixed_tail_ptrpg_rollout() else 0
+                return 0.0 if self._uses_fixed_tail_value_mode() else 0
+            zero = 0.0 if self._uses_fixed_tail_value_mode() else 0
             return zero, *snode.parent.stn.get_legal_interval(root_STNnode)
 
         if snode.depth > self.search_depth:
             cutoff = self._depth_cutoff_value(snode)
             return cutoff, *snode.parent.stn.get_legal_interval(root_STNnode)
 
-        if self._uses_fixed_tail_ptrpg_rollout() and self._fixed_tail_at_cutoff(snode):
-            val = self._fixed_tail_bootstrap_at_snode(snode, label="cutoff_node", crossed=True)
+        if self._uses_fixed_tail_value_mode() and self._fixed_tail_at_cutoff(snode):
+            val = self._fixed_tail_cutoff_value(snode)
             return val, *snode.parent.stn.get_legal_interval(root_STNnode)
 
         if self._uses_fixed_tail_expectimax() and not self._fixed_tail_at_cutoff(snode):
@@ -2025,7 +2130,12 @@ class C_MCTS(Base_MCTS):
                     reward += self._leaf_rollout_value(next_snode) * self.mdp.discount_factor
                     anode.add_child(next_snode)
                     next_snode.update(reward, lower, upper)
-                elif self._uses_fixed_tail_ptrpg_rollout():
+                elif self._uses_fixed_tail_random_rollout_eval():
+                    leaf_val = self._fixed_tail_leaf_eval_value(next_snode)
+                    reward += leaf_val * self.mdp.discount_factor
+                    anode.add_child(next_snode)
+                    next_snode.update(reward, lower, upper)
+                elif self._uses_fixed_tail_mcts_sampled():
                     from unified_planning.engines.solvers.fixed_tail_ptrpg_rollout import (
                         crossed_cutoff,
                         elapsed_from_root,

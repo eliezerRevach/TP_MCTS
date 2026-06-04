@@ -215,9 +215,21 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
     "fixed_tail_atomic_exact_resolution": {
         "heuristic_name": "temporal_probabilistic_rpg",
         "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
-        "value_mode": "fixed_tail_ptrpg_rollout",
+        "value_mode": "fixed_tail_mcts_sampled",
         "ptrpg_guided_rollout_policy": "atomic_exact_resolution",
         "label": "fixed_tail_atomic_exact_resolution",
+    },
+    "fixed_tail_mcts_sampled_atomic_exact_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
+        "value_mode": "fixed_tail_mcts_sampled",
+        "label": "fixed_tail_mcts_sampled_atomic_exact_resolution",
+    },
+    "fixed_tail_random_rollout_atomic_exact_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "atom_backtrack_exact_resolution",
+        "value_mode": "fixed_tail_random_rollout_eval",
+        "label": "fixed_tail_random_rollout_atomic_exact_resolution",
     },
     "fixed_tail_expectimax_atomic_exact_resolution": {
         "heuristic_name": "temporal_probabilistic_rpg",
@@ -302,6 +314,8 @@ def run_domain_subprocess(
     fixed_tail_expectimax_max_nodes: int | None = None,
     fixed_tail_expectimax_max_depth: int | None = None,
     fixed_tail_expectimax_max_time_sec: float | None = None,
+    fixed_tail_rollout_samples: int | None = None,
+    fixed_tail_rollout_policy: str | None = None,
     garbage_amount: int = 0,
     resolution_alpha: float | None = None,
     resolution_forced_minimum: bool = False,
@@ -409,6 +423,10 @@ def run_domain_subprocess(
         cmd.extend(["--fixed-tail-expectimax-max-depth", str(fixed_tail_expectimax_max_depth)])
     if fixed_tail_expectimax_max_time_sec is not None:
         cmd.extend(["--fixed-tail-expectimax-max-time-sec", str(fixed_tail_expectimax_max_time_sec)])
+    if fixed_tail_rollout_samples is not None:
+        cmd.extend(["--fixed-tail-rollout-samples", str(fixed_tail_rollout_samples)])
+    if fixed_tail_rollout_policy is not None:
+        cmd.extend(["--fixed-tail-rollout-policy", str(fixed_tail_rollout_policy)])
     if extra_args:
         cmd.extend(extra_args)
 

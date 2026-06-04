@@ -57,6 +57,8 @@ class FixedTailConfig:
     max_expectimax_nodes: int = 5000
     max_expectimax_depth: int = 64
     max_expectimax_time_sec: float = 0.0
+    rollout_samples: int = 1
+    rollout_policy: str = "random_legal_fitting"
 
     def __post_init__(self) -> None:
         frac = float(self.prefix_frac)
@@ -70,6 +72,8 @@ class FixedTailConfig:
         self.max_expectimax_nodes = max(1, int(self.max_expectimax_nodes))
         self.max_expectimax_depth = max(1, int(self.max_expectimax_depth))
         self.max_expectimax_time_sec = max(0.0, float(self.max_expectimax_time_sec))
+        self.rollout_samples = max(1, int(self.rollout_samples))
+        self.rollout_policy = str(self.rollout_policy).strip().lower()
 
 
 @dataclass(frozen=True)
@@ -94,12 +98,19 @@ def fixed_tail_config_from_args(args=None) -> FixedTailConfig:
         max_nodes = int(getattr(cli, "fixed_tail_expectimax_max_nodes", max_nodes))
         max_depth = int(getattr(cli, "fixed_tail_expectimax_max_depth", max_depth))
         max_time = float(getattr(cli, "fixed_tail_expectimax_max_time_sec", max_time))
+        rollout_samples = int(getattr(cli, "fixed_tail_rollout_samples", 1))
+        rollout_policy = str(getattr(cli, "fixed_tail_rollout_policy", "random_legal_fitting"))
+    else:
+        rollout_samples = 1
+        rollout_policy = "random_legal_fitting"
     return FixedTailConfig(
         prefix_frac=prefix_frac,
         prefix_policy=prefix_policy,
         max_expectimax_nodes=max_nodes,
         max_expectimax_depth=max_depth,
         max_expectimax_time_sec=max_time,
+        rollout_samples=rollout_samples,
+        rollout_policy=rollout_policy,
     )
 
 
