@@ -888,6 +888,29 @@ class TemporalProbabilisticRPGHeuristic:
         self._ensure_unbiased_structural_extracted()
         return self._unbiased_actions_are_mutex(name_a, name_b)
 
+    def action_add_facts(self, name: str) -> frozenset:
+        """
+        DP-relevant add facts of an action, keyed by action name.
+
+        Returns the facts the action's relaxed model introduces (its
+        ``add_probabilities`` keys). These are exactly the facts to seed at the
+        current layer when measuring an action's goal-backtrack contribution via
+        :meth:`heuristic_score` (head-start scoring used by max_approximation).
+        For split durative actions the start phase introduces ``inExecution``,
+        which unlocks the matching end action inside the DP, so the contribution
+        of *starting* a durative action still propagates to the goal.
+        Unknown names (e.g. pre-built combination actions with no relaxed model)
+        return an empty set and are skipped by the group builder.
+        """
+        cache = getattr(self, "_add_facts_by_name", None)
+        if cache is None:
+            cache = {
+                model.name: frozenset(model.add_probabilities.keys())
+                for model in self._action_models
+            }
+            self._add_facts_by_name = cache
+        return cache.get(name, frozenset())
+
     def action_contribution_scores(
         self,
         state,
