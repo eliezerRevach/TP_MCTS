@@ -200,6 +200,16 @@ def _uses_max_approximation_value_mode(value_mode: str) -> bool:
     return value_mode == "max_approximation"
 
 
+def _normalize_max_approximation_selection(selection_type, value_mode):
+    """``selection_type='max_approximation'`` is the single switch (matching the
+    greedy_parallel path): it enables the max_approximation value_mode and runs
+    ordinary 'avg' UCT selection underneath. Returns (selection_type, value_mode).
+    """
+    if selection_type == "max_approximation":
+        return "avg", "max_approximation"
+    return selection_type, value_mode
+
+
 def validate_ptrpg_guided_rollout_config(
     value_mode: str,
     temporal_heuristic_strategy: str,
@@ -650,6 +660,9 @@ class Base_MCTS:
         """
         start_time = time.time()
         current_time = time.time()
+        # max_approximation is a value_mode under the hood; run 'avg' selection.
+        if selection_type == "max_approximation":
+            selection_type = "avg"
         i = 0
         if hasattr(self, "_ptrpg_rollout_debug_done"):
             self._ptrpg_rollout_debug_done = False
@@ -879,6 +892,11 @@ class C_MCTS(Base_MCTS):
                  root_baseline_cache=None, value_mode: str = "tp_mcts",
                  uct_initial_k: int = 3):
         super().__init__(mdp, search_depth, exploration_constant, k)
+        # selection_type='max_approximation' is the single switch: enable the
+        # max_approximation value_mode and use 'avg' UCT selection underneath.
+        selection_type, value_mode = _normalize_max_approximation_selection(
+            selection_type, value_mode
+        )
         self._stn = stn
         self._previous_chosen_action_node = previous_chosen_action_node
         self.heuristic_name = heuristic_name

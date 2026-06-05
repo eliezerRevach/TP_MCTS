@@ -84,8 +84,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--search_depth", type=int, default=0)
     p.add_argument(
         "--selection_type",
-        choices=["avg", "avg_topk", "avg_pw", "max", "rootInterval"],
+        choices=["avg", "avg_topk", "avg_pw", "max", "rootInterval", "max_approximation"],
         default="max",
+        help=(
+            "UCT selection. 'max_approximation' is a shortcut that enables the "
+            "max_approximation value_mode (goal-backtrack rollout + expansion) "
+            "and runs 'avg' selection underneath."
+        ),
     )
     p.add_argument(
         "--uct_initial_k",
@@ -678,6 +683,12 @@ def print_snapshot(
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     apply_heuristic_alias_overrides(args)
+    # selection_type='max_approximation' is the single switch: enable the
+    # max_approximation value_mode and run 'avg' UCT selection underneath
+    # (mirrors run_domain / greedy_parallel). Overrides any --value_mode.
+    if args.selection_type == "max_approximation":
+        args.selection_type = "avg"
+        args.value_mode = "max_approximation"
     configure_ptrpg_rollout_cli(args)
     configure_fixed_tail_cli(args)
     configure_rollout_aligned_cli(args)
