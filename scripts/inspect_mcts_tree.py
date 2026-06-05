@@ -107,12 +107,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "fixed_tail_ptrpg_rollout",
             "fixed_tail_mcts_sampled",
             "fixed_tail_random_rollout_eval",
+            "max_approximation",
         ],
         default="greedy_matched",
         help=(
             "MCTS leaf/backup target: tp_mcts (PTRPG heuristic), greedy_matched, "
-            "ptrpg_guided_terminal_rollout, or fixed_tail_ptrpg_rollout."
+            "ptrpg_guided_terminal_rollout, fixed_tail_ptrpg_rollout, or "
+            "max_approximation (goal-backtrack group rollout + expansion ordering)."
         ),
+    )
+    p.add_argument(
+        "--max-approx-alpha",
+        dest="max_approx_alpha",
+        type=float,
+        default=None,
+        help="max_approximation: sampling exponent P(a) ∝ marginal(a)^alpha (default 1.0).",
+    )
+    p.add_argument(
+        "--max-approx-samples",
+        dest="max_approx_num_samples",
+        type=int,
+        default=None,
+        help="max_approximation: candidate action sets per dispatch in the rollout (default 2).",
+    )
+    p.add_argument(
+        "--max-approx-seed",
+        dest="max_approx_seed",
+        type=int,
+        default=None,
+        help="max_approximation: RNG seed for the rollout's set sampling.",
     )
     p.add_argument(
         "--ptrpg-guided-rollout-policy",
@@ -387,6 +410,20 @@ def configure_fixed_tail_cli(args: argparse.Namespace) -> None:
         a.fixed_tail_rollout_policy = str(args.fixed_tail_rollout_policy)
 
 
+def configure_max_approx_cli(args: argparse.Namespace) -> None:
+    """Mirror max_approximation flags on up.args so the leaf rollout and the
+    expansion-scoring adapter (built inside C_MCTS) pick them up."""
+    a = getattr(up, "args", None)
+    if a is None:
+        return
+    if getattr(args, "max_approx_alpha", None) is not None:
+        a.max_approx_alpha = float(args.max_approx_alpha)
+    if getattr(args, "max_approx_num_samples", None) is not None:
+        a.max_approx_num_samples = int(args.max_approx_num_samples)
+    if getattr(args, "max_approx_seed", None) is not None:
+        a.max_approx_seed = int(args.max_approx_seed)
+
+
 def build_mcts(args: argparse.Namespace) -> C_MCTS:
     mdp = build_mdp(args)
     alias = HEURISTIC_ALIASES[args.heuristic]
@@ -644,6 +681,7 @@ def main(argv: list[str] | None = None) -> None:
     configure_ptrpg_rollout_cli(args)
     configure_fixed_tail_cli(args)
     configure_rollout_aligned_cli(args)
+    configure_max_approx_cli(args)
     if args.resolution_alpha is not None:
         up.args.resolution_alpha = args.resolution_alpha
     if args.resolution_forced_minimum:
