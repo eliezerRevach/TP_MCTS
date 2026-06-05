@@ -231,9 +231,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--selection_type",
-        choices=["avg", "rootInterval", "max"],
+        choices=["avg", "rootInterval", "max", "max_approximation"],
         default=DEFAULT_SELECTION_TYPE,
-        help=f"MCTS selection/scheduling variant. Default: {DEFAULT_SELECTION_TYPE}",
+        help=(
+            "MCTS selection variant. 'max_approximation' is the single switch that "
+            "enables the max_approximation value_mode (goal-backtrack rollout + "
+            f"expansion) under 'avg' selection. Default: {DEFAULT_SELECTION_TYPE}"
+        ),
     )
     p.add_argument(
         "--heuristic_depth",
@@ -273,6 +277,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "fixed_tail_ptrpg_rollout",
             "fixed_tail_mcts_sampled",
             "fixed_tail_random_rollout_eval",
+            "max_approximation",
         ],
         default=DEFAULT_VALUE_MODE,
         help=f"MCTS backup target mode. Default: {DEFAULT_VALUE_MODE}",
@@ -501,6 +506,11 @@ def run_experiment(
 ) -> dict:
     alias = HEURISTIC_ALIASES[heuristic_key]
     effective_value_mode = alias.get("value_mode", value_mode)
+    # selection_type='max_approximation' is the single switch (mirrors greedy /
+    # run_domain): force the max_approximation value_mode so the forwarded CLI and
+    # the recorded CSV row are consistent with what MCTS actually runs.
+    if selection_type == "max_approximation":
+        effective_value_mode = "max_approximation"
     effective_rollout_policy = alias.get("ptrpg_guided_rollout_policy", ptrpg_guided_rollout_policy)
     effective_fixed_tail_prefix_frac = fixed_tail_prefix_frac
     if effective_fixed_tail_prefix_frac is None:
