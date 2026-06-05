@@ -375,6 +375,7 @@ parser.add_argument(
         'fixed_tail_ptrpg_rollout',
         'fixed_tail_mcts_sampled',
         'fixed_tail_random_rollout_eval',
+        'max_approximation',
     ),
 )
 parser.add_argument(

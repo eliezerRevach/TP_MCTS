@@ -194,6 +194,12 @@ def _uses_ptrpg_guided_rollout_value_mode(value_mode: str) -> bool:
     return value_mode == "ptrpg_guided_terminal_rollout"
 
 
+def _uses_max_approximation_value_mode(value_mode: str) -> bool:
+    """value_mode that drives BOTH MCTS expansion ordering and leaf rollout with
+    the max_approximation goal-backtrack group selector."""
+    return value_mode == "max_approximation"
+
+
 def validate_ptrpg_guided_rollout_config(
     value_mode: str,
     temporal_heuristic_strategy: str,
@@ -970,6 +976,17 @@ class C_MCTS(Base_MCTS):
                     ),
                 )
 
+        # max_approximation value_mode: drive BOTH expansion ordering and leaf
+        # rollout with the goal-backtrack group selector. Build the scoring
+        # adapter lazily; auto-enable progressive widening so the max-approx
+        # ranking actually governs which actions get expanded (otherwise the
+        # default 'avg' path ignores _allowed_actions_for_uct).
+        self._max_approx_adapter = None
+        self._max_approx_scores_cache = {}
+        if _uses_max_approximation_value_mode(value_mode):
+            if self._uct_filter_mode is None:
+                self._uct_filter_mode = 'pw'
+
         self._next_option_a_node_id = 1
         if selection_type == "max":
             create_snode = self.create_Snode_max
@@ -1031,6 +1048,93 @@ class C_MCTS(Base_MCTS):
             self._uses_fixed_tail_random_rollout_eval()
             and getattr(self, "_selection_type", "avg") == "max"
         )
+
+    # ---- max_approximation: expansion ordering + leaf rollout --------------
+
+    def _uses_max_approximation(self) -> bool:
+        return _uses_max_approximation_value_mode(self.value_mode)
+
+    def _get_max_approx_adapter(self):
+        if self._max_approx_adapter is None:
+            from unified_planning.engines.solvers.max_approximation_selector import (
+                build_heuristic_adapter,
+            )
+
+            self._max_approx_adapter = build_heuristic_adapter(
+                self.mdp,
+                self.heuristic_name,
+                self.temporal_heuristic_strategy,
+                self.temporal_heuristic_depth,
+                resolution_kwargs=_resolution_heuristic_kwargs_from_cli(),
+            )
+        return self._max_approx_adapter
+
+    def _max_approx_current_time(self, snode) -> float:
+        if snode.parent is not None:
+            try:
+                return float(snode.parent.stn.get_current_end_time())
+            except Exception:
+                pass
+        try:
+            return float(self._stn.get_current_end_time())
+        except Exception:
+            return float(getattr(snode.state, "current_time", 0.0))
+
+    def _max_approx_remaining(self, current_time: float) -> float:
+        deadline = self.mdp.deadline()
+        if deadline is None:
+            return float(self.temporal_heuristic_depth)
+        return max(0.0, float(deadline) - float(current_time))
+
+    def _max_approx_action_scores(self, snode):
+        """Per-action goal-backtrack marginal lift from this node's state, cached
+        per node. Used to rank/widen expansion toward high-contribution actions."""
+        key = id(snode)
+        cached = self._max_approx_scores_cache.get(key)
+        if cached is not None:
+            return cached
+        adapter = self._get_max_approx_adapter()
+        current_time = self._max_approx_current_time(snode)
+        remaining = self._max_approx_remaining(current_time)
+        base_facts = set(getattr(snode.state, "predicates", snode.state))
+        base = adapter.eval_facts(base_facts, current_time, remaining)
+        scores = {}
+        for action in snode.possible_actions:
+            adds = adapter.action_add_facts(action)
+            if not adds:
+                scores[action] = 0.0
+                continue
+            lifted = adapter.eval_facts(base_facts | set(adds), current_time, remaining)
+            scores[action] = lifted - base
+        self._max_approx_scores_cache[key] = scores
+        return scores
+
+    def _max_approx_rollout_value(self, snode) -> float:
+        """Leaf value = success of a max_approximation greedy-set rollout to a
+        terminal/deadline state from this leaf (1.0 if goal reached in time)."""
+        if snode.parent is None:
+            return self.heuristic(snode)
+        from unified_planning.engines.solvers.greedy_parallel import (
+            simulate_greedy_mdp_until_terminal,
+        )
+
+        anode = snode.parent
+        args = getattr(up, "args", None)
+        value, _ = simulate_greedy_mdp_until_terminal(
+            mdp=self.mdp,
+            state=snode.state,
+            stn=anode.stn,
+            previous_action_node=anode.STNNode,
+            heuristic_name=self.heuristic_name,
+            temporal_heuristic_depth=self.temporal_heuristic_depth,
+            temporal_heuristic_strategy=self.temporal_heuristic_strategy,
+            selection_type="max_approximation",
+            max_approx_alpha=float(getattr(args, "max_approx_alpha", 1.0)),
+            max_approx_num_samples=int(getattr(args, "max_approx_num_samples", 2)),
+            max_approx_seed=getattr(args, "max_approx_seed", None),
+            max_time_slices=max(1, min(int(self.search_depth), 90)),
+        )
+        return float(value)
 
     def _fixed_tail_action_leaf_value(
         self,
@@ -1374,6 +1478,8 @@ class C_MCTS(Base_MCTS):
         return self._leaf_rollout_value_from_anode(snode.state, snode.parent)
 
     def _depth_cutoff_value(self, snode: "up.engines.C_Snode"):
+        if self._uses_max_approximation():
+            return self._max_approx_rollout_value(snode)
         if self._uses_ptrpg_guided_rollout():
             return self._leaf_rollout_value(snode)
         if self._uses_fixed_tail_max_init():
@@ -1395,6 +1501,12 @@ class C_MCTS(Base_MCTS):
         return action_name if action_name is not None else str(action)
 
     def _rank_actions_by_expected_target(self, snode: "up.engines.C_Snode"):
+        if self._uses_max_approximation():
+            scores = self._max_approx_action_scores(snode)
+            return sorted(
+                snode.possible_actions,
+                key=lambda a: (-scores.get(a, 0.0), self._action_rank_key(a)),
+            )
         ranked = []
         for action in snode.possible_actions:
             ranked.append((self._greedy_matched_action_target(snode, action), action))
