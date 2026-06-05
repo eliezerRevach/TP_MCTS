@@ -206,10 +206,11 @@ def _normalize_max_approximation_selection(selection_type, value_mode):
     ordinary 'avg' UCT selection underneath. Returns (selection_type, value_mode).
     """
     if selection_type == "max_approximation":
-        # Use the 'max' variant: it expands the top-k children at once and seeds
-        # each with its value (no single-child progressive widening), which is
-        # where the goal-backtrack group scores are reused instead of discarded.
-        return "max", "max_approximation"
+        # Run LAZY 'avg' selection with progressive widening: a node only computes
+        # its value on arrival, and its goal-backtrack ranking is computed (and
+        # cached) the first time UCT descends it — children are then revealed
+        # best-first, k at a time. Frontier leaves never pay the ranking cost.
+        return "avg", "max_approximation"
     return selection_type, value_mode
 
 
@@ -663,10 +664,10 @@ class Base_MCTS:
         """
         start_time = time.time()
         current_time = time.time()
-        # max_approximation is a value_mode under the hood; run 'max' selection
-        # (expand-top-k-and-seed), which is where the group scores are reused.
+        # max_approximation is a value_mode under the hood; run lazy 'avg'
+        # selection with progressive widening (ranking computed on first descent).
         if selection_type == "max_approximation":
-            selection_type = "max"
+            selection_type = "avg"
         i = 0
         if hasattr(self, "_ptrpg_rollout_debug_done"):
             self._ptrpg_rollout_debug_done = False
@@ -998,14 +999,21 @@ class C_MCTS(Base_MCTS):
                     ),
                 )
 
-        # max_approximation value_mode: drive BOTH expansion ordering and leaf
-        # rollout with the goal-backtrack group selector. Build the scoring
-        # adapter lazily; auto-enable progressive widening so the max-approx
-        # ranking actually governs which actions get expanded (otherwise the
-        # default 'avg' path ignores _allowed_actions_for_uct).
+        # max_approximation value_mode: LAZY expansion. A node's value is the PTRPG
+        # heuristic computed on arrival; its goal-backtrack expansion ranking is
+        # computed (and cached) only the first time UCT descends it, then children
+        # are revealed best-first via progressive widening. Build the scoring
+        # adapter lazily; auto-enable progressive widening so the ranking governs
+        # which actions get expanded (the default 'avg' path ignores it otherwise).
         self._max_approx_adapter = None
         self._max_approx_scores_cache = {}
-        self._max_approx_abs_cache = {}
+        if _uses_max_approximation_value_mode(value_mode):
+            # Progressive widening drives the lazy reveal: UCT considers only the
+            # top-ranked actions, widening as the node is visited. This is also
+            # what makes ranking lazy — _allowed_actions_for_uct (hence the
+            # ranking eval) runs only when UCT actually descends the node.
+            if self._uct_filter_mode is None:
+                self._uct_filter_mode = 'pw'
 
         self._next_option_a_node_id = 1
         if selection_type == "max":
@@ -1017,6 +1025,19 @@ class C_MCTS(Base_MCTS):
         snode, _ = create_snode(root_state, 0, stn,
                                 previous_chosen_action_node=previous_chosen_action_node)
         self.set_root_node(root_node if root_node is not None else snode)
+
+        # First-node guard: expansion needs the node to know where to expand, so
+        # the root must have its goal-backtrack ranking before any selection runs.
+        # Pre-compute (and cache) it here so the lazy reveal is always well defined
+        # — even for a 0-iteration search and even though the root has no parent
+        # STN (current_time falls back to self._stn). Every other node is ranked
+        # lazily on first descent.
+        if (
+            _uses_max_approximation_value_mode(value_mode)
+            and self.root_node is not None
+            and self.root_node.possible_actions
+        ):
+            self._max_approx_action_scores(self.root_node)
 
     def _assign_option_a_node_id(self, snode, parent_snode=None):
         if not hasattr(self, "_next_option_a_node_id"):
@@ -1108,7 +1129,9 @@ class C_MCTS(Base_MCTS):
 
     def _max_approx_action_scores(self, snode):
         """Per-action goal-backtrack marginal lift from this node's state, cached
-        per node. Used to rank/widen expansion toward high-contribution actions."""
+        per node. Computed LAZILY: only the first time UCT descends this node
+        (via _allowed_actions_for_uct), never for un-expanded frontier leaves.
+        Used to rank/widen expansion toward high-contribution actions."""
         key = id(snode)
         cached = self._max_approx_scores_cache.get(key)
         if cached is not None:
@@ -1119,82 +1142,15 @@ class C_MCTS(Base_MCTS):
         base_facts = set(getattr(snode.state, "predicates", snode.state))
         base = adapter.eval_facts(base_facts, current_time, remaining)
         scores = {}
-        abs_vals = {}
         for action in snode.possible_actions:
             adds = adapter.action_add_facts(action)
             if not adds:
                 scores[action] = 0.0
-                abs_vals[action] = base
                 continue
             lifted = adapter.eval_facts(base_facts | set(adds), current_time, remaining)
             scores[action] = lifted - base
-            abs_vals[action] = lifted
         self._max_approx_scores_cache[key] = scores
-        self._max_approx_abs_cache[key] = abs_vals
         return scores
-
-    def _max_approx_action_abs(self, snode):
-        """Absolute head-start PTRPG per action (eval of state ∪ add(a)), computed
-        in the same pass as the marginals. Reused to seed expanded children so we
-        never recompute or discard the group evaluations."""
-        key = id(snode)
-        if key not in self._max_approx_abs_cache:
-            self._max_approx_action_scores(snode)
-        return self._max_approx_abs_cache[key]
-
-    def _create_snode_max_approx(self, snode):
-        """max_approximation expansion: rank this node's children by goal-backtrack
-        marginal, expand the top-k AT ONCE, and seed each child with the head-start
-        PTRPG value already computed during ranking — no per-child rollout, and no
-        discarded group evaluations. Node value = best child (selection_max style).
-        """
-        scores = self._max_approx_action_scores(snode)   # marginals (also caches abs)
-        abs_vals = self._max_approx_action_abs(snode)     # reused head-start PTRPG
-        ranked = sorted(
-            snode.children.keys(),
-            key=lambda a: (-scores.get(a, 0.0), self._action_rank_key(a)),
-        )
-        chosen = ranked if self.k >= len(ranked) else ranked[: self.k]
-        best = -math.inf
-        for action in chosen:
-            terminal, next_state, reward = self.mdp.step(snode.state, action)
-            reward = self._terminal_backup_reward(terminal, next_state, reward)
-            if not terminal:
-                reward += self.mdp.discount_factor * float(abs_vals.get(action, 0.0))
-            snode.children[action].update(reward)
-            if reward > best:
-                best = reward
-        if best == -math.inf:
-            best = self._depth_cutoff_value(snode)
-        snode.update(best)
-        return snode, best
-
-    def _max_approx_rollout_value(self, snode) -> float:
-        """Leaf value = success of a max_approximation greedy-set rollout to a
-        terminal/deadline state from this leaf (1.0 if goal reached in time)."""
-        if snode.parent is None:
-            return self.heuristic(snode)
-        from unified_planning.engines.solvers.greedy_parallel import (
-            simulate_greedy_mdp_until_terminal,
-        )
-
-        anode = snode.parent
-        args = getattr(up, "args", None)
-        value, _ = simulate_greedy_mdp_until_terminal(
-            mdp=self.mdp,
-            state=snode.state,
-            stn=anode.stn,
-            previous_action_node=anode.STNNode,
-            heuristic_name=self.heuristic_name,
-            temporal_heuristic_depth=self.temporal_heuristic_depth,
-            temporal_heuristic_strategy=self.temporal_heuristic_strategy,
-            selection_type="max_approximation",
-            max_approx_alpha=float(getattr(args, "max_approx_alpha", 1.0)),
-            max_approx_num_samples=int(getattr(args, "max_approx_num_samples", 2)),
-            max_approx_seed=getattr(args, "max_approx_seed", None),
-            max_time_slices=max(1, min(int(self.search_depth), 90)),
-        )
-        return float(value)
 
     def _fixed_tail_action_leaf_value(
         self,
@@ -1538,8 +1494,6 @@ class C_MCTS(Base_MCTS):
         return self._leaf_rollout_value_from_anode(snode.state, snode.parent)
 
     def _depth_cutoff_value(self, snode: "up.engines.C_Snode"):
-        if self._uses_max_approximation():
-            return self._max_approx_rollout_value(snode)
         if self._uses_ptrpg_guided_rollout():
             return self._leaf_rollout_value(snode)
         if self._uses_fixed_tail_max_init():
@@ -2079,8 +2033,6 @@ class C_MCTS(Base_MCTS):
          In this approach k children of snode are evaluated and the initiate value of snode is set to maximum value."""
         snode = up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent,
                                    previous_chosen_action_node)
-        if self._uses_max_approximation():
-            return self._create_snode_max_approx(snode)
         best = -math.inf
 
         actions_idx = list(range(len(snode.children)))
