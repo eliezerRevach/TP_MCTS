@@ -206,7 +206,10 @@ def _normalize_max_approximation_selection(selection_type, value_mode):
     ordinary 'avg' UCT selection underneath. Returns (selection_type, value_mode).
     """
     if selection_type == "max_approximation":
-        return "avg", "max_approximation"
+        # Use the 'max' variant: it expands the top-k children at once and seeds
+        # each with its value (no single-child progressive widening), which is
+        # where the goal-backtrack group scores are reused instead of discarded.
+        return "max", "max_approximation"
     return selection_type, value_mode
 
 
@@ -660,9 +663,10 @@ class Base_MCTS:
         """
         start_time = time.time()
         current_time = time.time()
-        # max_approximation is a value_mode under the hood; run 'avg' selection.
+        # max_approximation is a value_mode under the hood; run 'max' selection
+        # (expand-top-k-and-seed), which is where the group scores are reused.
         if selection_type == "max_approximation":
-            selection_type = "avg"
+            selection_type = "max"
         i = 0
         if hasattr(self, "_ptrpg_rollout_debug_done"):
             self._ptrpg_rollout_debug_done = False
@@ -1001,9 +1005,7 @@ class C_MCTS(Base_MCTS):
         # default 'avg' path ignores _allowed_actions_for_uct).
         self._max_approx_adapter = None
         self._max_approx_scores_cache = {}
-        if _uses_max_approximation_value_mode(value_mode):
-            if self._uct_filter_mode is None:
-                self._uct_filter_mode = 'pw'
+        self._max_approx_abs_cache = {}
 
         self._next_option_a_node_id = 1
         if selection_type == "max":
@@ -1117,15 +1119,55 @@ class C_MCTS(Base_MCTS):
         base_facts = set(getattr(snode.state, "predicates", snode.state))
         base = adapter.eval_facts(base_facts, current_time, remaining)
         scores = {}
+        abs_vals = {}
         for action in snode.possible_actions:
             adds = adapter.action_add_facts(action)
             if not adds:
                 scores[action] = 0.0
+                abs_vals[action] = base
                 continue
             lifted = adapter.eval_facts(base_facts | set(adds), current_time, remaining)
             scores[action] = lifted - base
+            abs_vals[action] = lifted
         self._max_approx_scores_cache[key] = scores
+        self._max_approx_abs_cache[key] = abs_vals
         return scores
+
+    def _max_approx_action_abs(self, snode):
+        """Absolute head-start PTRPG per action (eval of state ∪ add(a)), computed
+        in the same pass as the marginals. Reused to seed expanded children so we
+        never recompute or discard the group evaluations."""
+        key = id(snode)
+        if key not in self._max_approx_abs_cache:
+            self._max_approx_action_scores(snode)
+        return self._max_approx_abs_cache[key]
+
+    def _create_snode_max_approx(self, snode):
+        """max_approximation expansion: rank this node's children by goal-backtrack
+        marginal, expand the top-k AT ONCE, and seed each child with the head-start
+        PTRPG value already computed during ranking — no per-child rollout, and no
+        discarded group evaluations. Node value = best child (selection_max style).
+        """
+        scores = self._max_approx_action_scores(snode)   # marginals (also caches abs)
+        abs_vals = self._max_approx_action_abs(snode)     # reused head-start PTRPG
+        ranked = sorted(
+            snode.children.keys(),
+            key=lambda a: (-scores.get(a, 0.0), self._action_rank_key(a)),
+        )
+        chosen = ranked if self.k >= len(ranked) else ranked[: self.k]
+        best = -math.inf
+        for action in chosen:
+            terminal, next_state, reward = self.mdp.step(snode.state, action)
+            reward = self._terminal_backup_reward(terminal, next_state, reward)
+            if not terminal:
+                reward += self.mdp.discount_factor * float(abs_vals.get(action, 0.0))
+            snode.children[action].update(reward)
+            if reward > best:
+                best = reward
+        if best == -math.inf:
+            best = self._depth_cutoff_value(snode)
+        snode.update(best)
+        return snode, best
 
     def _max_approx_rollout_value(self, snode) -> float:
         """Leaf value = success of a max_approximation greedy-set rollout to a
@@ -2037,6 +2079,8 @@ class C_MCTS(Base_MCTS):
          In this approach k children of snode are evaluated and the initiate value of snode is set to maximum value."""
         snode = up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent,
                                    previous_chosen_action_node)
+        if self._uses_max_approximation():
+            return self._create_snode_max_approx(snode)
         best = -math.inf
 
         actions_idx = list(range(len(snode.children)))

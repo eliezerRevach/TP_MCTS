@@ -684,10 +684,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     apply_heuristic_alias_overrides(args)
     # selection_type='max_approximation' is the single switch: enable the
-    # max_approximation value_mode and run 'avg' UCT selection underneath
-    # (mirrors run_domain / greedy_parallel). Overrides any --value_mode.
+    # max_approximation value_mode and use the 'max' variant (expand top-k and
+    # seed each child with the reused goal-backtrack PTRPG). Mirrors C_MCTS /
+    # run_domain normalization. Overrides any --value_mode.
     if args.selection_type == "max_approximation":
-        args.selection_type = "avg"
+        args.selection_type = "max"
         args.value_mode = "max_approximation"
     configure_ptrpg_rollout_cli(args)
     configure_fixed_tail_cli(args)
