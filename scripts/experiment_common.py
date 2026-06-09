@@ -338,6 +338,9 @@ def run_domain_subprocess(
     max_approx_seed: int | None = None,
     max_approx_debug: bool = False,
     and_gamma_rollout_calibration: bool = False,
+    pdb_num_patterns: int | None = None,
+    pdb_max_facts_per_pattern: int | None = None,
+    pdb_expansion_policy: str | None = None,
     rollout_aligned_h: int | None = None,
     rollout_aligned_redo: int | None = None,
     rollout_aligned_policy: str | None = None,
@@ -401,6 +404,12 @@ def run_domain_subprocess(
         cmd.append("--max-approx-debug")
     if and_gamma_rollout_calibration:
         cmd.append("--and-gamma-rollout-calibration")
+    if pdb_num_patterns is not None:
+        cmd.extend(["--pdb-num-patterns", str(pdb_num_patterns)])
+    if pdb_max_facts_per_pattern is not None:
+        cmd.extend(["--pdb-max-facts-per-pattern", str(pdb_max_facts_per_pattern)])
+    if pdb_expansion_policy is not None:
+        cmd.extend(["--pdb-expansion-policy", str(pdb_expansion_policy)])
     if rollout_aligned_h is not None:
         cmd.extend(["--rollout-aligned-h", str(rollout_aligned_h)])
     if rollout_aligned_redo is not None:

@@ -414,6 +414,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "baseline_survival_and_gamma AND-layer gamma factors (default off)."
         ),
     )
+    # baseline_pdb: horizon-indexed Pattern Database AND-layer correction.
+    p.add_argument(
+        "--pdb-num-patterns",
+        type=int,
+        default=None,
+        help="Forwarded to run_domain: baseline_pdb number of goal-directed patterns.",
+    )
+    p.add_argument(
+        "--pdb-max-facts-per-pattern",
+        type=int,
+        default=None,
+        help="Forwarded to run_domain: baseline_pdb max facts per pattern.",
+    )
+    p.add_argument(
+        "--pdb-expansion-policy",
+        type=str,
+        default=None,
+        choices=["max_prob", "random"],
+        help="Forwarded to run_domain: baseline_pdb pattern-growth policy.",
+    )
     # Rollout-aligned common-horizon PTRPG (strategies 14/15/16).
     p.add_argument("--rollout-aligned-h", type=int, default=None,
                    help="Forwarded to run_domain: common suffix horizon H (sweep 5/10/15/20).")
@@ -477,6 +497,9 @@ def run_experiment(
     resolution_forced_minimum: bool = False,
     resolution_reference_t: int | None = None,
     and_gamma_rollout_calibration: bool = False,
+    pdb_num_patterns: int | None = None,
+    pdb_max_facts_per_pattern: int | None = None,
+    pdb_expansion_policy: str | None = None,
     rollout_aligned_h: int | None = None,
     rollout_aligned_redo: int | None = None,
     rollout_aligned_policy: str | None = None,
@@ -571,6 +594,9 @@ def run_experiment(
         resolution_forced_minimum=resolution_forced_minimum,
         resolution_reference_t=resolution_reference_t,
         and_gamma_rollout_calibration=and_gamma_rollout_calibration,
+        pdb_num_patterns=pdb_num_patterns,
+        pdb_max_facts_per_pattern=pdb_max_facts_per_pattern,
+        pdb_expansion_policy=pdb_expansion_policy,
         rollout_aligned_h=rollout_aligned_h,
         rollout_aligned_redo=rollout_aligned_redo,
         rollout_aligned_policy=rollout_aligned_policy,
@@ -716,6 +742,9 @@ def main(argv: list[str] | None = None) -> None:
                 resolution_forced_minimum=args.resolution_forced_minimum,
                 resolution_reference_t=args.resolution_reference_t,
                 and_gamma_rollout_calibration=args.and_gamma_rollout_calibration,
+                pdb_num_patterns=args.pdb_num_patterns,
+                pdb_max_facts_per_pattern=args.pdb_max_facts_per_pattern,
+                pdb_expansion_policy=args.pdb_expansion_policy,
                 rollout_aligned_h=args.rollout_aligned_h,
                 rollout_aligned_redo=args.rollout_aligned_redo,
                 rollout_aligned_policy=args.rollout_aligned_policy,

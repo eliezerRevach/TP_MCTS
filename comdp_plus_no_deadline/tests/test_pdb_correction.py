@@ -295,9 +295,10 @@ class TestHeuristicIntegration(unittest.TestCase):
             goal_facts={"goal"},
         )
 
-    def test_unattached_matches_baseline(self):
+    def test_autobuild_disabled_matches_baseline(self):
         heuristic = self._heuristic()
-        # With no correction attached, baseline_pdb == baseline.
+        # Opt out of the lazy auto-build -> baseline_pdb degrades to baseline.
+        heuristic._PDB_AUTOBUILD = False
         pdb_score = heuristic.heuristic_score(
             {"seed"}, {"goal"}, fixed_depth=5, strategy="baseline_pdb"
         )
@@ -305,8 +306,20 @@ class TestHeuristicIntegration(unittest.TestCase):
             {"seed"}, {"goal"}, fixed_depth=5, strategy="baseline"
         )
         self.assertAlmostEqual(pdb_score, base_score)
+        self.assertIsNone(heuristic._pdb_correction)
 
-    def test_pdb_used_and_reaches_goal(self):
+    def test_autobuild_uses_pdb(self):
+        heuristic = self._heuristic()
+        # Default behaviour: selecting baseline_pdb lazily builds + uses a PDB,
+        # no explicit build_pdb_correction() call required.
+        score = heuristic.heuristic_score(
+            {"seed"}, {"goal"}, fixed_depth=6, strategy="baseline_pdb"
+        )
+        self.assertGreater(score, 0.0)
+        self.assertIsNotNone(heuristic._pdb_correction)
+        self.assertGreater(heuristic._pdb_correction.stats()["pdb_used"], 0)
+
+    def test_explicit_build_takes_precedence(self):
         heuristic = self._heuristic()
         correction = heuristic.build_pdb_correction(
             {"goal"}, num_patterns=2, max_facts_per_pattern=4, expansion_policy="max_prob"
@@ -316,9 +329,23 @@ class TestHeuristicIntegration(unittest.TestCase):
         )
         # goal is reachable (seed -> a, c -> goal) within the horizon.
         self.assertGreater(score, 0.0)
-        stats = correction.stats()
-        # The PDB must have been consulted for at least one action's preconditions.
-        self.assertGreater(stats["pdb_used"], 0)
+        # The explicitly attached correction is the one consulted.
+        self.assertIs(heuristic._pdb_correction, correction)
+        self.assertGreater(correction.stats()["pdb_used"], 0)
+
+    def test_class_level_pdb_config_is_read(self):
+        # run_domain.py sets these class attrs from the CLI; confirm they flow
+        # into the lazily auto-built correction.
+        heuristic = self._heuristic()
+        heuristic._PDB_NUM_PATTERNS = 1
+        heuristic._PDB_MAX_FACTS_PER_PATTERN = 2
+        heuristic._PDB_EXPANSION_POLICY = "max_prob"
+        heuristic.heuristic_score(
+            {"seed"}, {"goal"}, fixed_depth=6, strategy="baseline_pdb"
+        )
+        stats = heuristic._pdb_correction.stats()
+        self.assertLessEqual(stats["num_patterns"], 1)
+        self.assertTrue(all(s <= 2 for s in stats["pattern_sizes"]))
 
 
 if __name__ == "__main__":

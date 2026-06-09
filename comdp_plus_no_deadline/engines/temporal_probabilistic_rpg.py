@@ -241,6 +241,18 @@ class TemporalProbabilisticRPGHeuristic:
     # 0.35 keeps a safe margin while still steering toward the laggard goal.
     _MEANVAR_ALPHA: float = 0.35
 
+    # ---- baseline_pdb configuration (class-level, override before construction
+    # or set once from a CLI front-end like run_domain.py). When the
+    # baseline_pdb strategy runs with no PDB explicitly attached and
+    # _PDB_AUTOBUILD is True, the heuristic lazily generates goal-directed
+    # patterns from its own goal facts and attaches the resulting PDBCorrection
+    # exactly once. These mirror the PDB_* knobs exposed in experiments.ipynb.
+    _PDB_AUTOBUILD: bool = True
+    _PDB_NUM_PATTERNS: int = 4
+    _PDB_MAX_FACTS_PER_PATTERN: int = 4
+    _PDB_EXPANSION_POLICY: str = "max_prob"
+    _PDB_SEED: Optional[int] = None
+
     def __init__(
         self,
         actions: Sequence[object],
@@ -288,6 +300,8 @@ class TemporalProbabilisticRPGHeuristic:
         # build_pdb_correction(...) is called; baseline_pdb degrades to plain
         # baseline while unset.
         self._pdb_correction: Optional[PDBCorrection] = None
+        # Guard so the lazy auto-build is attempted at most once per instance.
+        self._pdb_autobuild_attempted: bool = False
         # AND-layer gamma correction (baseline_survival_and_gamma). Config is
         # overridable per-instance before the first query; everything else is
         # built lazily once on first use.
@@ -934,6 +948,32 @@ class TemporalProbabilisticRPGHeuristic:
         self.attach_pdb_correction(correction)
         return correction
 
+    def _ensure_pdb_correction(self) -> Optional[PDBCorrection]:
+        """Return the attached PDB correction, lazily auto-building one for the
+        ``baseline_pdb`` strategy when none was attached explicitly.
+
+        Auto-build is gated by the class flag ``_PDB_AUTOBUILD`` and requires
+        known goal facts; it runs at most once per instance and degrades to the
+        independence product (plain baseline) when disabled or when there are no
+        goal facts to grow patterns from. Does NOT clear the query cache (it runs
+        inside a propagation), unlike the public ``attach_pdb_correction``."""
+        if self._pdb_correction is not None:
+            return self._pdb_correction
+        if self._pdb_autobuild_attempted or not self._PDB_AUTOBUILD:
+            return self._pdb_correction
+        self._pdb_autobuild_attempted = True
+        if not self._goal_facts:
+            return None
+        self._pdb_correction = PDBCorrection.from_actions(
+            self._actions,
+            goal_facts=self._goal_facts,
+            num_patterns=int(self._PDB_NUM_PATTERNS),
+            max_facts_per_pattern=int(self._PDB_MAX_FACTS_PER_PATTERN),
+            expansion_policy=str(self._PDB_EXPANSION_POLICY),
+            seed=self._PDB_SEED,
+        )
+        return self._pdb_correction
+
     def action_add_facts(self, name: str) -> frozenset:
         """
         DP-relevant add facts of an action, keyed by action name.
@@ -1187,7 +1227,7 @@ class TemporalProbabilisticRPGHeuristic:
         state_facts = _extract_state_facts(state)
         depth = max(0, int(fixed_depth))
         facts = self._facts.union(state_facts)
-        correction = self._pdb_correction
+        correction = self._ensure_pdb_correction()
 
         probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
             t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
