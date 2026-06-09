@@ -24,6 +24,7 @@ from comdp_plus_no_deadline.engines.and_gamma import (
     build_components,
     build_structural_context,
 )
+from comdp_plus_no_deadline.engines.pdb_correction import PDBCorrection
 
 
 Fact = Hashable
@@ -282,6 +283,11 @@ class TemporalProbabilisticRPGHeuristic:
         self._survival_table_built: bool = False
         self._survival_del_prob_by_name: Dict[str, Dict[Fact, float]] = {}
         self._survival_facts_with_deleters: Set[Fact] = set()
+        # Horizon-indexed PDB correction for the AND/precondition layer
+        # (strategy "baseline_pdb"). None until attach_pdb_correction(...) or
+        # build_pdb_correction(...) is called; baseline_pdb degrades to plain
+        # baseline while unset.
+        self._pdb_correction: Optional[PDBCorrection] = None
         # AND-layer gamma correction (baseline_survival_and_gamma). Config is
         # overridable per-instance before the first query; everything else is
         # built lazily once on first use.
@@ -467,6 +473,15 @@ class TemporalProbabilisticRPGHeuristic:
             result = self._heuristic_propagate_fast_atom_cache(
                 state=state,
                 goal_facts=goal_facts,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_pdb":
+            result = self._heuristic_propagate_baseline_pdb(
+                state=state,
                 fixed_depth=fixed_depth,
                 start_time=start_time,
                 debug=debug,
@@ -825,6 +840,7 @@ class TemporalProbabilisticRPGHeuristic:
 
     _FORWARD_STRATEGIES_WITH_ACTION_SUPPORT = frozenset({
         "baseline",
+        "baseline_pdb",
         "baseline_cached",
         "baseline_survival",
         "baseline_survival_meanvar",
@@ -887,6 +903,36 @@ class TemporalProbabilisticRPGHeuristic:
         """Relaxed action mutex for parallel set construction (not admissible)."""
         self._ensure_unbiased_structural_extracted()
         return self._unbiased_actions_are_mutex(name_a, name_b)
+
+    def attach_pdb_correction(self, correction: Optional[PDBCorrection]) -> None:
+        """Attach (or clear) a pre-built PDB correction for the ``baseline_pdb``
+        strategy. Resets the query cache so attaching takes effect immediately."""
+        self._pdb_correction = correction
+        self._query_cache.clear()
+
+    def build_pdb_correction(
+        self,
+        goal_facts: Optional[Iterable[Fact]] = None,
+        *,
+        num_patterns: int = 4,
+        max_facts_per_pattern: int = 4,
+        expansion_policy: str = "max_prob",
+        seed: Optional[int] = None,
+    ) -> PDBCorrection:
+        """Generate goal-directed patterns, build their PDBs, and attach the
+        result. Returns the :class:`PDBCorrection` so callers can read its
+        ``stats()`` / ``log_summary()`` afterwards."""
+        goals = list(goal_facts) if goal_facts is not None else list(self._goal_facts)
+        correction = PDBCorrection.from_actions(
+            self._actions,
+            goal_facts=goals,
+            num_patterns=num_patterns,
+            max_facts_per_pattern=max_facts_per_pattern,
+            expansion_policy=expansion_policy,
+            seed=seed,
+        )
+        self.attach_pdb_correction(correction)
+        return correction
 
     def action_add_facts(self, name: str) -> frozenset:
         """
@@ -1053,6 +1099,7 @@ class TemporalProbabilisticRPGHeuristic:
             value = "baseline"
         valid = {
             "baseline",
+            "baseline_pdb",
             "baseline_cached",
             "baseline_survival",
             "baseline_survival_meanvar",
@@ -1069,7 +1116,7 @@ class TemporalProbabilisticRPGHeuristic:
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_cached, baseline_survival, "
+                "Supported strategies: baseline, baseline_pdb, baseline_cached, baseline_survival, "
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "baseline_survival_resolution, "
                 "atom_half_split, "
@@ -1111,6 +1158,162 @@ class TemporalProbabilisticRPGHeuristic:
                 dirty.add(dependent)
                 queue.append(dependent)
         return dirty
+
+    def _heuristic_propagate_baseline_pdb(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """Forward baseline DP with the AND/precondition layer tightened by a
+        horizon-indexed PDB.
+
+        Identical to the plain baseline forward DP except that the precondition
+        support R_t(a) = P(pre(a) jointly true by layer t) is taken from a
+        pattern database when one covers ``pre(a)``:
+
+            R_t(a) = V_P[ alpha_P(current_state), horizon=t ]   (target = pre(a))
+
+        instead of the independence product ``prod_f P_t(f)``. ``alpha_P`` is the
+        projection of the node's (layer-0) state and ``horizon = t`` is the number
+        of layers available to make the preconditions jointly true. Actions whose
+        preconditions are not covered by any pattern fall back to the product,
+        and with no correction attached this reduces exactly to ``baseline``.
+
+        The OR/fact layer keeps the existing noisy-OR (delete/survival decay is
+        out of scope for this prototype).
+        """
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+        correction = self._pdb_correction
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        pending_successes: Dict[Tuple[int, Fact], List[float]] = {}
+        fact_support_cache: Dict[Tuple[Fact, int], float] = {}
+        action_support_cache: Dict[Tuple[str, int], float] = {}
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        traces: List[TemporalLayerTrace] = []
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
+
+        def fact_support(fact: Fact, layer: int) -> float:
+            nonlocal fact_cache_hits
+            key = (fact, layer)
+            if key in fact_support_cache:
+                fact_cache_hits += 1
+                return fact_support_cache[key]
+            value = _clamp_probability(probabilities_by_layer[layer].get(fact, 0.0))
+            fact_support_cache[key] = value
+            return value
+
+        for layer in range(depth + 1):
+            if layer > 0:
+                for fact in facts:
+                    probabilities_by_layer[layer][fact] = max(
+                        probabilities_by_layer[layer][fact],
+                        probabilities_by_layer[layer - 1][fact],
+                    )
+
+            arrivals: Dict[Fact, float] = {}
+            for fact in facts:
+                successes = pending_successes.get((layer, fact), [])
+                if not successes:
+                    continue
+                arrival_hazard = _clamp_probability(1.0 - prod(1.0 - s for s in successes))
+                current = probabilities_by_layer[layer][fact]
+                updated = _clamp_probability(current + (1.0 - current) * arrival_hazard)
+                probabilities_by_layer[layer][fact] = max(current, updated)
+                arrivals[fact] = arrival_hazard
+                fact_support_cache[(fact, layer)] = probabilities_by_layer[layer][fact]
+
+            if layer == depth:
+                if debug:
+                    traces.append(
+                        TemporalLayerTrace(
+                            layer=layer,
+                            fact_probabilities=dict(probabilities_by_layer[layer]),
+                            arrivals=arrivals,
+                        )
+                    )
+                break
+
+            action_support: Dict[str, float] = {}
+            for action_model in self._action_models:
+                support_key = (action_model.name, layer)
+                if support_key in action_support_cache:
+                    action_support_value = action_support_cache[support_key]
+                    action_cache_hits += 1
+                else:
+                    def _independence_estimate(
+                        _model=action_model, _layer=layer
+                    ) -> float:
+                        probs = {
+                            f: fact_support(f, _layer) for f in _model.preconditions
+                        }
+                        return compute_precondition_support(
+                            _model.preconditions, probs, strict=True
+                        )
+
+                    if correction is not None and action_model.preconditions:
+                        # alpha_P(current_state) with horizon = layers available.
+                        action_support_value = correction.applicability(
+                            state_facts,
+                            action_model.preconditions,
+                            layer,
+                            _independence_estimate,
+                        )
+                    else:
+                        action_support_value = _independence_estimate()
+                    action_support_cache[support_key] = action_support_value
+
+                action_support[action_model.name] = action_support_value
+                if action_support_value <= 0.0:
+                    continue
+
+                arrival_layer = layer + action_model.effect_delay_steps
+                if arrival_layer > depth:
+                    continue
+                for fact, add_prob in action_model.add_probabilities.items():
+                    success = _clamp_probability(action_support_value * add_prob)
+                    pending_successes.setdefault((arrival_layer, fact), []).append(success)
+
+            action_support_by_layer[layer] = dict(action_support)
+
+            if debug:
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=layer,
+                        fact_probabilities=dict(probabilities_by_layer[layer]),
+                        action_support=action_support,
+                        arrivals=arrivals,
+                    )
+                )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+            action_support_by_layer=action_support_by_layer,
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
 
     def _heuristic_propagate_baseline_cached(
         self,

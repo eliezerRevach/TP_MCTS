@@ -39,6 +39,18 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_cached",
         "label": "baseline_cached",
     },
+    # Forward baseline DP whose AND/precondition layer is tightened by a
+    # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
+    # layer t) from a per-pattern backward DP (max over projected actions),
+    # replacing the independence product prod_f P_t(f). Falls back to the product
+    # when no pattern covers pre(a); degrades to plain baseline when no PDB is
+    # attached. No survival/delete decay, no resolution shrinking. Configured by
+    # the --pdb-* CLI knobs (num patterns / max facts per pattern / growth policy).
+    "baseline_pdb": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_pdb",
+        "label": "baseline_pdb",
+    },
     # Delete/survival-aware baseline: forward DP with a per-step survival factor
     # S_t(f) so deletable facts (e.g. free(m)) decay below 1 instead of being
     # pinned at 1. NOT monotone, NOT admissible.
