@@ -27,7 +27,9 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "21": "frontier_aligned_option_a_survival",
         "22": "frontier_aligned_option_a_resolution",
         "23": "baseline_time_to_goal",
+        "24": "baseline_pdb",
         "baseline": "baseline",
+        "baseline_pdb": "baseline_pdb",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
         "baseline_cached": "baseline_cached",
@@ -72,7 +74,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "20|frontier_aligned_option_a, "
             "21|frontier_aligned_option_a_survival, "
             "22|frontier_aligned_option_a_resolution, "
-            "23|baseline_time_to_goal"
+            "23|baseline_time_to_goal, "
+            "24|baseline_pdb"
         )
     return aliases[normalized]
 
@@ -240,6 +243,29 @@ parser.add_argument(
         'baseline_survival_and_gamma: enable lazy rollout calibration of the '
         'AND-layer gamma factors (default off = static gamma table).'
     ),
+)
+
+# baseline_pdb: horizon-indexed Pattern Database AND-layer correction knobs.
+parser.add_argument(
+    '--pdb-num-patterns',
+    dest='pdb_num_patterns',
+    default=4,
+    type=int,
+    help='baseline_pdb: number of goal-directed patterns to build (default 4).',
+)
+parser.add_argument(
+    '--pdb-max-facts-per-pattern',
+    dest='pdb_max_facts_per_pattern',
+    default=4,
+    type=int,
+    help='baseline_pdb: max facts per pattern; PDB DP cost grows with this (default 4).',
+)
+parser.add_argument(
+    '--pdb-expansion-policy',
+    dest='pdb_expansion_policy',
+    default='max_prob',
+    choices=['max_prob', 'random'],
+    help='baseline_pdb: pattern-growth achiever choice (default max_prob).',
 )
 
 # Rollout-aligned common-horizon PTRPG (strategies 14/15/16). These wrap the
