@@ -76,6 +76,10 @@ def print_stats():
         print(f'Resolution alpha = {getattr(up.args, "resolution_alpha", 2.0)}')
         print(f'Resolution forced_minimum = {getattr(up.args, "resolution_forced_minimum", False)}')
         print(f'Resolution reference_t = {getattr(up.args, "resolution_reference_t", None)}')
+    if up.args.temporal_heuristic_strategy == "baseline_pdb":
+        print(f'PDB num_patterns = {getattr(up.args, "pdb_num_patterns", 4)}')
+        print(f'PDB max_facts_per_pattern = {getattr(up.args, "pdb_max_facts_per_pattern", 4)}')
+        print(f'PDB expansion_policy = {getattr(up.args, "pdb_expansion_policy", "max_prob")}')
     print(f'Value Mode = {up.args.value_mode}')
     if up.args.selection_type == 'max_approximation':
         print(f'Max approx alpha = {getattr(up.args, "max_approx_alpha", 1.5)}')
@@ -105,6 +109,34 @@ def set_seed():
     np.random.seed(up.args.seed)
 
 
+def _apply_pdb_config():
+    """Push the baseline_pdb CLI knobs onto the heuristic's class-level config.
+
+    The TemporalProbabilisticRPGHeuristic is constructed deep inside the solvers
+    (mcts / greedy_parallel) via .from_problem(...); it reads these class attrs
+    when it lazily auto-builds the PDB for the baseline_pdb strategy, so setting
+    them here once per process configures every instance without touching the
+    solver construction sites."""
+    if up.args.temporal_heuristic_strategy != "baseline_pdb":
+        return
+    from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
+        TemporalProbabilisticRPGHeuristic,
+    )
+
+    TemporalProbabilisticRPGHeuristic._PDB_AUTOBUILD = True
+    TemporalProbabilisticRPGHeuristic._PDB_NUM_PATTERNS = int(
+        getattr(up.args, "pdb_num_patterns", 4)
+    )
+    TemporalProbabilisticRPGHeuristic._PDB_MAX_FACTS_PER_PATTERN = int(
+        getattr(up.args, "pdb_max_facts_per_pattern", 4)
+    )
+    TemporalProbabilisticRPGHeuristic._PDB_EXPANSION_POLICY = str(
+        getattr(up.args, "pdb_expansion_policy", "max_prob")
+    )
+    # Make pattern generation reproducible across runs of the same config.
+    TemporalProbabilisticRPGHeuristic._PDB_SEED = up.args.seed
+
+
 def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
                 selection_type='avg', k=10, heuristic_name='trpg', temporal_heuristic_depth=25,
                 temporal_heuristic_strategy='baseline', tree_depth=3, value_mode='tp_mcts'):
@@ -114,6 +146,7 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
     assert domain in domains
     print_stats()
     set_seed()
+    _apply_pdb_config()
     start_time = time.time()
 
     model = domains[domain](kind=domain_type, deadline=deadline, object_amount=object_amount, garbage_amount=garbage_amount)
@@ -200,6 +233,7 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
     assert domain in domains
     print_stats()
     set_seed()
+    _apply_pdb_config()
 
     # create the pickle file name associated with the domain
     file_name = './pickle_domains/' + domains_files[domain]
