@@ -26,7 +26,7 @@ from comdp_plus_no_deadline.engines.pdb_correction import (
     build_pdb_actions,
     generate_patterns,
     grow_pattern,
-)
+)  # noqa: F401  (PDBOutcome used by concurrency tests)
 
 
 @dataclass(frozen=True)
@@ -190,6 +190,117 @@ class TestDoorChainPatternGrowth(unittest.TestCase):
         self.assertEqual(pattern, frozenset({"outside", "door_open"}))
 
 
+class TestConcurrentDurations(unittest.TestCase):
+    """Concurrent durative semantics: independent durative actions overlap
+    instead of serializing their durations."""
+
+    @staticmethod
+    def _two_independent(dur1, dur2, p1=0.8, p2=0.8):
+        a1 = PDBAction(
+            "A1", frozenset(),
+            (PDBOutcome(p1, frozenset({"f1"}), frozenset()),
+             PDBOutcome(1 - p1, frozenset(), frozenset())),
+            duration=dur1,
+        )
+        a2 = PDBAction(
+            "A2", frozenset(),
+            (PDBOutcome(p2, frozenset({"f2"}), frozenset()),
+             PDBOutcome(1 - p2, frozenset(), frozenset())),
+            duration=dur2,
+        )
+        return PatternDatabase(frozenset({"f1", "f2"}), [a1, a2])
+
+    def test_equal_durations_single_attempt(self):
+        # A1, A2 both dur 2, single attempt each -> exactly succ(A1)*succ(A2).
+        # The OLD sequential DP returned 0 here (2+2 > 2); concurrency fixes it.
+        pdb = self._two_independent(2, 2, 0.8, 0.8)
+        self.assertAlmostEqual(pdb.value(set(), 1.9, target={"f1", "f2"}), 0.0)
+        self.assertAlmostEqual(pdb.value(set(), 2, target={"f1", "f2"}), 0.64)
+
+    def test_fractional_durations_overlap(self):
+        # The brief's example: A1 dur 0.5 -> f1, A2 dur 2 -> f2, both at root.
+        # Old code returned 0 at H=2 (0.5 + 2 = 2.5 > 2); concurrency returns > 0.
+        pdb = self._two_independent(0.5, 2, 0.8, 0.8)
+        # Before A2 can finish (it needs 2.0) the target is unreachable.
+        self.assertAlmostEqual(pdb.value(set(), 1.5, target={"f1", "f2"}), 0.0)
+        v = pdb.value(set(), 2, target={"f1", "f2"})
+        self.assertGreater(v, 0.0)                       # the bug fix
+        self.assertGreaterEqual(v + 1e-9, 0.64)          # >= succ(A1)*succ(A2)
+        # A1 (dur 0.5) gets up to 4 attempts by t=2, A2 one: 0.8*(1-0.2**4).
+        self.assertAlmostEqual(v, 0.8 * (1 - 0.2 ** 4))
+
+    def test_independent_not_serialized_vs_old(self):
+        # Regression-direction: value must not DECREASE vs the old sequential
+        # model. Old returned 0 at t=2; new returns > 0.
+        pdb = self._two_independent(2, 2)
+        self.assertGreater(pdb.value(set(), 2, target={"f1", "f2"}), 0.0)
+
+
+def _sequential_value(pdb, state, H, target):
+    """Reference: the OLD sequential DP (one action per recursion, charging its
+    full duration). Used to assert the concurrent DP never returns LESS."""
+    pattern = pdb.pattern
+    actions = pdb.projected_actions
+    target_proj = frozenset(target) & pattern
+    memo = {}
+
+    def rec(x, h):
+        if target_proj <= x:
+            return 1.0
+        if h <= 0:
+            return 0.0
+        k = (x, h)
+        if k in memo:
+            return memo[k]
+        best = 0.0
+        for a in actions:
+            if not a.preconditions <= x:
+                continue
+            dur = max(1, int(a.duration))
+            if dur > h:
+                continue
+            v = 0.0
+            for o in a.outcomes:
+                v += o.probability * rec((x | o.add) - o.delete, h - dur)
+            best = max(best, v)
+        memo[k] = best
+        return best
+
+    return rec(frozenset(state) & pattern, int(H))
+
+
+class TestNoValueDecrease(unittest.TestCase):
+    """Concurrency only ADDS parallelism/retries, so the new DP must never score
+    below the old sequential DP (add-only instances, integer durations)."""
+
+    def test_random_instances_no_decrease(self):
+        import random as _random
+
+        rng = _random.Random(7)
+        facts = ["p", "q", "r", "s"]
+        for _ in range(60):
+            n_actions = rng.randint(1, 4)
+            actions = []
+            for i in range(n_actions):
+                pre = frozenset(rng.sample(facts, rng.randint(0, 2)))
+                add = frozenset(rng.sample(facts, rng.randint(1, 2)))
+                p = rng.choice([0.5, 0.8, 1.0])
+                outcomes = (PDBOutcome(p, add, frozenset()),)
+                if p < 1.0:
+                    outcomes = outcomes + (PDBOutcome(1 - p, frozenset(), frozenset()),)
+                actions.append(PDBAction(f"a{i}", pre, outcomes, duration=rng.randint(1, 3)))
+            pattern = frozenset(facts)
+            pdb = PatternDatabase(pattern, actions)
+            target = frozenset(rng.sample(facts, rng.randint(1, 2)))
+            for H in range(0, 7):
+                new_v = pdb.value(set(), H, target=target)
+                old_v = _sequential_value(pdb, set(), H, target)
+                self.assertGreaterEqual(
+                    new_v + 1e-9, old_v,
+                    msg=f"decrease: H={H} new={new_v} old={old_v} target={target}",
+                )
+
+
 class TestAdapterJointOutcomes(unittest.TestCase):
     def test_residual_no_op_outcome(self):
         # Only the 0.8 branch is listed; the adapter must add a 0.2 no-op.
@@ -233,13 +344,11 @@ class TestPDBCorrectionManager(unittest.TestCase):
             called["n"] += 1
             return 0.123
 
-        # The PDB DP is sequential (one action per layer): make_a then make_c
-        # need TWO steps, so {a, c} is NOT jointly reachable in horizon 1 even
-        # though each is reachable in one step. This is exactly the correlation
-        # the independence product misses.
-        self.assertAlmostEqual(corr.applicability({"seed"}, {"a", "c"}, 1, fallback), 0.0)
-        self.assertAlmostEqual(corr.applicability({"seed"}, {"a", "c"}, 2, fallback), 1.0)
-        self.assertEqual(corr.pdb_used, 2)
+        # Concurrent durative semantics: make_a and make_c (independent, both
+        # pre {seed}) start together at t=0 and both finish at t=1, so {a, c} is
+        # jointly reachable within horizon 1 (the old sequential DP needed 2).
+        self.assertAlmostEqual(corr.applicability({"seed"}, {"a", "c"}, 1, fallback), 1.0)
+        self.assertEqual(corr.pdb_used, 1)
         self.assertEqual(corr.fallbacks, 0)
         self.assertEqual(called["n"], 0)
 

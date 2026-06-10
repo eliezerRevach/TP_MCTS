@@ -252,6 +252,16 @@ class TemporalProbabilisticRPGHeuristic:
     _PDB_MAX_FACTS_PER_PATTERN: int = 4
     _PDB_EXPANSION_POLICY: str = "max_prob"
     _PDB_SEED: Optional[int] = None
+    # Seed each pattern from a single goal fact (essential for multi-goal
+    # problems; seeding from the whole goal set covers no action's preconditions).
+    _PDB_SEED_PER_GOAL: bool = True
+    # Keep growing each pattern past max-facts until it covers at least one
+    # action's full precondition set, so the PDB is actually used (not just
+    # falling back). Bounded by _PDB_COVER_HARD_CAP.
+    _PDB_GROW_UNTIL_COVERS: bool = False
+    _PDB_COVER_HARD_CAP: Optional[int] = None
+    # Most-recently auto-built correction (for end-of-run stats reporting).
+    _LAST_PDB_CORRECTION: Optional[PDBCorrection] = None
 
     def __init__(
         self,
@@ -932,6 +942,9 @@ class TemporalProbabilisticRPGHeuristic:
         max_facts_per_pattern: int = 4,
         expansion_policy: str = "max_prob",
         seed: Optional[int] = None,
+        seed_per_goal: bool = True,
+        grow_until_covers: bool = False,
+        cover_hard_cap: Optional[int] = None,
     ) -> PDBCorrection:
         """Generate goal-directed patterns, build their PDBs, and attach the
         result. Returns the :class:`PDBCorrection` so callers can read its
@@ -944,6 +957,9 @@ class TemporalProbabilisticRPGHeuristic:
             max_facts_per_pattern=max_facts_per_pattern,
             expansion_policy=expansion_policy,
             seed=seed,
+            seed_per_goal=seed_per_goal,
+            grow_until_covers=grow_until_covers,
+            cover_hard_cap=cover_hard_cap,
         )
         self.attach_pdb_correction(correction)
         return correction
@@ -971,7 +987,12 @@ class TemporalProbabilisticRPGHeuristic:
             max_facts_per_pattern=int(self._PDB_MAX_FACTS_PER_PATTERN),
             expansion_policy=str(self._PDB_EXPANSION_POLICY),
             seed=self._PDB_SEED,
+            seed_per_goal=bool(self._PDB_SEED_PER_GOAL),
+            grow_until_covers=bool(self._PDB_GROW_UNTIL_COVERS),
+            cover_hard_cap=self._PDB_COVER_HARD_CAP,
         )
+        # Record on the class so a CLI front-end can dump usage stats post-run.
+        type(self)._LAST_PDB_CORRECTION = self._pdb_correction
         return self._pdb_correction
 
     def action_add_facts(self, name: str) -> frozenset:

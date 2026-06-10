@@ -35,27 +35,45 @@ satisfiable):
     del(o_P)          = del(o) ∩ P
     duration, outcome probabilities                    unchanged
 
-Backward DP (horizon-indexed)
------------------------------
+Time-indexed concurrent DP
+--------------------------
 
-    V_P(x, H) = best abstract probability of reaching projected target G_P from
-                abstract state x within remaining horizon H
+    V_P(x, H) = best abstract probability that target G_P holds within remaining
+                time H, starting from abstract state x.
 
-    if x satisfies G_P:        V_P(x, H) = 1
-    elif H <= 0:               V_P(x, H) = 0
-    else:                      V_P(x, H) = max over applicable projected actions a:
-                                   sum over outcomes o: p(o) * V_P(next_P(x,a,o), H - dur(a))
+Durative actions run **concurrently** (this matches the forward temporal
+heuristic — an action finishing at time t started at t − dur(a), and actions
+overlap freely). The DP is therefore *event-driven over in-flight actions*
+rather than charging each action's duration sequentially:
 
-An action is *applicable* in the abstract iff ``pre(a_P) ⊆ x``. It can only be
-*used* when it can also finish within the horizon (``dur(a) <= H``); otherwise
-its effect would land past the deadline and is not counted. The target ``G_P``
-is supplied per query (the goal for reachability, or ``pre(a)`` for the
-applicability correction), so a single pattern database can answer both.
+    V_P(x, inflight, H):
+        if G_P ⊆ x:                        return 1
+        start every *useful* applicable action (pre ⊆ x, adds a fact ∉ x, not
+            already running) — concurrency = start a set, not one action
+        if nothing in flight:              return 0
+        δ = time to the next completion (min remaining over in-flight)
+        if δ > H:                          return 0      # next effect past deadline
+        for the action(s) completing at δ:
+            expectation over their joint outcomes o:
+                x' = (x ∪ add(o)) − del(o)
+                accumulate p(o) · V_P(x', still_running, H − δ)
+
+"Useful" (adds a not-yet-achieved fact) is what makes the stochastic chain
+reproduce the sequential values: once an achiever's fact is obtained it is no
+longer restarted, so there is no spurious retry boost; but in a *fail* branch
+the achiever stays useful and is retried, and *independent* achievers overlap
+instead of serializing. Durations may be fractional (e.g. 0.5); they are
+rescaled to an integer grid internally. The target ``G_P`` is supplied per query
+(the goal for reachability, or ``pre(a)`` for the applicability correction).
 """
 
 from __future__ import annotations
 
+import itertools
+import math
 from dataclasses import dataclass
+from fractions import Fraction
+from math import lcm
 from types import SimpleNamespace
 from typing import (
     Callable,
@@ -109,7 +127,7 @@ class PDBAction:
     name: str
     preconditions: frozenset
     outcomes: Tuple[PDBOutcome, ...]
-    duration: int = 1
+    duration: float = 1  # may be fractional (e.g. 0.5); rescaled to a grid in the DP
 
     def project(self, pattern: Pattern) -> "PDBAction":
         return PDBAction(
@@ -277,8 +295,24 @@ class PatternDatabase:
             if any(o.add or o.delete for o in pa.outcomes):
                 projected.append(pa)
         self.projected_actions: List[PDBAction] = projected
-        # memo key -> value; key = (target_proj, x, H)
-        self._memo: Dict[Tuple[Pattern, Pattern, int], float] = {}
+        # Precompute, per action, the union of facts it can add (the "useful"
+        # test) and an integer-rescaled duration (durations may be fractional).
+        self._action_add_facts: List[frozenset] = [
+            a.add_facts() for a in projected
+        ]
+        fractions = [
+            (Fraction(a.duration).limit_denominator(1000) if a.duration > 0 else Fraction(1))
+            for a in projected
+        ]
+        scale = 1
+        for fr in fractions:
+            scale = lcm(scale, fr.denominator)
+        self._time_scale: int = scale
+        self._scaled_durations: List[int] = [
+            max(1, int(fr * scale)) for fr in fractions
+        ]
+        # memo key -> value; key = (target_proj, achieved_set, in_flight, H)
+        self._memo: Dict[Tuple, float] = {}
         self.cache_hits: int = 0
         self.cache_misses: int = 0
 
@@ -286,45 +320,80 @@ class PatternDatabase:
     def table_size(self) -> int:
         return len(self._memo)
 
-    def value(self, state_facts: Iterable[Fact], horizon: int, target: Iterable[Fact]) -> float:
-        """V_P(alpha_P(state), horizon) for projected ``target``."""
+    def value(self, state_facts: Iterable[Fact], horizon: float, target: Iterable[Fact]) -> float:
+        """V_P(alpha_P(state), horizon) for projected ``target`` under concurrent
+        durative semantics. ``horizon`` may be fractional."""
         x = frozenset(state_facts) & self.pattern
         target_proj = frozenset(target) & self.pattern
-        return self._value(target_proj, x, int(horizon))
+        # Rescale the horizon to the integer grid. Floor (not round): time below
+        # the next grid point is unusable, so 1.9 with unit durations -> 1.
+        scaled_h = int(math.floor(float(horizon) * self._time_scale + 1e-9))
+        return self._value(target_proj, x, frozenset(), scaled_h)
 
-    def _value(self, target_proj: Pattern, x: Pattern, horizon: int) -> float:
-        if target_proj <= x:
+    def _value(
+        self,
+        target_proj: Pattern,
+        achieved: Pattern,
+        in_flight: frozenset,
+        horizon: int,
+    ) -> float:
+        # ``in_flight`` = frozenset of (action_index, remaining_scaled_time).
+        if target_proj <= achieved:
             return 1.0
-        if horizon <= 0:
-            return 0.0
-        key = (target_proj, x, horizon)
+        key = (target_proj, achieved, in_flight, horizon)
         cached = self._memo.get(key)
         if cached is not None:
             self.cache_hits += 1
             return cached
         self.cache_misses += 1
 
-        best = 0.0
-        for action in self.projected_actions:
-            if not action.preconditions <= x:
+        # Start every USEFUL applicable action that is not already running
+        # (concurrency: start a *set* of actions, not a single one).
+        running_ids = {idx for idx, _ in in_flight}
+        scheduled = set(in_flight)
+        for idx, action in enumerate(self.projected_actions):
+            if idx in running_ids:
                 continue
-            duration = max(1, action.duration)
-            # Effect must land within the horizon, else it is past the deadline.
-            if duration > horizon:
+            if not action.preconditions <= achieved:
                 continue
-            value = 0.0
-            for outcome in action.outcomes:
-                next_x = (x | outcome.add) - outcome.delete
-                value += outcome.probability * self._value(
-                    target_proj, next_x, horizon - duration
-                )
-            if value > best:
-                best = value
-                if best >= 1.0 - 1e-12:
-                    best = 1.0
-                    break
-        self._memo[key] = best
-        return best
+            if not (self._action_add_facts[idx] - achieved):
+                continue  # adds nothing new -> not useful, would only spin
+            scheduled.add((idx, self._scaled_durations[idx]))
+
+        if not scheduled:
+            self._memo[key] = 0.0
+            return 0.0
+
+        delta = min(remaining for _, remaining in scheduled)
+        if delta > horizon:
+            # The next effect lands past the deadline -> nothing more achievable.
+            self._memo[key] = 0.0
+            return 0.0
+
+        completing = [idx for idx, remaining in scheduled if remaining == delta]
+        still_running = frozenset(
+            (idx, remaining - delta) for idx, remaining in scheduled if remaining > delta
+        )
+
+        # Expectation over the joint outcomes of all actions completing now.
+        value = 0.0
+        outcome_lists = [self.projected_actions[idx].outcomes for idx in completing]
+        for combo in itertools.product(*outcome_lists):
+            prob = 1.0
+            next_achieved = set(achieved)
+            for outcome in combo:
+                prob *= outcome.probability
+                next_achieved |= outcome.add
+                next_achieved -= outcome.delete
+            if prob <= 0.0:
+                continue
+            value += prob * self._value(
+                target_proj, frozenset(next_achieved), still_running, horizon - delta
+            )
+
+        value = _clamp_probability(value)
+        self._memo[key] = value
+        return value
 
 
 # ---------------------------------------------------------------------------
@@ -345,18 +414,29 @@ def _build_achiever_index(
     return index
 
 
+def pattern_covers_any_action(pattern: Iterable[Fact], pdb_actions: Sequence[PDBAction]) -> bool:
+    """True if some action's whole precondition set is inside ``pattern`` — i.e.
+    the manager would actually *use* this pattern for that action (else it falls
+    back to the independence product). A pattern that covers nothing is dead
+    weight, which is exactly what made ``pdb_used == 0`` on nasa_rover."""
+    pat = frozenset(pattern)
+    return any(a.preconditions and a.preconditions <= pat for a in pdb_actions)
+
+
 def grow_pattern(
-    goal_facts: Iterable[Fact],
+    seed_facts: Iterable[Fact],
     pdb_actions: Sequence[PDBAction],
     *,
     max_facts_per_pattern: int,
     expansion_policy: str = "random",
     rng=None,
     achiever_index: Optional[Dict[Fact, List[Tuple[PDBAction, float]]]] = None,
+    stop_test: Optional[Callable[[frozenset], bool]] = None,
+    hard_cap: Optional[int] = None,
 ) -> Pattern:
-    """Grow one pattern from the goal facts.
+    """Grow one pattern from ``seed_facts`` (typically a single goal fact).
 
-    1. Start from the goal facts.
+    1. Start from the seed facts.
     2. Find (fact-in-pattern, achiever, missing-precondition) options.
     3. Choose an achiever:
          * ``random``   — uniformly among options (using ``rng``).
@@ -364,6 +444,10 @@ def grow_pattern(
     4. Add one missing precondition fact of that achiever to the pattern.
     5. Repeat until ``max_facts_per_pattern`` is reached or no useful fact
        remains.
+
+    If ``stop_test`` is given the pattern keeps growing *past*
+    ``max_facts_per_pattern`` until ``stop_test(pattern)`` is satisfied (e.g.
+    "covers at least one action's preconditions"), bounded by ``hard_cap``.
 
     NOTE: the random / max_prob choice only steers *growth*. The PDB DP itself
     always maximises over *all* projected actions.
@@ -375,12 +459,21 @@ def grow_pattern(
     if achiever_index is None:
         achiever_index = _build_achiever_index(pdb_actions)
 
-    pattern: Set[Fact] = set(goal_facts)
+    pattern: Set[Fact] = set(seed_facts)
     policy = (expansion_policy or "random").strip().lower()
     if policy not in ("random", "max_prob"):
         raise ValueError(f"Unknown expansion_policy: {expansion_policy!r}")
 
-    while len(pattern) < max_facts_per_pattern:
+    cap = max_facts_per_pattern
+    if stop_test is not None and hard_cap is not None:
+        cap = max(max_facts_per_pattern, int(hard_cap))
+
+    while len(pattern) < cap:
+        # Stop once we are at least max_facts AND (no stop test, or it passes).
+        if len(pattern) >= max_facts_per_pattern:
+            if stop_test is None or stop_test(frozenset(pattern)):
+                break
+
         # (fact, achiever_action, achievement_prob, missing_preconditions)
         options: List[Tuple[Fact, PDBAction, float, frozenset]] = []
         for fact in pattern:
@@ -417,32 +510,63 @@ def generate_patterns(
     max_facts_per_pattern: int,
     expansion_policy: str = "random",
     seed: Optional[int] = None,
+    seed_per_goal: bool = True,
+    grow_until_covers: bool = False,
+    cover_hard_cap: Optional[int] = None,
 ) -> List[Pattern]:
-    """Generate up to ``num_patterns`` distinct goal-directed patterns."""
+    """Generate up to ``num_patterns`` distinct patterns.
+
+    ``seed_per_goal`` (default): seed each pattern from a *single* goal fact,
+    cycling through the goals. This is essential for multi-goal problems — a
+    pattern seeded from the *whole* goal set starts already large and cannot
+    grow along any one goal's achiever chain, so it covers no action's
+    preconditions (this is what produced ``pdb_used == 0`` on nasa_rover).
+
+    ``grow_until_covers``: keep growing each pattern past
+    ``max_facts_per_pattern`` until it covers at least one action's full
+    precondition set (bounded by ``cover_hard_cap``), guaranteeing the pattern
+    is actually usable by the manager rather than a dead fallback.
+    """
     import random as _random
 
     rng = _random.Random(seed)
     achiever_index = _build_achiever_index(pdb_actions)
-    goal_facts = frozenset(goal_facts)
+    goals = list(dict.fromkeys(goal_facts))  # de-dup, keep order
+
+    stop_test = None
+    if grow_until_covers:
+        stop_test = lambda pat: pattern_covers_any_action(pat, pdb_actions)
+        if cover_hard_cap is None:
+            cover_hard_cap = max_facts_per_pattern + 12
+
+    def seeds_for(i: int) -> Iterable[Fact]:
+        if seed_per_goal and goals:
+            return {goals[i % len(goals)]}
+        return set(goals)
 
     patterns: List[Pattern] = []
     seen: Set[Pattern] = set()
-    # Allow a few extra attempts to collect distinct patterns under randomness.
     attempts = 0
-    max_attempts = max(num_patterns * 5, num_patterns + 5)
+    max_attempts = max(num_patterns * 5, num_patterns + 5, len(goals) + 5)
     while len(patterns) < num_patterns and attempts < max_attempts:
+        idx = attempts
         attempts += 1
         pattern = grow_pattern(
-            goal_facts,
+            seeds_for(idx),
             pdb_actions,
             max_facts_per_pattern=max_facts_per_pattern,
             expansion_policy=expansion_policy,
             rng=rng,
             achiever_index=achiever_index,
+            stop_test=stop_test,
+            hard_cap=cover_hard_cap,
         )
         if pattern in seen:
-            if expansion_policy == "max_prob":
-                # Deterministic: regenerating yields the same pattern; stop.
+            # Deterministic growth from the same seed repeats; with per-goal
+            # seeding we have already cycled all goals once we have one each.
+            if expansion_policy == "max_prob" and (
+                not seed_per_goal or len(patterns) >= len(goals)
+            ):
                 break
             continue
         seen.add(pattern)
@@ -489,6 +613,9 @@ class PDBCorrection:
         max_facts_per_pattern: int = 4,
         expansion_policy: str = "max_prob",
         seed: Optional[int] = None,
+        seed_per_goal: bool = True,
+        grow_until_covers: bool = False,
+        cover_hard_cap: Optional[int] = None,
     ) -> "PDBCorrection":
         pdb_actions = build_pdb_actions(actions)
         patterns = generate_patterns(
@@ -498,6 +625,9 @@ class PDBCorrection:
             max_facts_per_pattern=max_facts_per_pattern,
             expansion_policy=expansion_policy,
             seed=seed,
+            seed_per_goal=seed_per_goal,
+            grow_until_covers=grow_until_covers,
+            cover_hard_cap=cover_hard_cap,
         )
         return cls(patterns, pdb_actions)
 
