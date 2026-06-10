@@ -133,8 +133,34 @@ def _apply_pdb_config():
     TemporalProbabilisticRPGHeuristic._PDB_EXPANSION_POLICY = str(
         getattr(up.args, "pdb_expansion_policy", "max_prob")
     )
+    TemporalProbabilisticRPGHeuristic._PDB_SEED_PER_GOAL = bool(
+        getattr(up.args, "pdb_seed_per_goal", True)
+    )
+    TemporalProbabilisticRPGHeuristic._PDB_GROW_UNTIL_COVERS = bool(
+        getattr(up.args, "pdb_grow_until_covers", False)
+    )
+    TemporalProbabilisticRPGHeuristic._PDB_COVER_HARD_CAP = getattr(
+        up.args, "pdb_cover_hard_cap", None
+    )
     # Make pattern generation reproducible across runs of the same config.
     TemporalProbabilisticRPGHeuristic._PDB_SEED = up.args.seed
+    # Reset the last-correction handle so post-run stats reflect this run.
+    TemporalProbabilisticRPGHeuristic._LAST_PDB_CORRECTION = None
+
+
+def _report_pdb_stats():
+    """Print PDB pattern/usage stats after a baseline_pdb run."""
+    if up.args.temporal_heuristic_strategy != "baseline_pdb":
+        return
+    from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
+        TemporalProbabilisticRPGHeuristic,
+    )
+
+    correction = TemporalProbabilisticRPGHeuristic._LAST_PDB_CORRECTION
+    if correction is None:
+        print("[PDB] no correction was built (no goal facts / autobuild off).")
+        return
+    correction.log_summary()
 
 
 def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, exploration_constant, object_amount, garbage_amount,
@@ -201,6 +227,8 @@ def run_regular(domain, runs, domain_type, deadline, search_time, search_depth, 
     else:
         mcts_params = params + (value_mode, up.args.final_selection)
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.plan, mcts_params)
+
+    _report_pdb_stats()
 
 
 def create_combination_domain(domain, deadline, object_amount, garbage_amount):
@@ -318,6 +346,8 @@ def run_combination(domain, runs, solver, deadline, search_time, search_depth, e
         )
         mcts_params = params + (value_mode,)
         up.engines.solvers.evaluate.evaluation_loop(runs, up.engines.solvers.mcts.combination_plan, mcts_params)
+
+    _report_pdb_stats()
 
 
 

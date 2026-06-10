@@ -267,6 +267,30 @@ parser.add_argument(
     choices=['max_prob', 'random'],
     help='baseline_pdb: pattern-growth achiever choice (default max_prob).',
 )
+parser.add_argument(
+    '--pdb-no-seed-per-goal',
+    dest='pdb_seed_per_goal',
+    action='store_false',
+    default=True,
+    help='baseline_pdb: seed each pattern from the whole goal set instead of one '
+         'goal each (default: one per goal — required for coverage on multi-goal problems).',
+)
+parser.add_argument(
+    '--pdb-grow-until-covers',
+    dest='pdb_grow_until_covers',
+    action='store_true',
+    default=False,
+    help='baseline_pdb: keep growing each pattern past max-facts until it fully '
+         'covers at least one action (guarantees the pattern is actually used).',
+)
+parser.add_argument(
+    '--pdb-cover-hard-cap',
+    dest='pdb_cover_hard_cap',
+    default=None,
+    type=int,
+    help='baseline_pdb: max pattern size when --pdb-grow-until-covers is set '
+         '(default: max-facts + 12).',
+)
 
 # Rollout-aligned common-horizon PTRPG (strategies 14/15/16). These wrap the
 # underlying PTRPG suffix with a real prefix rollout up to the common horizon H.

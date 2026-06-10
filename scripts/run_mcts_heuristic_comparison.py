@@ -434,6 +434,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["max_prob", "random"],
         help="Forwarded to run_domain: baseline_pdb pattern-growth policy.",
     )
+    p.add_argument(
+        "--pdb-no-seed-per-goal",
+        dest="pdb_seed_per_goal",
+        action="store_false",
+        default=True,
+        help="Forwarded to run_domain: seed patterns from the whole goal set "
+             "(default: one pattern per goal).",
+    )
+    p.add_argument(
+        "--pdb-grow-until-covers",
+        action="store_true",
+        default=False,
+        help="Forwarded to run_domain: grow each pattern until it covers an action.",
+    )
+    p.add_argument(
+        "--pdb-cover-hard-cap",
+        type=int,
+        default=None,
+        help="Forwarded to run_domain: pattern-size cap for --pdb-grow-until-covers.",
+    )
     # Rollout-aligned common-horizon PTRPG (strategies 14/15/16).
     p.add_argument("--rollout-aligned-h", type=int, default=None,
                    help="Forwarded to run_domain: common suffix horizon H (sweep 5/10/15/20).")
@@ -500,6 +520,9 @@ def run_experiment(
     pdb_num_patterns: int | None = None,
     pdb_max_facts_per_pattern: int | None = None,
     pdb_expansion_policy: str | None = None,
+    pdb_seed_per_goal: bool = True,
+    pdb_grow_until_covers: bool = False,
+    pdb_cover_hard_cap: int | None = None,
     rollout_aligned_h: int | None = None,
     rollout_aligned_redo: int | None = None,
     rollout_aligned_policy: str | None = None,
@@ -597,6 +620,9 @@ def run_experiment(
         pdb_num_patterns=pdb_num_patterns,
         pdb_max_facts_per_pattern=pdb_max_facts_per_pattern,
         pdb_expansion_policy=pdb_expansion_policy,
+        pdb_seed_per_goal=pdb_seed_per_goal,
+        pdb_grow_until_covers=pdb_grow_until_covers,
+        pdb_cover_hard_cap=pdb_cover_hard_cap,
         rollout_aligned_h=rollout_aligned_h,
         rollout_aligned_redo=rollout_aligned_redo,
         rollout_aligned_policy=rollout_aligned_policy,
@@ -745,6 +771,9 @@ def main(argv: list[str] | None = None) -> None:
                 pdb_num_patterns=args.pdb_num_patterns,
                 pdb_max_facts_per_pattern=args.pdb_max_facts_per_pattern,
                 pdb_expansion_policy=args.pdb_expansion_policy,
+                pdb_seed_per_goal=args.pdb_seed_per_goal,
+                pdb_grow_until_covers=args.pdb_grow_until_covers,
+                pdb_cover_hard_cap=args.pdb_cover_hard_cap,
                 rollout_aligned_h=args.rollout_aligned_h,
                 rollout_aligned_redo=args.rollout_aligned_redo,
                 rollout_aligned_policy=args.rollout_aligned_policy,

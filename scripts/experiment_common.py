@@ -341,6 +341,9 @@ def run_domain_subprocess(
     pdb_num_patterns: int | None = None,
     pdb_max_facts_per_pattern: int | None = None,
     pdb_expansion_policy: str | None = None,
+    pdb_seed_per_goal: bool = True,
+    pdb_grow_until_covers: bool = False,
+    pdb_cover_hard_cap: int | None = None,
     rollout_aligned_h: int | None = None,
     rollout_aligned_redo: int | None = None,
     rollout_aligned_policy: str | None = None,
@@ -410,6 +413,12 @@ def run_domain_subprocess(
         cmd.extend(["--pdb-max-facts-per-pattern", str(pdb_max_facts_per_pattern)])
     if pdb_expansion_policy is not None:
         cmd.extend(["--pdb-expansion-policy", str(pdb_expansion_policy)])
+    if not pdb_seed_per_goal:
+        cmd.append("--pdb-no-seed-per-goal")
+    if pdb_grow_until_covers:
+        cmd.append("--pdb-grow-until-covers")
+    if pdb_cover_hard_cap is not None:
+        cmd.extend(["--pdb-cover-hard-cap", str(pdb_cover_hard_cap)])
     if rollout_aligned_h is not None:
         cmd.extend(["--rollout-aligned-h", str(rollout_aligned_h)])
     if rollout_aligned_redo is not None:
