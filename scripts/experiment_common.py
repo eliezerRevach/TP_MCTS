@@ -39,6 +39,24 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_cached",
         "label": "baseline_cached",
     },
+    # Admissible upper-bound PTRPG (PTRPG_Cleaned.docx). Same layered forward DP
+    # as baseline, but the AND/precondition layer uses the Frechet MIN bound
+    # R_t(a)=min_f P_t(f) (instead of the independence product) and the OR/fact
+    # layer uses the UNION bound H_t(f)=min(1,sum_e B_e) (instead of noisy-OR).
+    # Both are always-valid upper bounds (min>=prod, union>=noisy-OR), so the
+    # heuristic is VERY OPTIMISTIC but ADMISSIBLE — it never under-estimates
+    # reachability under the delete-relaxed temporal RPG envelope.
+    "baseline_admissible": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible",
+        "label": "baseline_admissible",
+    },
+    # Synonym: shorthand for baseline_admissible.
+    "admissible": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible",
+        "label": "baseline_admissible",
+    },
     # Forward baseline DP whose AND/precondition layer is tightened by a
     # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
     # layer t) from a per-pattern backward DP (max over projected actions),

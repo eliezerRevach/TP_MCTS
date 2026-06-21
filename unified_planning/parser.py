@@ -28,7 +28,9 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "22": "frontier_aligned_option_a_resolution",
         "23": "baseline_time_to_goal",
         "24": "baseline_pdb",
+        "25": "baseline_admissible",
         "baseline": "baseline",
+        "baseline_admissible": "baseline_admissible",
         "baseline_pdb": "baseline_pdb",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -75,7 +77,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "21|frontier_aligned_option_a_survival, "
             "22|frontier_aligned_option_a_resolution, "
             "23|baseline_time_to_goal, "
-            "24|baseline_pdb"
+            "24|baseline_pdb, "
+            "25|baseline_admissible"
         )
     return aliases[normalized]
 
@@ -197,7 +200,10 @@ parser.add_argument(
         'when no dependency is detected; NOT calibrated probability), '
         '12|atom_backtrack_exact_resolution_and_gamma (resolution backtrack with '
         'log-spaced/exponential-width layers + the same AND-layer gamma correction; '
-        'reduces to atom_backtrack_exact_resolution when no dependency is detected)'
+        'reduces to atom_backtrack_exact_resolution when no dependency is detected), '
+        '25|baseline_admissible (layered baseline with Frechet-min AND and union-bound '
+        'OR instead of the independence product / noisy-OR; very optimistic but '
+        'ADMISSIBLE upper bound)'
     ),
     nargs='?',
     default='baseline',

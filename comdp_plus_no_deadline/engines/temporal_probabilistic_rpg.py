@@ -25,6 +25,10 @@ from comdp_plus_no_deadline.engines.and_gamma import (
     build_structural_context,
 )
 from comdp_plus_no_deadline.engines.pdb_correction import PDBCorrection
+from comdp_plus_no_deadline.engines.admissible_temporal_rpg import (
+    admissible_and_support,
+    union_bound_or_hazard,
+)
 
 
 Fact = Hashable
@@ -505,6 +509,15 @@ class TemporalProbabilisticRPGHeuristic:
             return result
         if chosen_strategy == "baseline_pdb":
             result = self._heuristic_propagate_baseline_pdb(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_admissible":
+            result = self._heuristic_propagate_baseline_admissible(
                 state=state,
                 fixed_depth=fixed_depth,
                 start_time=start_time,
@@ -1160,6 +1173,7 @@ class TemporalProbabilisticRPGHeuristic:
             value = "baseline"
         valid = {
             "baseline",
+            "baseline_admissible",
             "baseline_pdb",
             "baseline_cached",
             "baseline_survival",
@@ -1177,7 +1191,7 @@ class TemporalProbabilisticRPGHeuristic:
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_pdb, baseline_cached, baseline_survival, "
+                "Supported strategies: baseline, baseline_admissible, baseline_pdb, baseline_cached, baseline_survival, "
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "baseline_survival_resolution, "
                 "atom_half_split, "
@@ -1332,6 +1346,152 @@ class TemporalProbabilisticRPGHeuristic:
                         )
                     else:
                         action_support_value = _independence_estimate()
+                    action_support_cache[support_key] = action_support_value
+
+                action_support[action_model.name] = action_support_value
+                if action_support_value <= 0.0:
+                    continue
+
+                arrival_layer = layer + action_model.effect_delay_steps
+                if arrival_layer > depth:
+                    continue
+                for fact, add_prob in action_model.add_probabilities.items():
+                    success = _clamp_probability(action_support_value * add_prob)
+                    pending_successes.setdefault((arrival_layer, fact), []).append(success)
+
+            action_support_by_layer[layer] = dict(action_support)
+
+            if debug:
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=layer,
+                        fact_probabilities=dict(probabilities_by_layer[layer]),
+                        action_support=action_support,
+                        arrivals=arrivals,
+                    )
+                )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+            action_support_by_layer=action_support_by_layer,
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def _heuristic_propagate_baseline_admissible(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """Admissible upper-bound forward DP (see ``admissible_temporal_rpg``).
+
+        Identical layered forward propagation to the plain ``baseline``, except
+        the two combination operators are replaced by their always-admissible
+        (looser, more optimistic) upper bounds:
+
+        - AND / precondition support uses the Frechet MIN bound
+          ``R_t(a) = min_{f in pre(a)} P_t(f)`` instead of the independence
+          product ``prod_f P_t(f)``.
+        - OR / arrival hazard uses the UNION bound
+          ``H_t(f) = min(1, sum_e B_e)`` instead of the noisy-OR
+          ``1 - prod_e (1 - B_e)``.
+
+        Both replacements only ever raise the estimate (``min >= prod`` and the
+        union bound ``>= noisy-OR``), so this is a strict upper bound relative to
+        baseline: VERY optimistic, but admissible under the delete-relaxed
+        temporal RPG envelope. The cumulative retry update ``g(p, h)`` and the
+        single-achiever contribution ``B_e = q_e * R_t(a)`` are unchanged.
+        """
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        pending_successes: Dict[Tuple[int, Fact], List[float]] = {}
+        fact_support_cache: Dict[Tuple[Fact, int], float] = {}
+        action_support_cache: Dict[Tuple[str, int], float] = {}
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        traces: List[TemporalLayerTrace] = []
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
+
+        def fact_support(fact: Fact, layer: int) -> float:
+            nonlocal fact_cache_hits
+            key = (fact, layer)
+            if key in fact_support_cache:
+                fact_cache_hits += 1
+                return fact_support_cache[key]
+            value = _clamp_probability(probabilities_by_layer[layer].get(fact, 0.0))
+            fact_support_cache[key] = value
+            return value
+
+        for layer in range(depth + 1):
+            if layer > 0:
+                for fact in facts:
+                    probabilities_by_layer[layer][fact] = max(
+                        probabilities_by_layer[layer][fact],
+                        probabilities_by_layer[layer - 1][fact],
+                    )
+
+            arrivals: Dict[Fact, float] = {}
+            for fact in facts:
+                successes = pending_successes.get((layer, fact), [])
+                if not successes:
+                    continue
+                # OR layer: union bound instead of noisy-OR.
+                arrival_hazard = union_bound_or_hazard(successes)
+                current = probabilities_by_layer[layer][fact]
+                updated = _clamp_probability(current + (1.0 - current) * arrival_hazard)
+                probabilities_by_layer[layer][fact] = max(current, updated)
+                arrivals[fact] = arrival_hazard
+                fact_support_cache[(fact, layer)] = probabilities_by_layer[layer][fact]
+
+            if layer == depth:
+                if debug:
+                    traces.append(
+                        TemporalLayerTrace(
+                            layer=layer,
+                            fact_probabilities=dict(probabilities_by_layer[layer]),
+                            arrivals=arrivals,
+                        )
+                    )
+                break
+
+            action_support: Dict[str, float] = {}
+            for action_model in self._action_models:
+                support_key = (action_model.name, layer)
+                if support_key in action_support_cache:
+                    action_support_value = action_support_cache[support_key]
+                    action_cache_hits += 1
+                else:
+                    # AND layer: Frechet min instead of the independence product.
+                    probs_for_preconditions = {
+                        fact: fact_support(fact, layer)
+                        for fact in action_model.preconditions
+                    }
+                    action_support_value = admissible_and_support(
+                        action_model.preconditions,
+                        probs_for_preconditions,
+                    )
                     action_support_cache[support_key] = action_support_value
 
                 action_support[action_model.name] = action_support_value
