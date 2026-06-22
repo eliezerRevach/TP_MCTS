@@ -29,8 +29,10 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "23": "baseline_time_to_goal",
         "24": "baseline_pdb",
         "25": "baseline_admissible",
+        "26": "baseline_admissible_lp",
         "baseline": "baseline",
         "baseline_admissible": "baseline_admissible",
+        "baseline_admissible_lp": "baseline_admissible_lp",
         "baseline_pdb": "baseline_pdb",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -78,7 +80,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "22|frontier_aligned_option_a_resolution, "
             "23|baseline_time_to_goal, "
             "24|baseline_pdb, "
-            "25|baseline_admissible"
+            "25|baseline_admissible, "
+            "26|baseline_admissible_lp"
         )
     return aliases[normalized]
 
@@ -203,7 +206,13 @@ parser.add_argument(
         'reduces to atom_backtrack_exact_resolution when no dependency is detected), '
         '25|baseline_admissible (layered baseline with Frechet-min AND and union-bound '
         'OR instead of the independence product / noisy-OR; very optimistic but '
-        'ADMISSIBLE upper bound)'
+        'ADMISSIBLE upper bound), '
+        '26|baseline_admissible_lp (baseline_admissible with the OR layer replaced by '
+        'the marginal-consistent LP bound: per arrival fact, max probability of the '
+        'OR-of-AND achiever formula over all local joints consistent with the stored '
+        'marginals; still ADMISSIBLE but tighter than the union bound when achievers '
+        'share preconditions; falls back to the union bound when |local facts| > '
+        'TP_MCTS_ADMISSIBLE_LP_MAX_LOCAL_FACTS)'
     ),
     nargs='?',
     default='baseline',

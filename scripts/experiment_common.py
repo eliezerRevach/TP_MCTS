@@ -57,6 +57,27 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_admissible",
         "label": "baseline_admissible",
     },
+    # baseline_admissible with the OR/fact layer tightened by the marginal-
+    # consistent LP bound (PTRPG_Cleaned.docx Section 9.3). Per arrival fact it
+    # solves max P(OR-of-AND achievers) over all local joint distributions
+    # consistent with the stored marginal upper bounds, instead of the capped
+    # union bound. Still ADMISSIBLE (the true local joint is feasible) but never
+    # looser than the union bound and strictly tighter when achievers share
+    # preconditions. Falls back to the union bound when the local fact set exceeds
+    # TP_MCTS_ADMISSIBLE_LP_MAX_LOCAL_FACTS (default 8). Knobs (env vars, set in
+    # the notebook config block): TP_MCTS_ADMISSIBLE_LP_MAX_LOCAL_FACTS,
+    # TP_MCTS_ADMISSIBLE_LP_VALUE_MODE ("union" safe default | "independent").
+    "baseline_admissible_lp": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_lp",
+        "label": "baseline_admissible_lp",
+    },
+    # Synonym: shorthand for baseline_admissible_lp.
+    "admissible_lp": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_lp",
+        "label": "baseline_admissible_lp",
+    },
     # Forward baseline DP whose AND/precondition layer is tightened by a
     # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
     # layer t) from a per-pattern backward DP (max over projected actions),

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from math import prod
 from types import SimpleNamespace
 import math
+import os
 import random
 import time
 from typing import Callable, Dict, Hashable, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple
@@ -29,9 +30,48 @@ from comdp_plus_no_deadline.engines.admissible_temporal_rpg import (
     admissible_and_support,
     union_bound_or_hazard,
 )
+from comdp_plus_no_deadline.engines.admissible_lp import (
+    DEFAULT_MAX_LOCAL_FACTS as _ADMISSIBLE_LP_DEFAULT_MAX_LOCAL_FACTS,
+    MarginalConsistentORBound,
+)
 
 
 Fact = Hashable
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int from the environment, falling back to ``default`` on error."""
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return int(default)
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _achievers_share_fact(records) -> bool:
+    """True iff a precondition fact appears in two distinct achiever records.
+
+    Records are ``(preconditions, q, firing_layer, B_e)`` tuples. Only when this
+    holds can the marginal-consistent LP improve on the capped union bound, so it
+    gates the (relatively expensive) LP solve in the admissible-LP strategy.
+    """
+    seen: Set[Fact] = set()
+    for pre, _q, _fl, _b in records:
+        for fact in pre:
+            if fact in seen:
+                return True
+            seen.add(fact)
+    return False
+
+
+def _env_str(name: str, default: str) -> str:
+    """Read a (lower-cased, stripped) string from the environment."""
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return str(raw).strip().lower()
 
 
 @dataclass(frozen=True)
@@ -316,6 +356,21 @@ class TemporalProbabilisticRPGHeuristic:
         self._pdb_correction: Optional[PDBCorrection] = None
         # Guard so the lazy auto-build is attempted at most once per instance.
         self._pdb_autobuild_attempted: bool = False
+        # Marginal-consistent LP OR-layer bound (strategy "baseline_admissible_lp").
+        # ``max_local_facts`` caps the 2^|U| world enumeration; above it the layer
+        # falls back to the union bound. ``value_mode`` is "union" (safe) or
+        # "independent" (tighter, assumes independent action noise). Both knobs
+        # are overridable per-instance and via env vars so the notebook config
+        # block can thread them through to the subprocess. The operator (with its
+        # formula-signature cache) is built lazily on first use.
+        self._admissible_lp_max_local_facts: int = _env_int(
+            "TP_MCTS_ADMISSIBLE_LP_MAX_LOCAL_FACTS",
+            _ADMISSIBLE_LP_DEFAULT_MAX_LOCAL_FACTS,
+        )
+        self._admissible_lp_value_mode: str = _env_str(
+            "TP_MCTS_ADMISSIBLE_LP_VALUE_MODE", "union"
+        )
+        self._admissible_lp_bound: Optional[MarginalConsistentORBound] = None
         # AND-layer gamma correction (baseline_survival_and_gamma). Config is
         # overridable per-instance before the first query; everything else is
         # built lazily once on first use.
@@ -518,6 +573,15 @@ class TemporalProbabilisticRPGHeuristic:
             return result
         if chosen_strategy == "baseline_admissible":
             result = self._heuristic_propagate_baseline_admissible(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_admissible_lp":
+            result = self._heuristic_propagate_baseline_admissible_lp(
                 state=state,
                 fixed_depth=fixed_depth,
                 start_time=start_time,
@@ -1174,6 +1238,7 @@ class TemporalProbabilisticRPGHeuristic:
         valid = {
             "baseline",
             "baseline_admissible",
+            "baseline_admissible_lp",
             "baseline_pdb",
             "baseline_cached",
             "baseline_survival",
@@ -1191,7 +1256,7 @@ class TemporalProbabilisticRPGHeuristic:
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_admissible, baseline_pdb, baseline_cached, baseline_survival, "
+                "Supported strategies: baseline, baseline_admissible, baseline_admissible_lp, baseline_pdb, baseline_cached, baseline_survival, "
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "baseline_survival_resolution, "
                 "atom_half_split, "
@@ -1504,6 +1569,202 @@ class TemporalProbabilisticRPGHeuristic:
                 for fact, add_prob in action_model.add_probabilities.items():
                     success = _clamp_probability(action_support_value * add_prob)
                     pending_successes.setdefault((arrival_layer, fact), []).append(success)
+
+            action_support_by_layer[layer] = dict(action_support)
+
+            if debug:
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=layer,
+                        fact_probabilities=dict(probabilities_by_layer[layer]),
+                        action_support=action_support,
+                        arrivals=arrivals,
+                    )
+                )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+            action_support_by_layer=action_support_by_layer,
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def _ensure_admissible_lp_bound(self) -> MarginalConsistentORBound:
+        """Lazily build the marginal-consistent OR-layer LP operator.
+
+        Re-reads the env-var overrides each time the operator is (re)built so a
+        notebook/CLI config change between heuristic instances takes effect; the
+        per-instance attributes win if explicitly set in code.
+        """
+        if self._admissible_lp_bound is None:
+            self._admissible_lp_bound = MarginalConsistentORBound(
+                max_local_facts=self._admissible_lp_max_local_facts,
+                value_mode=self._admissible_lp_value_mode,
+            )
+        return self._admissible_lp_bound
+
+    def _heuristic_propagate_baseline_admissible_lp(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """Admissible forward DP with the marginal-consistent LP OR-layer bound.
+
+        Identical layered propagation to ``baseline_admissible`` (Frechet-min AND
+        support, ``B_e = q_e * R_t(a)``, cumulative retry update ``g(p, h)``), but
+        the OR layer no longer combines the per-achiever contributions with the
+        capped union bound. Instead, for every fact arriving at a layer it solves
+        the local LP of doc Section 9.3:
+
+            H_f(t_i) = max over local joint distributions consistent with the
+                       stored marginals P(x_l) of the OR-of-AND achiever formula.
+
+        This is still an admissible upper bound (the true local joint is feasible)
+        but never looser than the union bound — strictly tighter when achievers
+        share preconditions. When a fact has more than
+        ``self._admissible_lp_max_local_facts`` distinct local facts (or SciPy is
+        unavailable), the layer falls back to the union bound, so this strategy is
+        always >= the true relaxed probability and <= ``baseline_admissible``.
+        """
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+        lp_bound = self._ensure_admissible_lp_bound()
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        # Per (arrival_layer, fact): the active achievers that land there, each as
+        # (preconditions, q_e, precondition marginals frozen at its firing layer).
+        # The marginals are captured when the achiever fires (start time
+        # s_e(t_i)), exactly where the Frechet support R_e was read, so the LP and
+        # the union-bound fallback see the same probabilities.
+        # (arrival_layer, fact) -> list of (preconditions, q, firing_layer, B_e).
+        pending_records: Dict[Tuple[int, Fact], List[Tuple[Tuple[Fact, ...], float, int, float]]] = {}
+        fact_support_cache: Dict[Tuple[Fact, int], float] = {}
+        action_support_cache: Dict[Tuple[str, int], float] = {}
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        lp_layer_count = 0
+        fallback_layer_count = 0
+        traces: List[TemporalLayerTrace] = []
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
+
+        def fact_support(fact: Fact, layer: int) -> float:
+            nonlocal fact_cache_hits
+            key = (fact, layer)
+            if key in fact_support_cache:
+                fact_cache_hits += 1
+                return fact_support_cache[key]
+            value = _clamp_probability(probabilities_by_layer[layer].get(fact, 0.0))
+            fact_support_cache[key] = value
+            return value
+
+        for layer in range(depth + 1):
+            if layer > 0:
+                for fact in facts:
+                    probabilities_by_layer[layer][fact] = max(
+                        probabilities_by_layer[layer][fact],
+                        probabilities_by_layer[layer - 1][fact],
+                    )
+
+            arrivals: Dict[Fact, float] = {}
+            for fact in facts:
+                records = pending_records.get((layer, fact))
+                if not records:
+                    continue
+                # OR layer: try the marginal-consistent LP, fall back to the
+                # union bound. The LP can only tighten the union bound when two
+                # distinct achievers share a precondition, so check that first
+                # (cheap) and read precondition marginals only then.
+                arrival_hazard = None
+                if len(records) > 1 and _achievers_share_fact(records):
+                    achievers = [(pre, q) for (pre, q, _fl, _b) in records]
+                    merged_marginals: Dict[Fact, float] = {}
+                    for pre, _q, firing_layer, _b in records:
+                        src = probabilities_by_layer[firing_layer]
+                        for f in pre:
+                            p = _clamp_probability(src.get(f, 0.0))
+                            if p > merged_marginals.get(f, 0.0):
+                                merged_marginals[f] = p
+                    arrival_hazard = lp_bound.or_hazard(achievers, merged_marginals)
+                if arrival_hazard is None:
+                    # Fallback: union bound over the precomputed B_e = q_e * R_e.
+                    arrival_hazard = union_bound_or_hazard(
+                        [b for (_pre, _q, _fl, b) in records]
+                    )
+                    fallback_layer_count += 1
+                else:
+                    lp_layer_count += 1
+                current = probabilities_by_layer[layer][fact]
+                updated = _clamp_probability(current + (1.0 - current) * arrival_hazard)
+                probabilities_by_layer[layer][fact] = max(current, updated)
+                arrivals[fact] = arrival_hazard
+                fact_support_cache[(fact, layer)] = probabilities_by_layer[layer][fact]
+
+            if layer == depth:
+                if debug:
+                    traces.append(
+                        TemporalLayerTrace(
+                            layer=layer,
+                            fact_probabilities=dict(probabilities_by_layer[layer]),
+                            arrivals=arrivals,
+                        )
+                    )
+                break
+
+            action_support: Dict[str, float] = {}
+            for action_model in self._action_models:
+                support_key = (action_model.name, layer)
+                if support_key in action_support_cache:
+                    action_support_value = action_support_cache[support_key]
+                    action_cache_hits += 1
+                else:
+                    # AND layer: Frechet min support (drives B_e and the fallback).
+                    action_support_value = admissible_and_support(
+                        action_model.preconditions,
+                        {fact: fact_support(fact, layer)
+                         for fact in action_model.preconditions},
+                    )
+                    action_support_cache[support_key] = action_support_value
+
+                action_support[action_model.name] = action_support_value
+                if action_support_value <= 0.0:
+                    continue
+
+                arrival_layer = layer + action_model.effect_delay_steps
+                if arrival_layer > depth:
+                    continue
+                # Record the achiever for the OR layer at its arrival. We keep the
+                # firing layer (so the LP can read the precondition marginals
+                # P(x_l) only when a shared precondition is actually present) and
+                # the scalar B_e = q * R_e for the cheap union-bound fast path.
+                precondition_tuple = tuple(action_model.preconditions)
+                for fact, add_prob in action_model.add_probabilities.items():
+                    q = _clamp_probability(add_prob)
+                    if q <= 0.0:
+                        continue
+                    b_e = _clamp_probability(q * action_support_value)
+                    pending_records.setdefault((arrival_layer, fact), []).append(
+                        (precondition_tuple, q, layer, b_e)
+                    )
 
             action_support_by_layer[layer] = dict(action_support)
 
