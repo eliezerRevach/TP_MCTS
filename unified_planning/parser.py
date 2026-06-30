@@ -30,9 +30,13 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "24": "baseline_pdb",
         "25": "baseline_admissible",
         "26": "baseline_admissible_lp",
+        "27": "baseline_admissible_kmutex",
+        "28": "baseline_admissible_paths",
         "baseline": "baseline",
         "baseline_admissible": "baseline_admissible",
         "baseline_admissible_lp": "baseline_admissible_lp",
+        "baseline_admissible_kmutex": "baseline_admissible_kmutex",
+        "baseline_admissible_paths": "baseline_admissible_paths",
         "baseline_pdb": "baseline_pdb",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -81,7 +85,9 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "23|baseline_time_to_goal, "
             "24|baseline_pdb, "
             "25|baseline_admissible, "
-            "26|baseline_admissible_lp"
+            "26|baseline_admissible_lp, "
+            "27|baseline_admissible_kmutex, "
+            "28|baseline_admissible_paths"
         )
     return aliases[normalized]
 
@@ -212,7 +218,18 @@ parser.add_argument(
         'OR-of-AND achiever formula over all local joints consistent with the stored '
         'marginals; still ADMISSIBLE but tighter than the union bound when achievers '
         'share preconditions; falls back to the union bound when |local facts| > '
-        'TP_MCTS_ADMISSIBLE_LP_MAX_LOCAL_FACTS)'
+        'TP_MCTS_ADMISSIBLE_LP_MAX_LOCAL_FACTS), '
+        '27|baseline_admissible_kmutex (baseline_admissible with the OR layer '
+        'tightened by a mutex-aware K-bounded bound: per arrival fact keep <= K '
+        'rows by certified action-mutex and aggregate sum(free rows)+max(mutex '
+        'clique); always <= the union bound, reduces to baseline_admissible when '
+        'no achievers are mutex; K via TP_MCTS_KMUTEX_K), '
+        '28|baseline_admissible_paths (temporal path-mutex tightening: carry <= K '
+        'timed achiever-paths per fact and combine by segment-overlap mutex -- '
+        'alternative paths sharing a mutex action in overlapping windows (incl. an '
+        'action mutex with itself when it occupies a resource) collapse via max '
+        'instead of summing as independent retries; an AND path is dropped when its '
+        'achievers cannot run in parallel; K via TP_MCTS_KMUTEX_K)'
     ),
     nargs='?',
     default='baseline',

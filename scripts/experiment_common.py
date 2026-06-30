@@ -78,6 +78,46 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_admissible_lp",
         "label": "baseline_admissible_lp",
     },
+    # baseline_admissible with the OR/fact layer tightened by a mutex-aware
+    # K-bounded bound. Per arrival fact the achiever contributions are bucketed
+    # into <= K rows by certified action-mutex; the hazard is
+    # sum(free rows) + max(surviving mutex clique) instead of the capped union
+    # bound. Always <= baseline_admissible (max <= sum), and reduces to it
+    # exactly when no two achievers landing at a cell are mutex. Headline metric:
+    # fraction of OR-nodes where a pure mutex clique of size >= 2 survived (best
+    # observed on machine_shop free(m), the exclusive-achiever case). Knob:
+    # TP_MCTS_KMUTEX_K (default 3); TP_MCTS_KMUTEX_DEBUG=1 prints surviving cliques.
+    "baseline_admissible_kmutex": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_kmutex",
+        "label": "baseline_admissible_kmutex",
+    },
+    # Synonym: shorthand for baseline_admissible_kmutex.
+    "admissible_kmutex": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_kmutex",
+        "label": "baseline_admissible_kmutex",
+    },
+    # baseline_admissible with a TEMPORAL path-mutex tightening. Instead of a
+    # scalar P_t(f), carries <= K timed achiever-paths per fact and combines them
+    # by segment-overlap mutex: two alternative paths that share a mutex action in
+    # overlapping time windows -- INCLUDING an action mutex with itself when it
+    # occupies a resource (deletes a precondition it needs, e.g. a car driving
+    # [0,15] and [5,20]) -- collapse via max instead of summing as independent
+    # retries; a conjunctive AND path is dropped when its chosen achievers cannot
+    # run in parallel ("at least one mutex breaks the parallel"). K via
+    # TP_MCTS_KMUTEX_K; headline metric via log_pathmutex_summary().
+    "baseline_admissible_paths": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_paths",
+        "label": "baseline_admissible_paths",
+    },
+    # Synonym: shorthand for baseline_admissible_paths.
+    "admissible_paths": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_paths",
+        "label": "baseline_admissible_paths",
+    },
     # Forward baseline DP whose AND/precondition layer is tightened by a
     # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
     # layer t) from a per-pattern backward DP (max over projected actions),

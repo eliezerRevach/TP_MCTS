@@ -34,6 +34,14 @@ from comdp_plus_no_deadline.engines.admissible_lp import (
     DEFAULT_MAX_LOCAL_FACTS as _ADMISSIBLE_LP_DEFAULT_MAX_LOCAL_FACTS,
     MarginalConsistentORBound,
 )
+from comdp_plus_no_deadline.engines.kmutex_or_bound import (
+    KMutexInstrumentation,
+    kmutex_or_hazard,
+)
+from comdp_plus_no_deadline.engines.path_mutex import (
+    PathMutexInstrumentation,
+    propagate_path_mutex,
+)
 
 
 Fact = Hashable
@@ -371,6 +379,37 @@ class TemporalProbabilisticRPGHeuristic:
             "TP_MCTS_ADMISSIBLE_LP_VALUE_MODE", "union"
         )
         self._admissible_lp_bound: Optional[MarginalConsistentORBound] = None
+        # Mutex-aware K-bounded OR-layer tightening (strategy
+        # "baseline_admissible_kmutex"). ``K`` caps the rows kept per fact-layer
+        # cell; small by design (2-4). Reuses the same structural action-mutex
+        # test as the unbiased strategy. The instrumentation accumulator records
+        # the headline survival metric (fraction of OR-nodes where a pure mutex
+        # clique of size >= 2 survived) across the whole search; call
+        # ``log_kmutex_summary()`` to read it. Env knobs let the notebook config
+        # block thread values into the run_domain subprocess.
+        self._kmutex_k: int = max(1, _env_int("TP_MCTS_KMUTEX_K", 3))
+        # Which action-mutex notion certifies a max-collapse:
+        #   "exec" (default): delete-interference + shared consumable precondition
+        #       only — "paths we can say FOR SURE are mutex" (cannot both execute
+        #       toward the fact). This is the principled choice: ``max`` over such
+        #       achievers stays a valid bound.
+        #   "all": also treats two achievers that share an add-effect as mutex
+        #       (reuses ``_unbiased_actions_are_mutex``). At an OR-node every pair
+        #       of achievers shares the target fact, so this marks every cell fully
+        #       mutex (degenerate h_max-style collapse) — kept only for comparison.
+        self._kmutex_mutex_mode: str = _env_str("TP_MCTS_KMUTEX_MUTEX_MODE", "exec")
+        self._kmutex_debug: bool = _env_str("TP_MCTS_KMUTEX_DEBUG", "0") in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        self._kmutex_instr: KMutexInstrumentation = KMutexInstrumentation()
+        # Path-mutex temporal tightening (strategy "baseline_admissible_paths").
+        # Carries <= K timed achiever-paths per fact and combines them by temporal
+        # segment-overlap mutex (including an action mutex with itself when it
+        # occupies a resource). Reuses _kmutex_k for the path cap.
+        self._pathmutex_instr: PathMutexInstrumentation = PathMutexInstrumentation()
         # AND-layer gamma correction (baseline_survival_and_gamma). Config is
         # overridable per-instance before the first query; everything else is
         # built lazily once on first use.
@@ -582,6 +621,24 @@ class TemporalProbabilisticRPGHeuristic:
             return result
         if chosen_strategy == "baseline_admissible_lp":
             result = self._heuristic_propagate_baseline_admissible_lp(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_admissible_kmutex":
+            result = self._heuristic_propagate_baseline_admissible_kmutex(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_admissible_paths":
+            result = self._heuristic_propagate_baseline_admissible_paths(
                 state=state,
                 fixed_depth=fixed_depth,
                 start_time=start_time,
@@ -1239,6 +1296,8 @@ class TemporalProbabilisticRPGHeuristic:
             "baseline",
             "baseline_admissible",
             "baseline_admissible_lp",
+            "baseline_admissible_kmutex",
+            "baseline_admissible_paths",
             "baseline_pdb",
             "baseline_cached",
             "baseline_survival",
@@ -1256,7 +1315,7 @@ class TemporalProbabilisticRPGHeuristic:
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_admissible, baseline_admissible_lp, baseline_pdb, baseline_cached, baseline_survival, "
+                "Supported strategies: baseline, baseline_admissible, baseline_admissible_lp, baseline_admissible_kmutex, baseline_admissible_paths, baseline_pdb, baseline_cached, baseline_survival, "
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "baseline_survival_resolution, "
                 "atom_half_split, "
@@ -1594,6 +1653,273 @@ class TemporalProbabilisticRPGHeuristic:
                 probabilities_by_layer={
                     layer: dict(values)
                     for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def log_kmutex_summary(self, reset: bool = False) -> str:
+        """Return (and optionally print) the headline mutex-survival metric.
+
+        Accumulated across every OR-node the ``baseline_admissible_kmutex``
+        strategy evaluated on this heuristic instance. The fraction of OR-nodes
+        (cells with >= 2 achievers) where a pure mutex clique of size >= 2
+        survived tells whether the K-bounded tightening bought anything.
+        """
+        summary = self._kmutex_instr.summary()
+        if reset:
+            self._kmutex_instr = KMutexInstrumentation()
+        return summary
+
+    def _heuristic_propagate_baseline_admissible_kmutex(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """``baseline_admissible`` with the OR/fact layer tightened by a
+        mutex-aware K-bounded bound (see ``kmutex_or_bound``).
+
+        Identical forward propagation to ``baseline_admissible`` (Frechet-min AND
+        support, ``B_e = q_e * R_t(a)``, cumulative retry update ``g(p, h)``), but
+        each arrival fact's per-layer hazard is no longer the capped union bound
+        over its achiever contributions. Instead the contributions are bucketed
+        into <= K rows by certified action-mutex (``_unbiased_actions_are_mutex``)
+        and aggregated as ``sum(free rows) + max(surviving mutex clique)``. This
+        is always ``<=`` the union bound (``max <= sum``), so the strategy stays
+        admissible w.r.t. ``baseline_admissible`` and degrades to it exactly when
+        no two achievers landing at a cell are mutex.
+        """
+        self._ensure_unbiased_structural_extracted()
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+        k = self._kmutex_k
+        mutex_fn = (
+            self._unbiased_actions_are_mutex
+            if self._kmutex_mutex_mode == "all"
+            else self._kmutex_actions_are_mutex
+        )
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        # Per (arrival_layer, fact): list of (achiever name, contribution B_e).
+        pending_supports: Dict[Tuple[int, Fact], List[Tuple[str, float]]] = {}
+        fact_support_cache: Dict[Tuple[Fact, int], float] = {}
+        action_support_cache: Dict[Tuple[str, int], float] = {}
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        traces: List[TemporalLayerTrace] = []
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
+
+        def fact_support(fact: Fact, layer: int) -> float:
+            nonlocal fact_cache_hits
+            key = (fact, layer)
+            if key in fact_support_cache:
+                fact_cache_hits += 1
+                return fact_support_cache[key]
+            value = _clamp_probability(probabilities_by_layer[layer].get(fact, 0.0))
+            fact_support_cache[key] = value
+            return value
+
+        for layer in range(depth + 1):
+            if layer > 0:
+                for fact in facts:
+                    probabilities_by_layer[layer][fact] = max(
+                        probabilities_by_layer[layer][fact],
+                        probabilities_by_layer[layer - 1][fact],
+                    )
+
+            arrivals: Dict[Fact, float] = {}
+            for fact in facts:
+                supports = pending_supports.get((layer, fact), [])
+                if not supports:
+                    continue
+                # OR layer: mutex-aware K-bounded bound instead of the raw union.
+                or_result = kmutex_or_hazard(supports, mutex_fn, k)
+                self._kmutex_instr.record(or_result)
+                if self._kmutex_debug and or_result.clique_survived:
+                    print(
+                        "[kmutex] layer={l} fact={f!r} supports={n} "
+                        "clique_size={c} value={v:.4f} union={u:.4f}".format(
+                            l=layer,
+                            f=fact,
+                            n=or_result.n_supports,
+                            c=or_result.max_clique_size,
+                            v=or_result.value,
+                            u=or_result.union_value,
+                        ),
+                        flush=True,
+                    )
+                arrival_hazard = or_result.value
+                current = probabilities_by_layer[layer][fact]
+                updated = _clamp_probability(current + (1.0 - current) * arrival_hazard)
+                probabilities_by_layer[layer][fact] = max(current, updated)
+                arrivals[fact] = arrival_hazard
+                fact_support_cache[(fact, layer)] = probabilities_by_layer[layer][fact]
+
+            if layer == depth:
+                if debug:
+                    traces.append(
+                        TemporalLayerTrace(
+                            layer=layer,
+                            fact_probabilities=dict(probabilities_by_layer[layer]),
+                            arrivals=arrivals,
+                        )
+                    )
+                break
+
+            action_support: Dict[str, float] = {}
+            for action_model in self._action_models:
+                support_key = (action_model.name, layer)
+                if support_key in action_support_cache:
+                    action_support_value = action_support_cache[support_key]
+                    action_cache_hits += 1
+                else:
+                    # AND layer: Frechet min (same as baseline_admissible).
+                    probs_for_preconditions = {
+                        fact: fact_support(fact, layer)
+                        for fact in action_model.preconditions
+                    }
+                    action_support_value = admissible_and_support(
+                        action_model.preconditions,
+                        probs_for_preconditions,
+                    )
+                    action_support_cache[support_key] = action_support_value
+
+                action_support[action_model.name] = action_support_value
+                if action_support_value <= 0.0:
+                    continue
+
+                arrival_layer = layer + action_model.effect_delay_steps
+                if arrival_layer > depth:
+                    continue
+                for fact, add_prob in action_model.add_probabilities.items():
+                    success = _clamp_probability(action_support_value * add_prob)
+                    pending_supports.setdefault((arrival_layer, fact), []).append(
+                        (action_model.name, success)
+                    )
+
+            action_support_by_layer[layer] = dict(action_support)
+
+            if debug:
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=layer,
+                        fact_probabilities=dict(probabilities_by_layer[layer]),
+                        action_support=action_support,
+                        arrivals=arrivals,
+                    )
+                )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+            action_support_by_layer=action_support_by_layer,
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def _path_actions_mutex(self, name_a: str, name_b: str) -> bool:
+        """Action-mutex for the path-mutex layer, INCLUDING self-mutex.
+
+        For two distinct actions this is the certified execution mutex
+        (delete-interference + shared consumable precondition). For an action with
+        itself it returns True iff the action occupies a resource it also needs --
+        i.e. it deletes one of its own preconditions (``del(a) & pre(a) != {}``) --
+        so two overlapping uses of it (the same drive over [0,15] and [5,20])
+        conflict. Instantaneous actions never overlap, so a zero-duration
+        self-mutex action is harmless.
+        """
+        self._ensure_unbiased_structural_extracted()
+        if name_a == name_b:
+            model = self._unbiased_name_to_model.get(name_a)
+            if model is None:
+                return False
+            dels = self._unbiased_action_del_effects.get(name_a, frozenset())
+            return bool(dels & model.preconditions)
+        return self._kmutex_actions_are_mutex(name_a, name_b)
+
+    def log_pathmutex_summary(self, reset: bool = False) -> str:
+        """Return (and optionally reset) the path-mutex survival / AND-feasibility
+        metrics accumulated by the ``baseline_admissible_paths`` strategy."""
+        summary = self._pathmutex_instr.summary()
+        if reset:
+            self._pathmutex_instr = PathMutexInstrumentation()
+        return summary
+
+    def _heuristic_propagate_baseline_admissible_paths(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """Path-mutex temporal tightening (see ``path_mutex``).
+
+        Instead of a scalar ``P_t(f)``, this carries <= K timed achiever-PATHS per
+        fact and combines them by temporal segment-overlap mutex: alternative
+        paths that share a mutex action in overlapping windows (including an action
+        mutex with itself when it occupies a resource) collapse via ``max`` rather
+        than summing as independent retries; a conjunctive AND path is dropped when
+        its chosen achievers cannot run in parallel. The OR-aggregated scalar is
+        returned in ``probabilities_by_layer`` so the usual goal product applies.
+        """
+        self._ensure_unbiased_structural_extracted()
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+        k = self._kmutex_k
+
+        prob_by_layer, _ = propagate_path_mutex(
+            self._action_models,
+            state_facts=state_facts,
+            facts=facts,
+            depth=depth,
+            mutex_fn=self._path_actions_mutex,
+            k=k,
+            instrumentation=self._pathmutex_instr,
+        )
+
+        traces: List[TemporalLayerTrace] = []
+        if debug:
+            for layer in sorted(prob_by_layer.keys()):
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=layer,
+                        fact_probabilities=dict(prob_by_layer[layer]),
+                    )
+                )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=prob_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=0,
+            action_cache_hits=0,
+            action_support_by_layer={},
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values) for layer, values in prob_by_layer.items()
                 },
                 state_facts=frozenset(state_facts),
                 depth_used=depth,
@@ -3173,6 +3499,48 @@ class TemporalProbabilisticRPGHeuristic:
                 return True
         # (3) Shared add-effect on the same fact: only one can first-achieve.
         if add_a & add_b:
+            return True
+        return False
+
+    def _kmutex_actions_are_mutex(self, name_a: str, name_b: str) -> bool:
+        """EXECUTION mutex for the K-bounded OR-layer max-collapse.
+
+        Deliberately STRICTER than ``_unbiased_actions_are_mutex``: it drops the
+        "shared add-effect" criterion (rule 3 there). At an OR-node every pair of
+        achievers trivially shares the target add-effect, so that rule would mark
+        *every* multi-achiever cell fully mutex and collapse the whole union bound
+        to ``max`` — which is unjustified, since two non-interfering achievers can
+        both run in the delete-relaxation (parallel execution), so the union is
+        the correct combination, not ``max``.
+
+        Two achievers are certified mutex here only when they cannot both be
+        executed toward the fact in the same plan window:
+          1. Direct delete-interference (Graphplan classic): one's delete
+             clobbers the other's precondition or add-effect.
+          2. Shared CONSUMABLE precondition: both require a fact that some action
+             in the domain deletes (e.g. an exclusive resource like machine_shop
+             ``free(m)``), so only one of the competing achievers can hold it.
+        """
+        if name_a == name_b:
+            return False
+        model_a = self._unbiased_name_to_model.get(name_a)
+        model_b = self._unbiased_name_to_model.get(name_b)
+        if model_a is None or model_b is None:
+            return False
+        del_a = self._unbiased_action_del_effects.get(name_a, frozenset())
+        del_b = self._unbiased_action_del_effects.get(name_b, frozenset())
+        pre_a = model_a.preconditions
+        pre_b = model_b.preconditions
+        add_a = frozenset(model_a.add_probabilities.keys())
+        add_b = frozenset(model_b.add_probabilities.keys())
+        # (1) Direct delete-interference.
+        if del_a & (pre_b | add_b):
+            return True
+        if del_b & (pre_a | add_a):
+            return True
+        # (2) Shared consumable precondition (exclusive resource).
+        shared_pre = pre_a & pre_b
+        if shared_pre and (shared_pre & set(self._unbiased_deleters_by_fact.keys())):
             return True
         return False
 

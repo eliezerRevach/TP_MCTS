@@ -1,0 +1,2 @@
+domain,object_amount,deadline,heuristic,heuristic_label,runs_total,amount_success,success_rate,avg_success_time,std_success_time,seed,search_time,search_depth,k,selection_type,exploration_constant,discount_factor,step_penalty,reward_mode,value_mode,heuristic_depth,returncode
+nasa_rover,2,15,baseline_pdb,baseline_pdb,1,0,0.0,-inf,-1,123,1,40,10,max_approximation,10.0,1.0,0.0,terminal,max_approximation,15,0
