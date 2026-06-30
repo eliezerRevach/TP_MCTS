@@ -405,6 +405,13 @@ class TemporalProbabilisticRPGHeuristic:
             "on",
         )
         self._kmutex_instr: KMutexInstrumentation = KMutexInstrumentation()
+        # Structural action-mutex is constant across the whole run (same fact has
+        # the same achievers at every layer), so memoize each pair once. Keyed by
+        # the ordered name pair; covers both the exec-mutex and path self-mutex
+        # tests. Turns the O(n^2)-per-OR-node comparison into a dict lookup after
+        # the first time each pair is seen.
+        self._kmutex_mutex_memo: Dict[Tuple[str, str], bool] = {}
+        self._pathmutex_mutex_memo: Dict[Tuple[str, str], bool] = {}
         # Path-mutex temporal tightening (strategy "baseline_admissible_paths").
         # Carries <= K timed achiever-paths per fact and combines them by temporal
         # segment-overlap mutex (including an action mutex with itself when it
@@ -1839,24 +1846,55 @@ class TemporalProbabilisticRPGHeuristic:
         )
 
     def _path_actions_mutex(self, name_a: str, name_b: str) -> bool:
-        """Action-mutex for the path-mutex layer, INCLUDING self-mutex.
+        """Memoized front-end for :meth:`_compute_path_actions_mutex` (incl. self)."""
+        key = (name_a, name_b) if name_a <= name_b else (name_b, name_a)
+        cached = self._pathmutex_mutex_memo.get(key)
+        if cached is not None:
+            return cached
+        result = self._compute_path_actions_mutex(name_a, name_b)
+        self._pathmutex_mutex_memo[key] = result
+        return result
 
-        For two distinct actions this is the certified execution mutex
-        (delete-interference + shared consumable precondition). For an action with
-        itself it returns True iff the action occupies a resource it also needs --
-        i.e. it deletes one of its own preconditions (``del(a) & pre(a) != {}``) --
-        so two overlapping uses of it (the same drive over [0,15] and [5,20])
-        conflict. Instantaneous actions never overlap, so a zero-duration
-        self-mutex action is harmless.
+    def _compute_path_actions_mutex(self, name_a: str, name_b: str) -> bool:
+        """SOUND action-mutex for the path-mutex layer, INCLUDING self-mutex.
+
+        Deliberately uses ONLY provably-sound rules so the ``baseline_admissible_
+        paths`` heuristic stays admissible (``max`` is applied only where two paths
+        genuinely cannot run in parallel; everything else sums):
+
+          - self-mutex: ``del(a) & pre(a) != {}`` — the action occupies a resource
+            it also needs, so two TEMPORALLY OVERLAPPING uses conflict (the same
+            drive over [0,15] and [5,20]). Zero-duration actions never overlap, so
+            this is harmless for instantaneous actions.
+          - cross delete-interference (Graphplan): one action's delete clobbers the
+            other's precondition or add-effect, so they cannot be co-executed.
+
+        It does NOT use the "shared consumable precondition" proxy from
+        ``_kmutex_actions_are_mutex``: that can OVER-declare mutex (two actions
+        merely sharing a deletable precondition need not be mutually exclusive),
+        which would ``max`` where it should ``sum`` and break admissibility. On
+        nasa_rover / machine_shop the proxy added zero hits, so dropping it costs
+        nothing and buys a soundness guarantee.
         """
         self._ensure_unbiased_structural_extracted()
+        model_a = self._unbiased_name_to_model.get(name_a)
+        if model_a is None:
+            return False
+        del_a = self._unbiased_action_del_effects.get(name_a, frozenset())
         if name_a == name_b:
-            model = self._unbiased_name_to_model.get(name_a)
-            if model is None:
-                return False
-            dels = self._unbiased_action_del_effects.get(name_a, frozenset())
-            return bool(dels & model.preconditions)
-        return self._kmutex_actions_are_mutex(name_a, name_b)
+            return bool(del_a & model_a.preconditions)
+        model_b = self._unbiased_name_to_model.get(name_b)
+        if model_b is None:
+            return False
+        del_b = self._unbiased_action_del_effects.get(name_b, frozenset())
+        add_a = frozenset(model_a.add_probabilities.keys())
+        add_b = frozenset(model_b.add_probabilities.keys())
+        # Cross delete-interference only (no shared-consumable proxy).
+        if del_a & (model_b.preconditions | add_b):
+            return True
+        if del_b & (model_a.preconditions | add_a):
+            return True
+        return False
 
     def log_pathmutex_summary(self, reset: bool = False) -> str:
         """Return (and optionally reset) the path-mutex survival / AND-feasibility
@@ -3503,6 +3541,21 @@ class TemporalProbabilisticRPGHeuristic:
         return False
 
     def _kmutex_actions_are_mutex(self, name_a: str, name_b: str) -> bool:
+        """Memoized front-end for :meth:`_compute_kmutex_actions_are_mutex`.
+
+        The structural mutex relation is constant across the run, so each ordered
+        name pair is computed at most once; every later OR-node comparison is a
+        dict lookup.
+        """
+        key = (name_a, name_b) if name_a <= name_b else (name_b, name_a)
+        cached = self._kmutex_mutex_memo.get(key)
+        if cached is not None:
+            return cached
+        result = self._compute_kmutex_actions_are_mutex(name_a, name_b)
+        self._kmutex_mutex_memo[key] = result
+        return result
+
+    def _compute_kmutex_actions_are_mutex(self, name_a: str, name_b: str) -> bool:
         """EXECUTION mutex for the K-bounded OR-layer max-collapse.
 
         Deliberately STRICTER than ``_unbiased_actions_are_mutex``: it drops the

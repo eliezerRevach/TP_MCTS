@@ -59,7 +59,7 @@ class TestPathMutexPrimitives(unittest.TestCase):
         p2 = Path(frozenset({Segment("drive", 5, 20)}), 0.8)
         res = or_aggregate_paths([p1, p2], _drive_self_mutex, k=4)
         self.assertAlmostEqual(res.value, 0.9)  # max, not 0.9+0.8
-        self.assertEqual(res.n_components, 1)
+        self.assertEqual(res.n_cliques, 1)
         self.assertTrue(res.clique_survived)
 
     def test_or_sums_disjoint_drives(self):
@@ -67,8 +67,43 @@ class TestPathMutexPrimitives(unittest.TestCase):
         p2 = Path(frozenset({Segment("drive", 5, 20)}), 0.5)
         res = or_aggregate_paths([p1, p2], _drive_self_mutex, k=4)
         self.assertAlmostEqual(res.value, 0.9)  # sum (no overlap)
-        self.assertEqual(res.n_components, 2)
+        self.assertEqual(res.n_cliques, 2)
         self.assertFalse(res.clique_survived)
+
+    def test_or_max_only_within_a_clique_not_a_chain(self):
+        # A⊥B, B⊥C, but A is FREE w.r.t. C (chain, not a clique).
+        # Connected components would wrongly take max(A,B,C); the correct
+        # admissible answer keeps A and C summed: A + max(B,C) (or C + max(A,B)).
+        A = Path(frozenset({Segment("x", 0, 10)}), 0.5)   # x⊥y (overlap 5-10)
+        B = Path(frozenset({Segment("y", 5, 15)}), 0.4)   # y⊥x and y⊥z
+        C = Path(frozenset({Segment("z", 12, 20)}), 0.3)  # z⊥y (overlap 12-15), z free of x
+        mutex = lambda a, b: frozenset((a, b)) in (
+            {frozenset(("x", "y")), frozenset(("y", "z"))}
+        )
+        res = or_aggregate_paths([A, B, C], mutex, k=4)
+        # Greedy anchors A (highest prob): clique {A,B} (B⊥A); C cannot join (C free of A)
+        # -> cliques {A,B} and {C} -> max(0.5,0.4) + 0.3 = 0.8  (NOT max(0.5,0.4,0.3)=0.5).
+        self.assertAlmostEqual(res.value, 0.8)
+        self.assertEqual(res.n_cliques, 2)
+        self.assertEqual(res.max_clique_size, 2)
+
+    def test_shared_segment_is_not_a_conflict(self):
+        # Two retry paths SHARE the same self-mutex step drive[0,5] (one physical
+        # occurrence), and their distinct steps don't overlap. They must be FREE
+        # (sum/accumulate), not mutex — a shared occurrence is not contention.
+        shared = Segment("drive", 0, 5)
+        p = Path(frozenset({shared, Segment("sample", 6, 8)}), 0.5)
+        q = Path(frozenset({shared, Segment("sample", 10, 12)}), 0.5)
+        self.assertFalse(paths_mutex(p, q, _drive_self_mutex))
+        res = or_aggregate_paths([p, q], _drive_self_mutex, k=4)
+        self.assertAlmostEqual(res.value, 1.0)  # 0.5 + 0.5 (free), clamped
+        self.assertEqual(res.n_cliques, 2)
+
+    def test_distinct_overlapping_self_mutex_segments_conflict(self):
+        # Two DISTINCT windows of the same self-mutex action overlap -> mutex.
+        p = Path(frozenset({Segment("drive", 0, 10)}), 0.5)
+        q = Path(frozenset({Segment("drive", 5, 15)}), 0.5)
+        self.assertTrue(paths_mutex(p, q, _drive_self_mutex))
 
     def test_one_conflicting_pair_breaks_parallel(self):
         # P has many free segments + one that conflicts with Q -> mutex.
