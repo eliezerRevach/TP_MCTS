@@ -128,16 +128,16 @@ def main():
         flush=True,
     )
     print(
-        f"  temporal paths  : {pinstr.or_nodes_clique_survived} clique(s) survived "
+        f"  temporal paths  : {pinstr.or_nodes_tightened} HIT(s) (max-of-sums<union) "
         f"of {pinstr.or_nodes_total} OR-nodes "
-        f"(survival={pinstr.clique_survival_fraction:.3f}, "
-        f"AND_blocked={pinstr.and_paths_blocked}).",
+        f"(tighten_fraction={pinstr.tighten_fraction:.3f}, "
+        f"mass_shaved={pinstr.mass_shaved:.3f}, AND_blocked={pinstr.and_paths_blocked}).",
         flush=True,
     )
-    if pinstr.or_nodes_clique_survived > kinstr.or_nodes_clique_survived:
+    if pinstr.or_nodes_tightened > kinstr.or_nodes_clique_survived:
         print(
             "  => the TEMPORAL path-mutex caught resource/self-mutex that the "
-            "per-cell bound missed (overlapping re-fires collapse via max).",
+            "per-cell bound missed.",
             flush=True,
         )
 

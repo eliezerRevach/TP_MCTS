@@ -31,14 +31,22 @@ mutually exclusive. Action-mutex now INCLUDES self-mutex: a resource-occupying
 action (one that deletes a precondition it needs, ``del(a) & pre(a) != {}``) is
 mutex with itself, so two overlapping uses of it conflict.
 
-OR layer
---------
-Alternative achiever-paths of a fact are partitioned into mutex CLIQUES — groups
-in which EVERY pair is mutex. Within a clique only one path can happen, so we take
-``max``; across cliques (mutually compatible) we ``sum`` (union bound).
-``P(f) <= sum_cliques( max_{path in clique} prob(path) )``. Using ``max`` only over
-genuine cliques (not merely connected paths) keeps the bound admissible — A⊥B and
-B⊥C with A free w.r.t. C must still SUM A and C, never ``max`` them.
+OR layer (MAX of SUMS)
+----------------------
+Alternative achiever-paths are grouped into COMPATIBLE-SET rows: each row is a set
+of pairwise-free paths (a schedule that can be executed together) holding the
+``sum`` of its members (the union bound for that schedule). A new path is summed
+into every row it is free with, and skipped for rows it is mutex with. You can
+execute only ONE schedule, so the achievable probability is bounded by the BEST
+one: ``P(f) <= max_rows( sum_{path in row} prob(path) )`` — the MAX of SUMS.
+
+This is admissible (``max`` only across mutually-exclusive schedules, ``sum`` only
+within a compatible one) and, crucially, MONOTONE in the deadline: more time lets
+overlapping paths be scheduled apart, so they become free, join the same row, and
+the max rises. It reduces to the union bound when nothing is mutex (one row holds
+everything). NOTE: it is max-of-sums, NOT sum-of-(per-clique max) — a new path
+that is mutex with one row but free with others must SUM into those others (e.g.
+``max(p1, p2+pnew, p3+pnew)``), never collapse to ``max(p1, pnew)``.
 
 AND layer
 ---------
@@ -157,49 +165,162 @@ def _dedup_topk(paths: Sequence[Path], k: int) -> List[Path]:
     return merged[: max(1, int(k))]
 
 
-def _mutex_clique_partition(paths: Sequence[Path], mutex_fn) -> List[List[int]]:
-    """Partition paths into MUTEX CLIQUES — groups where EVERY pair is mutex.
+def _keep_for_or(paths: Sequence[Path], mutex_fn, k: int) -> List[Path]:
+    """Retain <= ``k`` paths chosen for FREE diversity, not raw probability.
 
-    ``max`` is only an admissible substitution for ``sum`` when the paths are
-    mutually exclusive, so a group may be collapsed to ``max`` only if all of its
-    members are pairwise mutex (a clique), NOT merely connected through a chain
-    (A⊥B, B⊥C, A free w.r.t. C must still SUM A and C). Connected components would
-    wrongly ``max`` non-mutex paths and under-estimate below the admissible bound.
-
-    Greedy and deterministic (anchor by descending probability, grow a clique by
-    only adding a path that is mutex with ALL current members). With K small this
-    is a handful of pairwise tests, fast enough for a per-node MCTS step. Any such
-    clique partition keeps the result an admissible upper bound (each collapsed
-    group is genuinely mutually exclusive); greedy just may not be the tightest.
+    The OR value comes from summing mutually-free (non-overlapping) paths, so when
+    capping we must NOT keep ``k`` overlapping near-duplicates of the same attempt
+    (which all collapse to one ``max``); we keep paths that are free with the ones
+    already chosen, so waited re-uses (``a[0,5]`` then ``a[6,11]`` …) survive and
+    accumulate. Greedy: take the highest-probability path, then repeatedly add the
+    highest-probability path that is FREE w.r.t. every path chosen so far; if none
+    is free, fall back to the highest-probability remaining (a genuine mutex
+    alternative). Deterministic and O(k · n) pairwise tests.
     """
-    n = len(paths)
-    order = sorted(range(n), key=lambda i: (-paths[i].prob, i))
-    used = [False] * n
-    cliques: List[List[int]] = []
-    for i in order:
-        if used[i]:
-            continue
-        clique = [i]
-        used[i] = True
-        for j in order:
-            if used[j]:
+    best: Dict[FrozenSet[Segment], float] = {}
+    for p in paths:
+        prev = best.get(p.segments)
+        if prev is None or p.prob > prev:
+            best[p.segments] = p.prob
+    distinct = [Path(segs, pr) for segs, pr in best.items()]
+    if len(distinct) <= max(1, int(k)):
+        return distinct
+    distinct.sort(key=lambda p: -p.prob)
+    selected: List[Path] = []
+    remaining = list(distinct)
+    while remaining and len(selected) < k:
+        pick = None
+        for p in remaining:
+            if all(not paths_mutex(p, s, mutex_fn) for s in selected):
+                pick = p
+                break
+        if pick is None:
+            pick = remaining[0]
+        selected.append(pick)
+        remaining.remove(pick)
+    return selected
+
+
+@dataclass
+class Row:
+    """One row of the K-bounded OR fact table: an abstract policy alternative.
+
+    ``prob`` upper-bounds all concrete paths the row stands for. ``footprint`` is
+    the set of timed segments GUARANTEED present in every concrete path of the row
+    — the only mutex evidence we are allowed to rely on. It only ever SHRINKS
+    (intersection on a max-merge, erased to empty on a sum). An empty footprint
+    means "free / unknown": not certified mutex with anything.
+    """
+
+    prob: float
+    footprint: FrozenSet[Segment]
+
+
+def row_from_path(p: Path) -> Row:
+    """A fresh single-path row: it guarantees exactly its own segments."""
+    return Row(prob=_clamp01(p.prob), footprint=frozenset(p.segments))
+
+
+def guaranteed_mutex(r1: Row, r2: Row, mutex_fn: Callable[[Action, Action], bool]) -> bool:
+    """Certified row-level mutex: some guaranteed segment of each row conflicts
+    (temporal overlap AND action-mutex). If either footprint is empty, or no pair
+    conflicts, the pair is NOT certified mutex — uncertain returns False, so it is
+    treated as free (the safe, admissibility-preserving default). Identical shared
+    segments (same occurrence in both rows) are skipped — a shared step is not a
+    contention."""
+    for s1 in r1.footprint:
+        for s2 in r2.footprint:
+            if s1 == s2:
                 continue
-            if all(paths_mutex(paths[j], paths[m], mutex_fn) for m in clique):
-                clique.append(j)
-                used[j] = True
-        cliques.append(clique)
-    return cliques
+            if segments_conflict(s1, s2, mutex_fn):
+                return True
+    return False
+
+
+def common_footprint(r1: Row, r2: Row) -> FrozenSet[Segment]:
+    """Mutex evidence guaranteed by BOTH rows after a merge = the intersection."""
+    return r1.footprint & r2.footprint
+
+
+def insert_or_absorb(
+    table: List[Row],
+    r_new: Row,
+    k: int,
+    mutex_fn: Callable[[Action, Action], bool],
+    counter: Optional[List[int]] = None,
+) -> List[Row]:
+    """Insert ``r_new`` into the K-bounded OR fact table, never dropping it.
+
+    Optional ``counter`` is a 3-slot list ``[case1_mutex_add, case2_merge,
+    case3_sum]`` of HIT counts: slot 0 increments when r_new is certified mutex
+    with EVERY existing row and is added as a new mutex alternative (Case 1 with a
+    non-empty M); slot 1 when r_new is mutex-merged into a row (Case 2); slot 2 on
+    a free sum (Case 3). A "hit" is a real mutex event = slot0 + slot1.
+
+    Invariant: ``table`` has at most ``k`` rows, certified-mutex pairwise; each row
+    is a policy alternative whose ``prob`` upper-bounds its concrete paths and whose
+    ``footprint`` holds only mutex info guaranteed by all of them. Exactly three
+    cases (``max`` only with certified mutex, ``sum``/free otherwise; ``r_new.prob``
+    counted once; footprints intersect on max, erase on sum):
+
+      M = rows certified mutex with r_new;  F = the rest (free / uncertain).
+      Case 1  F empty, room  -> add r_new as a new mutex alternative.
+      Case 2  F empty, full  -> absorb r_new into the best existing row via max,
+              keeping the common (intersected) footprint.
+      Case 3  F non-empty    -> r_new is compatible with the F rows, so fold them
+              and r_new into one summed (union-bound) row with an erased footprint.
+
+    Old rows are never re-checked against each other; the invariant is preserved by
+    construction.
+    """
+    M = [r for r in table if guaranteed_mutex(r, r_new, mutex_fn)]
+    F = [r for r in table if not guaranteed_mutex(r, r_new, mutex_fn)]
+
+    # Case 3: r_new is free w.r.t. at least one row -> sum and free.
+    if F:
+        if counter is not None:
+            counter[2] += 1
+        total = _clamp01(min(1.0, r_new.prob + sum(r.prob for r in F)))
+        r_sum = Row(prob=total, footprint=frozenset())  # EMPTY_OR_UNKNOWN
+        table[:] = M + [r_sum]
+        return table
+
+    # F is empty: r_new is certified mutex with every existing row.
+    # Case 1: there is room for another mutex alternative.
+    if len(table) < k:
+        if counter is not None and M:  # M non-empty => a genuine mutex add (not the first row)
+            counter[0] += 1
+        table.append(r_new)
+        return table
+
+    # Case 2: table full -> absorb r_new into the best row via max.
+    if counter is not None:
+        counter[1] += 1
+    # Prefer the largest common footprint, then the larger max prob, then the
+    # smaller (stable) index.
+    best_idx = 0
+    best_key: Optional[Tuple[int, float, int]] = None
+    for idx, r in enumerate(table):
+        key = (len(common_footprint(r, r_new)), max(r.prob, r_new.prob), -idx)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_idx = idx
+    r_best = table[best_idx]
+    merged_fp = common_footprint(r_best, r_new)
+    r_best.prob = max(r_best.prob, r_new.prob)
+    r_best.footprint = merged_fp
+    return table
 
 
 @dataclass
 class ORAggregateResult:
     value: float
+    union_value: float         # min(1, sum of all paths) — the loose union baseline.
     n_paths: int
-    n_cliques: int
-    clique_survived: bool      # a mutex clique of size >= 2 (a real max-collapse).
-    max_clique_size: int
-    mutex_cliques: int = 0     # # of cliques of size >= 2 here (each = one max-instead-of-sum HIT).
-    sum_terms_replaced: int = 0  # sum_{clique>=2}(size-1): # of sum terms eliminated by max.
+    n_rows: int                # rows kept in the K-bounded table.
+    tightened: bool            # value < union (mutex actually reduced the bound).
+    mutex_adds: int = 0        # Case 1 with non-empty M: a mutex row was ADDED.
+    mutex_merges: int = 0      # Case 2: a mutex was MERGED into a row.
 
 
 def or_aggregate_paths(
@@ -207,38 +328,33 @@ def or_aggregate_paths(
     mutex_fn: Callable[[Action, Action], bool],
     k: int,
 ) -> ORAggregateResult:
-    """OR-combine achiever-paths: ``sum`` across mutex CLIQUES of their ``max``.
+    """OR-combine achiever-paths via the K-bounded :func:`insert_or_absorb` table.
 
-    Paths are first capped to the top ``k`` by probability, then partitioned into
-    mutex cliques (every pair mutex). Each clique collapses to a single ``max``
-    (only one of mutually-exclusive paths can apply); distinct cliques sum (union
-    bound). ``max`` is therefore used ONLY over genuinely mutex paths, so the
-    result stays an admissible upper bound and never drops below it by collapsing
-    paths that are actually compatible.
+    Each path is inserted as a fresh row; the table keeps <= ``k`` rows
+    (certified-mutex alternatives, plus at most one free/summed row). The fact's
+    probability is the ``max`` over the table rows — you can execute only one
+    policy alternative, so the achievable probability is bounded by the best one,
+    while free (non-mutex) paths have already been summed into a single row. ``max``
+    is used only across certified-mutex rows, so the bound stays admissible and
+    reduces to the union when nothing is certified mutex.
     """
-    kept = _dedup_topk(paths, k)
-    if not kept:
-        return ORAggregateResult(0.0, 0, 0, False, 0)
-    cliques = _mutex_clique_partition(kept, mutex_fn)
-    total = 0.0
-    max_size = 0
-    mutex_cliques = 0
-    sum_terms_replaced = 0
-    for clq in cliques:
-        total += max(kept[i].prob for i in clq)
-        if len(clq) > max_size:
-            max_size = len(clq)
-        if len(clq) >= 2:
-            mutex_cliques += 1
-            sum_terms_replaced += len(clq) - 1
+    distinct = _dedup_topk(paths, len(list(paths)) or 1)  # dedup identical, keep all
+    if not distinct:
+        return ORAggregateResult(0.0, 0.0, 0, 0, False)
+    union = _clamp01(min(1.0, sum(p.prob for p in distinct)))
+    table: List[Row] = []
+    counter = [0, 0, 0]  # [case1_mutex_add, case2_merge, case3_sum]
+    for p in sorted(distinct, key=lambda p: (-p.prob,)):
+        insert_or_absorb(table, row_from_path(p), k, mutex_fn, counter)
+    value = _clamp01(max(r.prob for r in table))
     return ORAggregateResult(
-        value=_clamp01(min(1.0, total)),
-        n_paths=len(kept),
-        n_cliques=len(cliques),
-        clique_survived=mutex_cliques > 0,
-        max_clique_size=max_size,
-        mutex_cliques=mutex_cliques,
-        sum_terms_replaced=sum_terms_replaced,
+        value=value,
+        union_value=union,
+        mutex_adds=counter[0],
+        mutex_merges=counter[1],
+        n_paths=len(distinct),
+        n_rows=len(table),
+        tightened=value < union - 1e-12,
     )
 
 
@@ -293,23 +409,33 @@ class PathMutexInstrumentation:
     """Accumulates the path-mutex survival + AND-feasibility metrics."""
 
     or_nodes_total: int = 0           # cells with >= 2 candidate paths.
-    or_nodes_clique_survived: int = 0  # cells with a mutex clique of size >= 2.
-    max_clique_size_seen: int = 0
-    max_hits: int = 0                 # total HITS: # of mutex cliques (size>=2) -> max used instead of sum.
-    sum_terms_replaced: int = 0       # total sum terms eliminated by those maxes.
+    or_nodes_tightened: int = 0       # cells where the table value < union (mutex bit).
+    or_nodes_multi_row: int = 0       # HIT: cells whose final table has > 1 row (mutex alternatives survived).
+    mutex_adds: int = 0               # HIT: a mutex row was ADDED (insert_or_absorb Case 1, M non-empty).
+    mutex_merges: int = 0             # HIT: a mutex was MERGED into a row (Case 2).
+    max_rows_seen: int = 0            # largest table (mutex alternatives) seen.
+    mass_shaved: float = 0.0          # total (union - value) removed by mutex.
     and_paths_built: int = 0          # conjunctive paths successfully built.
     and_paths_blocked: int = 0        # conjunctive combos dropped as infeasible.
+
+    @property
+    def hits(self) -> int:
+        """Total mutex hits: a row added OR a mutex merged into a row."""
+        return self.mutex_adds + self.mutex_merges
 
     def record_or(self, res: ORAggregateResult) -> None:
         if res.n_paths < 2:
             return
         self.or_nodes_total += 1
-        if res.clique_survived:
-            self.or_nodes_clique_survived += 1
-        self.max_hits += res.mutex_cliques
-        self.sum_terms_replaced += res.sum_terms_replaced
-        if res.max_clique_size > self.max_clique_size_seen:
-            self.max_clique_size_seen = res.max_clique_size
+        self.mutex_adds += res.mutex_adds
+        self.mutex_merges += res.mutex_merges
+        if res.n_rows > 1:
+            self.or_nodes_multi_row += 1
+        if res.tightened:
+            self.or_nodes_tightened += 1
+            self.mass_shaved += res.union_value - res.value
+        if res.n_rows > self.max_rows_seen:
+            self.max_rows_seen = res.n_rows
 
     def record_and(self, built: bool) -> None:
         if built:
@@ -318,23 +444,25 @@ class PathMutexInstrumentation:
             self.and_paths_blocked += 1
 
     @property
-    def clique_survival_fraction(self) -> float:
+    def tighten_fraction(self) -> float:
         if self.or_nodes_total == 0:
             return 0.0
-        return self.or_nodes_clique_survived / self.or_nodes_total
+        return self.or_nodes_tightened / self.or_nodes_total
 
     def summary(self) -> str:
         return (
-            "[pathmutex] OR-nodes(>=2 paths)={t} clique>=2_survived={s} "
-            "survival_fraction={f:.4f} max_clique={m} "
-            "HITS(max-instead-of-sum)={h} sum_terms_replaced={st} "
+            "[pathmutex] OR-nodes(>=2 paths)={t} HITS={h} "
+            "(mutex_adds={ma} mutex_merges={mm}) multi_row_nodes={mr} "
+            "tightened_nodes={s} max_rows={m} mass_shaved={ms:.4f} "
             "AND_built={ab} AND_blocked={bl}".format(
                 t=self.or_nodes_total,
-                s=self.or_nodes_clique_survived,
-                f=self.clique_survival_fraction,
-                m=self.max_clique_size_seen,
-                h=self.max_hits,
-                st=self.sum_terms_replaced,
+                h=self.hits,
+                ma=self.mutex_adds,
+                mm=self.mutex_merges,
+                mr=self.or_nodes_multi_row,
+                s=self.or_nodes_tightened,
+                m=self.max_rows_seen,
+                ms=self.mass_shaved,
                 ab=self.and_paths_built,
                 bl=self.and_paths_blocked,
             )
@@ -349,6 +477,7 @@ def propagate_path_mutex(
     mutex_fn: Callable[[Action, Action], bool],
     k: int,
     instrumentation: Optional[PathMutexInstrumentation] = None,
+    capture_paths: Optional[Dict[int, Dict[Action, List["Path"]]]] = None,
 ) -> Tuple[Dict[int, Dict[Action, float]], PathMutexInstrumentation]:
     """Bounded path-carrying forward DP.
 
@@ -383,11 +512,11 @@ def propagate_path_mutex(
         # Persistence: a fact stays achieved (carry its paths forward).
         if t > 0:
             for f, plist in paths_by_layer[t - 1].items():
-                layer_paths[f] = _dedup_topk(layer_paths.get(f, []) + plist, k)
+                layer_paths[f] = _keep_for_or(layer_paths.get(f, []) + plist, mutex_fn, k)
         # Arrivals scheduled to land at this layer.
         for (arrival, f), plist in pending.items():
             if arrival == t:
-                layer_paths[f] = _dedup_topk(layer_paths.get(f, []) + plist, k)
+                layer_paths[f] = _keep_for_or(layer_paths.get(f, []) + plist, mutex_fn, k)
 
         # OR-aggregate every fact's paths into the scalar probability.
         for f, plist in layer_paths.items():
@@ -423,5 +552,9 @@ def propagate_path_mutex(
             for f_add, add_prob in getattr(model, "add_probabilities", {}).items():
                 new_path = Path(support.segments, _clamp01(support.prob * _clamp01(add_prob)))
                 pending.setdefault((arrival, f_add), []).append(new_path)
+
+    if capture_paths is not None:
+        for t, fmap in paths_by_layer.items():
+            capture_paths[t] = {f: list(pl) for f, pl in fmap.items()}
 
     return prob_by_layer, instr

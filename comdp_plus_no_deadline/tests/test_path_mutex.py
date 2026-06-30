@@ -18,12 +18,17 @@ from dataclasses import dataclass
 from comdp_plus_no_deadline.engines.path_mutex import (
     Path,
     PathMutexInstrumentation,
+    Row,
     Segment,
     best_feasible_and,
+    common_footprint,
+    guaranteed_mutex,
+    insert_or_absorb,
     or_aggregate_paths,
     path_internal_feasible,
     paths_mutex,
     propagate_path_mutex,
+    row_from_path,
     segments_overlap,
 )
 from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
@@ -58,34 +63,127 @@ class TestPathMutexPrimitives(unittest.TestCase):
         p1 = Path(frozenset({Segment("drive", 0, 15)}), 0.9)
         p2 = Path(frozenset({Segment("drive", 5, 20)}), 0.8)
         res = or_aggregate_paths([p1, p2], _drive_self_mutex, k=4)
-        self.assertAlmostEqual(res.value, 0.9)  # max, not 0.9+0.8
-        self.assertEqual(res.n_cliques, 1)
-        self.assertTrue(res.clique_survived)
+        self.assertAlmostEqual(res.value, 0.9)  # max(0.9, 0.8), two schedules
+        self.assertEqual(res.n_rows, 2)
+        self.assertTrue(res.tightened)
 
     def test_or_sums_disjoint_drives(self):
         p1 = Path(frozenset({Segment("drive", 0, 5)}), 0.4)
         p2 = Path(frozenset({Segment("drive", 5, 20)}), 0.5)
         res = or_aggregate_paths([p1, p2], _drive_self_mutex, k=4)
-        self.assertAlmostEqual(res.value, 0.9)  # sum (no overlap)
-        self.assertEqual(res.n_cliques, 2)
-        self.assertFalse(res.clique_survived)
+        self.assertAlmostEqual(res.value, 0.9)  # one schedule {p1,p2} sum
+        self.assertEqual(res.n_rows, 1)
+        self.assertFalse(res.tightened)
 
-    def test_or_max_only_within_a_clique_not_a_chain(self):
-        # A⊥B, B⊥C, but A is FREE w.r.t. C (chain, not a clique).
-        # Connected components would wrongly take max(A,B,C); the correct
-        # admissible answer keeps A and C summed: A + max(B,C) (or C + max(A,B)).
-        A = Path(frozenset({Segment("x", 0, 10)}), 0.5)   # x⊥y (overlap 5-10)
-        B = Path(frozenset({Segment("y", 5, 15)}), 0.4)   # y⊥x and y⊥z
-        C = Path(frozenset({Segment("z", 12, 20)}), 0.3)  # z⊥y (overlap 12-15), z free of x
-        mutex = lambda a, b: frozenset((a, b)) in (
-            {frozenset(("x", "y")), frozenset(("y", "z"))}
-        )
-        res = or_aggregate_paths([A, B, C], mutex, k=4)
-        # Greedy anchors A (highest prob): clique {A,B} (B⊥A); C cannot join (C free of A)
-        # -> cliques {A,B} and {C} -> max(0.5,0.4) + 0.3 = 0.8  (NOT max(0.5,0.4,0.3)=0.5).
-        self.assertAlmostEqual(res.value, 0.8)
-        self.assertEqual(res.n_cliques, 2)
-        self.assertEqual(res.max_clique_size, 2)
+    def test_new_path_mutex_with_one_row_folds_free_rows(self):
+        # Table {p1,p2,p3} pairwise mutex; pnew mutex with p1 only, free with p2,p3.
+        # Per insert_or_absorb Case 3: the free rows (p2,p3) and pnew fold into one
+        # summed row -> table {p1, p2+p3+pnew}; value = max(0.5, 0.9) = 0.9.
+        p1 = Path(frozenset({Segment("a", 0, 10)}), 0.5)
+        p2 = Path(frozenset({Segment("b", 0, 10)}), 0.4)
+        p3 = Path(frozenset({Segment("c", 0, 10)}), 0.3)
+        pnew = Path(frozenset({Segment("d", 2, 8)}), 0.2)  # action d -> mutex with a (p1) only
+        pairs = {frozenset(("a", "b")), frozenset(("a", "c")),
+                 frozenset(("b", "c")), frozenset(("a", "d"))}
+        mutex = lambda x, y: frozenset((x, y)) in pairs
+        res = or_aggregate_paths([p1, p2, p3, pnew], mutex, k=4)
+        self.assertAlmostEqual(res.value, max(0.5, 0.2 + 0.4 + 0.3))  # 0.9
+        self.assertEqual(res.n_rows, 2)
+        self.assertTrue(res.tightened)
+
+
+def _name_mutex(*pairs):
+    """Symmetric action-mutex from unordered name pairs (handles a==b too)."""
+    pset = {frozenset(p) if len(set(p)) == 2 else (p[0],) for p in pairs}
+    def fn(a, b):
+        if a == b:
+            return (a,) in pset
+        return frozenset((a, b)) in pset
+    return fn
+
+
+class TestInsertOrAbsorb(unittest.TestCase):
+    """The three cases of insert_or_absorb."""
+
+    def _row(self, action, prob, start=0, end=10):
+        return Row(prob, frozenset({Segment(action, start, end)}))
+
+    def test_guaranteed_mutex_and_common_footprint(self):
+        sa = Segment("a", 0, 10)
+        sb = Segment("b", 0, 10)
+        mutex = _name_mutex(("a", "b"))
+        self.assertTrue(guaranteed_mutex(Row(0.5, frozenset({sa})),
+                                         Row(0.4, frozenset({sb})), mutex))
+        # Empty footprint -> never certified mutex (uncertain = free).
+        self.assertFalse(guaranteed_mutex(Row(0.5, frozenset()),
+                                          Row(0.4, frozenset({sb})), mutex))
+        self.assertEqual(common_footprint(Row(0.5, frozenset({sa, sb})),
+                                          Row(0.4, frozenset({sb}))), frozenset({sb}))
+
+    def test_case1_mutex_with_all_and_room_adds_row(self):
+        mutex = _name_mutex(("a", "b"))
+        A = self._row("a", 0.5)
+        T = [A]
+        new = self._row("b", 0.3)
+        insert_or_absorb(T, new, 3, mutex)
+        self.assertEqual(len(T), 2)
+        self.assertIn(new, T)  # r_new never dropped
+
+    def test_case3_free_row_sums_and_erases_footprint(self):
+        # A free w.r.t E, B mutex with E -> E folds with A into a summed, footprint-
+        # erased row; B stays.  T = {B, A+E}.
+        mutex = _name_mutex(("a", "b"), ("b", "e"))  # a-e NOT mutex
+        A = self._row("a", 0.5)
+        B = self._row("b", 0.4)
+        T = [A, B]
+        E = self._row("e", 0.3)
+        insert_or_absorb(T, E, 3, mutex)
+        self.assertEqual(len(T), 2)
+        summed = [r for r in T if not r.footprint]
+        self.assertEqual(len(summed), 1)
+        self.assertAlmostEqual(summed[0].prob, 0.5 + 0.3)  # A + E, counted once
+        self.assertTrue(any(r.footprint and abs(r.prob - 0.4) < 1e-9 for r in T))  # B kept
+
+    def test_case2_full_table_absorbs_via_max(self):
+        # T full (K=3), all pairwise mutex; D mutex with all -> absorbed via max into
+        # the best row (largest common footprint, then larger max prob). r_new not added.
+        mutex = _name_mutex(("a", "b"), ("a", "c"), ("b", "c"),
+                            ("a", "d"), ("b", "d"), ("c", "d"))
+        A = self._row("a", 0.5)
+        B = self._row("b", 0.4)
+        C = self._row("c", 0.3)
+        T = [A, B, C]
+        D = Row(0.45, frozenset({Segment("d", 0, 10)}))
+        insert_or_absorb(T, D, 3, mutex)
+        self.assertEqual(len(T), 3)  # no new row
+        # common footprint is empty for all (distinct segments) -> tie broken by max
+        # prob: A=max(0.5,0.45)=0.5 wins. A absorbs D: prob max -> 0.5, footprint -> {}.
+        self.assertAlmostEqual(A.prob, 0.5)
+        self.assertEqual(A.footprint, frozenset())
+
+    def test_hit_counter(self):
+        # counter = [case1_mutex_add, case2_merge, case3_sum]
+        mutex = _name_mutex(("a", "b"), ("a", "c"), ("b", "c"))
+        c = [0, 0, 0]
+        T = []
+        insert_or_absorb(T, self._row("a", 0.5), 2, mutex, c)  # first row: trivial add, no hit
+        insert_or_absorb(T, self._row("b", 0.4), 2, mutex, c)  # mutex with a, room -> Case 1 add (HIT)
+        insert_or_absorb(T, self._row("c", 0.3), 2, mutex, c)  # mutex with all, full -> Case 2 merge (HIT)
+        self.assertEqual(c[0], 1)  # one mutex add
+        self.assertEqual(c[1], 1)  # one mutex merge
+        self.assertEqual(c[2], 0)  # no free sums
+        # A free path triggers Case 3 (not a hit).
+        c2 = [0, 0, 0]
+        T2 = [self._row("a", 0.5)]
+        insert_or_absorb(T2, self._row("z", 0.3), 2, _name_mutex(("a", "b")), c2)  # z free of a
+        self.assertEqual(c2, [0, 0, 1])
+
+    def test_never_drops_r_new(self):
+        mutex = _name_mutex(("a", "a"))  # only a self-mutex
+        T = []
+        for i in range(6):
+            insert_or_absorb(T, Row(0.5 - i * 0.05, frozenset({Segment("x", i, i + 1)})), 2, mutex)
+        self.assertLessEqual(len(T), 2)  # K bound respected, nothing crashed/dropped silently
 
     def test_shared_segment_is_not_a_conflict(self):
         # Two retry paths SHARE the same self-mutex step drive[0,5] (one physical
@@ -96,8 +194,9 @@ class TestPathMutexPrimitives(unittest.TestCase):
         q = Path(frozenset({shared, Segment("sample", 10, 12)}), 0.5)
         self.assertFalse(paths_mutex(p, q, _drive_self_mutex))
         res = or_aggregate_paths([p, q], _drive_self_mutex, k=4)
-        self.assertAlmostEqual(res.value, 1.0)  # 0.5 + 0.5 (free), clamped
-        self.assertEqual(res.n_cliques, 2)
+        self.assertAlmostEqual(res.value, 1.0)  # one compatible schedule {p,q}: 0.5+0.5
+        self.assertEqual(res.n_rows, 1)
+        self.assertFalse(res.tightened)
 
     def test_distinct_overlapping_self_mutex_segments_conflict(self):
         # Two DISTINCT windows of the same self-mutex action overlap -> mutex.
@@ -210,7 +309,7 @@ class TestPathMutexStrategy(unittest.TestCase):
         )
         self.assertGreaterEqual(score, 0.0)
         self.assertLessEqual(score, 1.0)
-        self.assertIn("survival_fraction", h.log_pathmutex_summary())
+        self.assertIn("HITS", h.log_pathmutex_summary())
 
 
 if __name__ == "__main__":
