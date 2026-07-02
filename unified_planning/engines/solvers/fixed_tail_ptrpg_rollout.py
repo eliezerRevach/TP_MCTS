@@ -42,11 +42,18 @@ def _resolution_heuristic_kwargs_from_cli() -> dict:
 
 
 def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
+    import os
+
+    env_agg = (os.environ.get("TP_MCTS_HEURISTIC_AGGREGATION") or "").strip().lower()
+    if env_agg:
+        return env_agg
     strat = (temporal_heuristic_strategy or "").strip().lower()
     if strat == "baseline_survival_meanvar":
         return "meanvar"
     if strat == "baseline_time_to_goal":
         return "time_to_goal"
+    if strat == "baseline_admissible_paths_table":
+        return "kernelized"
     return "product"
 
 

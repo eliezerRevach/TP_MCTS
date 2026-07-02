@@ -430,6 +430,12 @@ class TemporalProbabilisticRPGHeuristic:
         # the "kernelized" goal aggregation can apply the cross-fact AND bound.
         self._paths_table_final: Dict[Fact, List[Row]] = {}
         self._paths_table_marginals: Dict[Fact, float] = {}
+        # AND-layer tightening instrumentation for baseline_admissible_paths_table:
+        # nodes = AND evaluations with >=2 preconditions; hits = where the cumulative
+        # bound dropped strictly below the Frechet min (a real cross-fact mutex bit).
+        self._paths_table_and_nodes: int = 0
+        self._paths_table_and_hits: int = 0
+        self._paths_table_and_shaved: float = 0.0
         # AND-layer gamma correction (baseline_survival_and_gamma). Config is
         # overridable per-instance before the first query; everything else is
         # built lazily once on first use.
@@ -2228,6 +2234,9 @@ class TemporalProbabilisticRPGHeuristic:
         pending_supports: Dict[Tuple[int, Fact], List[Row]] = {}
         traces: List[TemporalLayerTrace] = []
         action_support_by_layer: Dict[int, Dict[str, float]] = {}
+        self._paths_table_and_nodes = 0
+        self._paths_table_and_hits = 0
+        self._paths_table_and_shaved = 0.0
 
         for layer in range(depth + 1):
             if layer > 0:
@@ -2278,6 +2287,12 @@ class TemporalProbabilisticRPGHeuristic:
                     marg = {f: probabilities_by_layer[layer].get(f, 0.0) for f in preconds}
                     fr = {f: fact_tables.get(f, []) for f in preconds}
                     support_value = and_cumulative_bound(fr, marg, mutex_fn)
+                    if len(preconds) >= 2:
+                        frechet = min(marg.values())
+                        self._paths_table_and_nodes += 1
+                        if support_value < frechet - 1e-9:
+                            self._paths_table_and_hits += 1
+                            self._paths_table_and_shaved += frechet - support_value
                 else:
                     support_value = 1.0
                 action_support[action_model.name] = support_value

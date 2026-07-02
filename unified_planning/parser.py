@@ -32,11 +32,13 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "26": "baseline_admissible_lp",
         "27": "baseline_admissible_kmutex",
         "28": "baseline_admissible_paths",
+        "29": "baseline_admissible_paths_table",
         "baseline": "baseline",
         "baseline_admissible": "baseline_admissible",
         "baseline_admissible_lp": "baseline_admissible_lp",
         "baseline_admissible_kmutex": "baseline_admissible_kmutex",
         "baseline_admissible_paths": "baseline_admissible_paths",
+        "baseline_admissible_paths_table": "baseline_admissible_paths_table",
         "baseline_pdb": "baseline_pdb",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -87,7 +89,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "25|baseline_admissible, "
             "26|baseline_admissible_lp, "
             "27|baseline_admissible_kmutex, "
-            "28|baseline_admissible_paths"
+            "28|baseline_admissible_paths, "
+            "29|baseline_admissible_paths_table"
         )
     return aliases[normalized]
 
@@ -229,7 +232,11 @@ parser.add_argument(
         'alternative paths sharing a mutex action in overlapping windows (incl. an '
         'action mutex with itself when it occupies a resource) collapse via max '
         'instead of summing as independent retries; an AND path is dropped when its '
-        'achievers cannot run in parallel; K via TP_MCTS_KMUTEX_K)'
+        'achievers cannot run in parallel; K via TP_MCTS_KMUTEX_K), '
+        '29|baseline_admissible_paths_table (table-flowing paths: K-row achiever-path '
+        'tables flow through the RPG so the AND layer and goal score can apply '
+        'cross-fact temporal-mutex bounds via kernelized aggregation; ADMISSIBLE; '
+        'K via TP_MCTS_KMUTEX_K, aggregation via TP_MCTS_HEURISTIC_AGGREGATION)'
     ),
     nargs='?',
     default='baseline',

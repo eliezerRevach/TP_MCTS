@@ -67,9 +67,17 @@ def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
     direction that — unlike the final-layer "product" — is not gated by the
     slowest goal and gives a usable gradient. `baseline_survival` keeps the
     standard final-layer "product" score, so the two are directly comparable
-    (identical survival propagation, different goal aggregation). Every other
-    strategy also uses "product".
+    (identical survival propagation, different goal aggregation).
+    `baseline_admissible_paths_table` uses "kernelized" goal aggregation
+    (cross-fact temporal-mutex AND over the stashed path tables). Override any
+    strategy default via env ``TP_MCTS_HEURISTIC_AGGREGATION`` (set in the
+    notebook config). Every other strategy uses "product".
     """
+    import os
+
+    env_agg = (os.environ.get("TP_MCTS_HEURISTIC_AGGREGATION") or "").strip().lower()
+    if env_agg:
+        return env_agg
     strat = (temporal_heuristic_strategy or "").strip().lower()
     if strat == "baseline_survival_meanvar":
         return "meanvar"
@@ -77,6 +85,8 @@ def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
         # baseline propagation + deadline-normalized time-to-goal margin
         # V = 1 - t*/R (comparable across deadlines; see temporal_probabilistic_rpg).
         return "time_to_goal"
+    if strat == "baseline_admissible_paths_table":
+        return "kernelized"
     return "product"
 
 

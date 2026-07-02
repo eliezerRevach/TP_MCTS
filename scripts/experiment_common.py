@@ -118,6 +118,22 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_admissible_paths",
         "label": "baseline_admissible_paths",
     },
+    # baseline_admissible with a TABLE-FLOWING path representation: a K-row
+    # achiever-path table flows through the whole RPG so the AND layer (action
+    # preconditions AND the goal) can apply cross-fact temporal-mutex bounds.
+    # Goal score uses aggregation="kernelized" (and_cumulative_bound over goal
+    # path tables); KMUTEX_K caps rows per fact-layer. ADMISSIBLE upper bound.
+    "baseline_admissible_paths_table": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_paths_table",
+        "label": "baseline_admissible_paths_table",
+    },
+    # Synonym: shorthand for baseline_admissible_paths_table.
+    "admissible_paths_table": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_paths_table",
+        "label": "baseline_admissible_paths_table",
+    },
     # Forward baseline DP whose AND/precondition layer is tightened by a
     # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
     # layer t) from a per-pattern backward DP (max over projected actions),
