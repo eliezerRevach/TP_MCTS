@@ -58,7 +58,7 @@ def main():
     ap.add_argument("--garbage_amount", type=int, default=10)
     ap.add_argument("--domain_type", default="regular")
     ap.add_argument("--depth", type=int, default=None, help="propagation depth (default: deadline)")
-    ap.add_argument("-k", "--kmutex_k", type=int, default=3)
+    ap.add_argument("-k", "--kmutex_k", type=int, default=5)
     ap.add_argument(
         "--mutex_mode",
         default="exec",
@@ -115,7 +115,10 @@ def main():
     print("\n=== temporal path-mutex growth (one forward propagation) ===", flush=True)
     print(heuristic.log_pathmutex_summary(), flush=True)
     print(
-        f"baseline_admissible_paths score = {paths:.6f}", flush=True,
+        f"baseline_admissible_paths score = {paths:.6f}   "
+        f"(baseline_admissible={admissible:.6f}, delta={paths - admissible:+.6f}, "
+        f"{'OK <= baseline' if paths <= admissible + 1e-9 else 'VIOLATION > baseline'})",
+        flush=True,
     )
 
     kinstr = heuristic._kmutex_instr
@@ -128,10 +131,10 @@ def main():
         flush=True,
     )
     print(
-        f"  temporal paths  : {pinstr.or_nodes_tightened} HIT(s) (max-of-sums<union) "
-        f"of {pinstr.or_nodes_total} OR-nodes "
+        f"  temporal paths  : {pinstr.hits} HIT(s) (mutex_adds={pinstr.mutex_adds} "
+        f"mutex_merges={pinstr.mutex_merges}) of {pinstr.or_nodes_total} OR-nodes "
         f"(tighten_fraction={pinstr.tighten_fraction:.3f}, "
-        f"mass_shaved={pinstr.mass_shaved:.3f}, AND_blocked={pinstr.and_paths_blocked}).",
+        f"mass_shaved={pinstr.mass_shaved:.3f}).",
         flush=True,
     )
     if pinstr.or_nodes_tightened > kinstr.or_nodes_clique_survived:

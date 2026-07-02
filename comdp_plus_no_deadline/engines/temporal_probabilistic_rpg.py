@@ -40,7 +40,14 @@ from comdp_plus_no_deadline.engines.kmutex_or_bound import (
 )
 from comdp_plus_no_deadline.engines.path_mutex import (
     PathMutexInstrumentation,
-    propagate_path_mutex,
+    Row,
+    Segment,
+    and_cumulative_bound,
+    combine_precondition_footprints,
+    cumulative_merge_truncate,
+    prune_expired,
+    table_or_hazard,
+    table_or_hazard_paths,
 )
 
 
@@ -347,6 +354,7 @@ class TemporalProbabilisticRPGHeuristic:
         self._unbiased_structural_built: bool = False
         self._unbiased_action_del_effects: Dict[str, frozenset] = {}
         self._unbiased_deleters_by_fact: Dict[Fact, List[str]] = {}
+        self._unbiased_preconditioners_by_fact: Dict[Fact, Set[str]] = {}
         self._unbiased_name_to_model: Dict[str, TemporalRelaxedActionModel] = {}
         # Per (state_sig, target_sig, depth) cache of {lambda_total, lambda_breakdown, B_table}.
         self._unbiased_correction_cache: Dict[Tuple[frozenset[Fact], frozenset[Fact], int], Dict] = {}
@@ -387,7 +395,7 @@ class TemporalProbabilisticRPGHeuristic:
         # clique of size >= 2 survived) across the whole search; call
         # ``log_kmutex_summary()`` to read it. Env knobs let the notebook config
         # block thread values into the run_domain subprocess.
-        self._kmutex_k: int = max(1, _env_int("TP_MCTS_KMUTEX_K", 3))
+        self._kmutex_k: int = max(1, _env_int("TP_MCTS_KMUTEX_K", 5))
         # Which action-mutex notion certifies a max-collapse:
         #   "exec" (default): delete-interference + shared consumable precondition
         #       only — "paths we can say FOR SURE are mutex" (cannot both execute
@@ -417,6 +425,11 @@ class TemporalProbabilisticRPGHeuristic:
         # segment-overlap mutex (including an action mutex with itself when it
         # occupies a resource). Reuses _kmutex_k for the path cap.
         self._pathmutex_instr: PathMutexInstrumentation = PathMutexInstrumentation()
+        # Table-flowing strategy ("baseline_admissible_paths_table"): the last
+        # run's final-layer per-fact cumulative row tables + marginals, stashed so
+        # the "kernelized" goal aggregation can apply the cross-fact AND bound.
+        self._paths_table_final: Dict[Fact, List[Row]] = {}
+        self._paths_table_marginals: Dict[Fact, float] = {}
         # AND-layer gamma correction (baseline_survival_and_gamma). Config is
         # overridable per-instance before the first query; everything else is
         # built lazily once on first use.
@@ -653,6 +666,15 @@ class TemporalProbabilisticRPGHeuristic:
             )
             self._query_cache[query_key] = result
             return result
+        if chosen_strategy == "baseline_admissible_paths_table":
+            result = self._heuristic_propagate_baseline_admissible_paths_table(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
         if chosen_strategy == "baseline_cached":
             result = self._heuristic_propagate_baseline_cached(
                 state=state,
@@ -863,6 +885,20 @@ class TemporalProbabilisticRPGHeuristic:
                 score *= probability
         elif aggregation == "min":
             score = min(goal_probabilities, default=1.0)
+        elif aggregation == "kernelized":
+            # Cross-fact temporal-mutex AND bound over the GOAL conjunction, using
+            # the per-goal cumulative path tables stashed by the table-flowing
+            # strategy (baseline_admissible_paths_table). Falls back to the plain
+            # Frechet min of the goal marginals when no table is available (other
+            # strategies) or nothing is mutex. Always <= min(goal marginals).
+            marg = {
+                goal: _clamp_probability(
+                    self._paths_table_marginals.get(goal, final_probabilities.get(goal, 0.0))
+                )
+                for goal in goals_list
+            }
+            fr = {goal: self._paths_table_final.get(goal, []) for goal in goals_list}
+            score = and_cumulative_bound(fr, marg, self._path_actions_mutex)
         elif aggregation == "area":
             # Time-aware graded score: mean over ALL temporal layers of the
             # goal-product at that layer (an integral / area-under-curve of
@@ -1305,6 +1341,7 @@ class TemporalProbabilisticRPGHeuristic:
             "baseline_admissible_lp",
             "baseline_admissible_kmutex",
             "baseline_admissible_paths",
+            "baseline_admissible_paths_table",
             "baseline_pdb",
             "baseline_cached",
             "baseline_survival",
@@ -1862,10 +1899,21 @@ class TemporalProbabilisticRPGHeuristic:
         paths`` heuristic stays admissible (``max`` is applied only where two paths
         genuinely cannot run in parallel; everything else sums):
 
-          - self-mutex: ``del(a) & pre(a) != {}`` — the action occupies a resource
-            it also needs, so two TEMPORALLY OVERLAPPING uses conflict (the same
-            drive over [0,15] and [5,20]). Zero-duration actions never overlap, so
-            this is harmless for instantaneous actions.
+          - self-mutex: ``del(a) & pre(a) != {}`` for some fact NOT PRIVATE to
+            ``a`` — the action occupies a resource it also needs, so two
+            TEMPORALLY OVERLAPPING uses conflict (the same drive over [0,15] and
+            [5,20]). Zero-duration actions never overlap, so this is harmless for
+            instantaneous actions. A fact required by NO action other than ``a``
+            itself (e.g. the ``inExecution(start-X)`` bookkeeping marker the
+            durative-action start/end-splitting convention uses internally) is
+            EXCLUDED: it isn't a shared resource, it's an artifact of how this
+            codebase represents one durative action as two atoms, and its
+            "self-delete-interference" is exactly the relaxed-graph re-firing
+            that ``cumulative_retry_update`` already discounts correctly as a
+            legitimate retry (the probabilistic outcome may need another
+            attempt). Treating it as resource contention would shadow every
+            retry after the first, capping a probabilistic action's reachability
+            at its single-attempt probability — a real under-count, not a bound.
           - cross delete-interference (Graphplan): one action's delete clobbers the
             other's precondition or add-effect, so they cannot be co-executed.
 
@@ -1882,7 +1930,11 @@ class TemporalProbabilisticRPGHeuristic:
             return False
         del_a = self._unbiased_action_del_effects.get(name_a, frozenset())
         if name_a == name_b:
-            return bool(del_a & model_a.preconditions)
+            shared = del_a & model_a.preconditions
+            return any(
+                self._unbiased_preconditioners_by_fact.get(f, set()) - {name_a}
+                for f in shared
+            )
         model_b = self._unbiased_name_to_model.get(name_b)
         if model_b is None:
             return False
@@ -1911,53 +1963,364 @@ class TemporalProbabilisticRPGHeuristic:
         start_time: float,
         debug: bool,
     ) -> TemporalPropagationResult:
-        """Path-mutex temporal tightening (see ``path_mutex``).
+        """``baseline_admissible`` with the per-layer OR-hazard tightened by a
+        mutex-aware K-bounded table (see ``path_mutex``).
 
-        Instead of a scalar ``P_t(f)``, this carries <= K timed achiever-PATHS per
-        fact and combines them by temporal segment-overlap mutex: alternative
-        paths that share a mutex action in overlapping windows (including an action
-        mutex with itself when it occupies a resource) collapse via ``max`` rather
-        than summing as independent retries; a conjunctive AND path is dropped when
-        its chosen achievers cannot run in parallel. The OR-aggregated scalar is
-        returned in ``probabilities_by_layer`` so the usual goal product applies.
+        This is a MINIMAL generalization of ``_heuristic_propagate_baseline_
+        admissible``: identical persistence step, identical Frechet-min AND
+        layer, identical cumulative-retry cross-layer recursion ``g(p, h) =
+        p + (1-p)*h`` (UNCHANGED — no new probability-combination algebra).
+        Contributions arriving at the SAME layer are folded into a <= K row
+        table (``table_or_hazard`` / ``insert_or_absorb``) keyed by TEMPORAL
+        segment-overlap mutex (including an action mutex with itself when it
+        occupies a resource it also needs), read as the max over that table
+        instead of a flat capped sum.
+
+        NOTE — cross-layer shadowing (excluding a contribution arriving at a
+        LATER layer if it conflicted with an earlier layer's still-active
+        occupant) was tried and REVERTED: it can permanently block a much
+        STRONGER later mutex-alternative behind a weak earlier one, because by
+        the time the later one arrives the earlier one's value is already
+        irreversibly folded into the scalar P_{t-1}(f) via g(p,h) — there is no
+        way to retroactively compare and let the better one win. So mutex is
+        only ever compared WITHIN one layer's arrivals (table_or_hazard); a
+        self-mutex action firing again at a later, overlapping layer is not
+        caught by this design. That gap needs a different mechanism (holding
+        contested contributions until their window can no longer be
+        challenged, then taking max over whichever overlapped) — not yet built.
+
+        AND layer remembers paths ("pai"): when action ``a`` fires, the
+        contribution it schedules carries not just ``a``'s own ``[fire, arrival)``
+        segment but the UNION of one feasible representative footprint per
+        precondition (``combine_precondition_footprints``, against the SAME
+        per-fact registry) — so a later mutex check sees the full transitive
+        resource usage, not just ``a``'s own step. The AND-layer PROBABILITY
+        itself is UNCHANGED (still the Frechet-min ``admissible_and_support`` over
+        the precondition scalars) — only the footprint used for FUTURE mutex
+        detection is enriched. The enrichment is feasibility-checked (rejects any
+        combination where two chosen precondition-occurrences are themselves
+        mutex) so it never claims two mutually-exclusive occurrences "both
+        definitely happened" — an over-claim that would risk under-counting later
+        — and on failure it silently falls back to just ``a``'s own segment.
+
+        Provably ``<= baseline_admissible`` at every layer: ``table_or_hazard``'s
+        value never exceeds the flat sum of its inputs (``max(a,b) <= a+b``), so
+        ``H_t(f)_table <= H_t(f)_baseline`` always; since ``g(p,h)`` is monotone
+        non-decreasing in ``h``, induction over layers gives
+        ``P_t(f)_table <= P_t(f)_baseline`` everywhere. The AND-layer footprint
+        enrichment changes NO probability anywhere (the Frechet-min computation
+        is untouched), so it cannot affect this bound — it can only ever ADD
+        mutex-detection power to LATER OR-layer cells, which can only further
+        TIGHTEN (never loosen) the result.
         """
         self._ensure_unbiased_structural_extracted()
         state_facts = _extract_state_facts(state)
         depth = max(0, int(fixed_depth))
         facts = self._facts.union(state_facts)
         k = self._kmutex_k
-
-        prob_by_layer, _ = propagate_path_mutex(
-            self._action_models,
-            state_facts=state_facts,
-            facts=facts,
-            depth=depth,
-            mutex_fn=self._path_actions_mutex,
-            k=k,
-            instrumentation=self._pathmutex_instr,
+        mutex_fn = self._path_actions_mutex
+        # A future arrival's occupied window can START much earlier than the
+        # layer it ARRIVES at (long-duration actions), so a registered segment
+        # is only safe to prune once even the longest possible future action
+        # could no longer reach back far enough to overlap it (worst case start
+        # = current_layer - max_duration). Pruning by "current layer" alone
+        # would discard still-relevant segments too early.
+        max_duration = max(
+            (int(m.effect_delay_steps) for m in self._action_models), default=0
         )
 
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        # Per (arrival_layer, fact): list of (achiever name, B_e, footprint).
+        pending_supports: Dict[Tuple[int, Fact], List[Tuple[str, float, frozenset]]] = {}
+        # Per fact: persisted registry of recent contributions' temporal
+        # footprints, used ONLY by the AND-layer's combine_precondition_footprints
+        # lookup (bookkeeping — no exclusion; cross-layer shadowing was tried and
+        # reverted, see the strategy/module docstrings).
+        active_footprints: Dict[Fact, List[Segment]] = {}
+        fact_support_cache: Dict[Tuple[Fact, int], float] = {}
+        action_support_cache: Dict[Tuple[str, int], float] = {}
+        fact_cache_hits = 0
+        action_cache_hits = 0
         traces: List[TemporalLayerTrace] = []
-        if debug:
-            for layer in sorted(prob_by_layer.keys()):
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
+
+        def fact_support(fact: Fact, layer: int) -> float:
+            nonlocal fact_cache_hits
+            key = (fact, layer)
+            if key in fact_support_cache:
+                fact_cache_hits += 1
+                return fact_support_cache[key]
+            value = _clamp_probability(probabilities_by_layer[layer].get(fact, 0.0))
+            fact_support_cache[key] = value
+            return value
+
+        for layer in range(depth + 1):
+            if layer > 0:
+                for fact in facts:
+                    probabilities_by_layer[layer][fact] = max(
+                        probabilities_by_layer[layer][fact],
+                        probabilities_by_layer[layer - 1][fact],
+                    )
+
+            arrivals: Dict[Fact, float] = {}
+            for fact in facts:
+                supports = pending_supports.get((layer, fact), [])
+                if not supports:
+                    continue
+                # Register this layer's arriving footprints for the AND-layer's
+                # combine_precondition_footprints lookup only (bookkeeping, no
+                # exclusion — cross-layer shadowing was reverted, see below).
+                registry = prune_expired(active_footprints.get(fact, []), layer - max_duration)
+                for _name, _prob, footprint in supports:
+                    registry.extend(footprint)
+                active_footprints[fact] = registry
+                # OR layer: K-bounded mutex table instead of the flat union sum
+                # (same-layer arrivals only).
+                or_result = table_or_hazard(supports, mutex_fn, k)
+                self._pathmutex_instr.record_or(or_result)
+                arrival_hazard = or_result.value
+                current = probabilities_by_layer[layer][fact]
+                updated = _clamp_probability(current + (1.0 - current) * arrival_hazard)
+                probabilities_by_layer[layer][fact] = max(current, updated)
+                arrivals[fact] = arrival_hazard
+                fact_support_cache[(fact, layer)] = probabilities_by_layer[layer][fact]
+
+            if layer == depth:
+                if debug:
+                    traces.append(
+                        TemporalLayerTrace(
+                            layer=layer,
+                            fact_probabilities=dict(probabilities_by_layer[layer]),
+                            arrivals=arrivals,
+                        )
+                    )
+                break
+
+            action_support: Dict[str, float] = {}
+            for action_model in self._action_models:
+                support_key = (action_model.name, layer)
+                if support_key in action_support_cache:
+                    action_support_value = action_support_cache[support_key]
+                    action_cache_hits += 1
+                else:
+                    # AND layer: Frechet min, identical to baseline_admissible.
+                    probs_for_preconditions = {
+                        fact: fact_support(fact, layer)
+                        for fact in action_model.preconditions
+                    }
+                    action_support_value = admissible_and_support(
+                        action_model.preconditions,
+                        probs_for_preconditions,
+                    )
+                    action_support_cache[support_key] = action_support_value
+
+                action_support[action_model.name] = action_support_value
+                if action_support_value <= 0.0:
+                    continue
+
+                arrival_layer = layer + action_model.effect_delay_steps
+                if arrival_layer > depth:
+                    continue
+                own_segment = Segment(action_model.name, layer, arrival_layer)
+                # AND layer remembers paths: union in one feasible representative
+                # footprint per precondition (best-effort; falls back to just
+                # own_segment on failure). Does NOT change action_support_value.
+                inherited = combine_precondition_footprints(
+                    list(action_model.preconditions), active_footprints, mutex_fn
+                )
+                full_footprint = frozenset(inherited | {own_segment})
+                for fact, add_prob in action_model.add_probabilities.items():
+                    success = _clamp_probability(action_support_value * add_prob)
+                    pending_supports.setdefault((arrival_layer, fact), []).append(
+                        (action_model.name, success, full_footprint)
+                    )
+
+            action_support_by_layer[layer] = dict(action_support)
+
+            if debug:
                 traces.append(
                     TemporalLayerTrace(
                         layer=layer,
-                        fact_probabilities=dict(prob_by_layer[layer]),
+                        fact_probabilities=dict(probabilities_by_layer[layer]),
+                        action_support=action_support,
+                        arrivals=arrivals,
                     )
                 )
 
         return TemporalPropagationResult(
-            probabilities_by_layer=prob_by_layer,
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+            action_support_by_layer=action_support_by_layer,
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def _heuristic_propagate_baseline_admissible_paths_table(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """Table-flowing paths strategy: a K-row table flows through the whole RPG
+        instead of a scalar, so the AND layer can see cross-fact temporal mutex.
+
+        Per fact we keep BOTH:
+          * the scalar marginal ``V_f`` = P(f by t), updated by the SAME cumulative
+            retry ``g(p,h)`` as ``baseline_admissible`` (with the OR hazard from the
+            mutex-aware ``table_or_hazard_paths`` <= union) — this fills
+            ``probabilities_by_layer`` and keeps the whole strategy <= baseline; and
+          * a cumulative K-row table of the fact's achiever PATHS (each row carries
+            the firing action's own [fire,arrival) segment as a GUARANTEED footprint,
+            ``complete=True``), summed across layers and truncated sum-preservingly
+            (``cumulative_merge_truncate``) — the mutex evidence for the AND.
+
+        AND layer (both action preconditions AND the goal, via the ``kernelized``
+        aggregation) uses ``and_cumulative_bound``: min( Frechet over V_f , union
+        bound over the COMPATIBLE cross-fact path tuples ). That is <= Frechet
+        always (so <= baseline) and drops below it exactly when a genuine temporal
+        conflict makes a conjunction infeasible — the machine_shop serialization
+        signal. Admissible: V_f is the proven scalar bound; the tuple sum is a
+        union bound over compatible joint path-events, and every truncation keeps
+        all mass as a free/incomplete row so nothing is dropped.
+
+        v1 scope: the emitted achiever row carries only its OWN segment (guaranteed);
+        deeper transitive footprints and multi-row AND emission are deferred.
+        """
+        self._ensure_unbiased_structural_extracted()
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+        k = self._kmutex_k
+        mutex_fn = self._path_actions_mutex
+        max_duration = max(
+            (int(m.effect_delay_steps) for m in self._action_models), default=0
+        )
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        # Cumulative per-fact path table (auxiliary — carries footprints for the
+        # AND mutex; the marginal lives in probabilities_by_layer). Initial facts
+        # start as one free/incomplete row (achieved, no resource commitment).
+        fact_tables: Dict[Fact, List[Row]] = {
+            f: [Row(1.0, frozenset(), alternatives=(), complete=False)] for f in state_facts
+        }
+        pending_supports: Dict[Tuple[int, Fact], List[Row]] = {}
+        traces: List[TemporalLayerTrace] = []
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
+
+        for layer in range(depth + 1):
+            if layer > 0:
+                for fact in facts:
+                    probabilities_by_layer[layer][fact] = max(
+                        probabilities_by_layer[layer][fact],
+                        probabilities_by_layer[layer - 1][fact],
+                    )
+                # Expire footprint segments that can no longer overlap anything new.
+                cutoff = layer - max_duration
+                for rows in fact_tables.values():
+                    for r in rows:
+                        if r.footprint:
+                            pruned = frozenset(s for s in r.footprint if s.end > cutoff)
+                            if pruned != r.footprint:
+                                r.footprint = pruned
+
+            arrivals: Dict[Fact, float] = {}
+            for fact in facts:
+                sup = pending_supports.get((layer, fact))
+                if not sup:
+                    continue
+                v_prev = probabilities_by_layer[layer][fact]
+                triples = [(idx, r.prob, r.footprint) for idx, r in enumerate(sup)]
+                hazard = table_or_hazard_paths(triples, mutex_fn, k).value
+                v_new = _clamp_probability(v_prev + (1.0 - v_prev) * hazard)
+                probabilities_by_layer[layer][fact] = max(v_prev, v_new)
+                arrivals[fact] = hazard
+                tbl = fact_tables.setdefault(fact, [])
+                for r in sup:
+                    tbl.append(Row(r.prob, r.footprint, alternatives=r.alternatives,
+                                   complete=r.complete))
+                cumulative_merge_truncate(tbl, k)
+
+            if layer == depth:
+                if debug:
+                    traces.append(TemporalLayerTrace(
+                        layer=layer,
+                        fact_probabilities=dict(probabilities_by_layer[layer]),
+                        arrivals=arrivals,
+                    ))
+                break
+
+            action_support: Dict[str, float] = {}
+            for action_model in self._action_models:
+                preconds = list(action_model.preconditions)
+                if preconds:
+                    marg = {f: probabilities_by_layer[layer].get(f, 0.0) for f in preconds}
+                    fr = {f: fact_tables.get(f, []) for f in preconds}
+                    support_value = and_cumulative_bound(fr, marg, mutex_fn)
+                else:
+                    support_value = 1.0
+                action_support[action_model.name] = support_value
+                if support_value <= 0.0:
+                    continue
+                arrival_layer = layer + action_model.effect_delay_steps
+                if arrival_layer > depth:
+                    continue
+                own_segment = Segment(action_model.name, layer, arrival_layer)
+                for fact, add_prob in action_model.add_probabilities.items():
+                    success = _clamp_probability(support_value * add_prob)
+                    if success <= 0.0:
+                        continue
+                    pending_supports.setdefault((arrival_layer, fact), []).append(
+                        Row(success, frozenset({own_segment}), alternatives=(), complete=True)
+                    )
+            action_support_by_layer[layer] = dict(action_support)
+
+            if debug:
+                traces.append(TemporalLayerTrace(
+                    layer=layer,
+                    fact_probabilities=dict(probabilities_by_layer[layer]),
+                    action_support=action_support,
+                    arrivals=arrivals,
+                ))
+
+        # Stash final tables + marginals so the "kernelized" goal aggregation can
+        # apply the cross-fact AND bound over the goal conjunction.
+        self._paths_table_final = {f: list(rows) for f, rows in fact_tables.items()}
+        self._paths_table_marginals = dict(probabilities_by_layer[depth])
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
             depth_used=depth,
             traces=traces,
             cache_hit=False,
             fact_cache_hits=0,
             action_cache_hits=0,
-            action_support_by_layer={},
+            action_support_by_layer=action_support_by_layer,
             cached_table=CachedPTRPGTable(
                 probabilities_by_layer={
-                    layer: dict(values) for layer, values in prob_by_layer.items()
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
                 },
                 state_facts=frozenset(state_facts),
                 depth_used=depth,
@@ -3490,6 +3853,17 @@ class TemporalProbabilisticRPGHeuristic:
             for f in dels:
                 deleters.setdefault(f, []).append(name)
         self._unbiased_deleters_by_fact = deleters
+
+        # Invert: fact -> {action names that require it as a precondition}. Used
+        # to tell a genuine shared resource apart from a PRIVATE bookkeeping
+        # marker (e.g. the "inExecution(start-X)" fact the start/end durative-
+        # action-splitting convention uses internally, required ONLY by its own
+        # matching end-action) — see _compute_path_actions_mutex.
+        preconditioners: Dict[Fact, Set[str]] = {}
+        for m in self._action_models:
+            for f in m.preconditions:
+                preconditioners.setdefault(f, set()).add(m.name)
+        self._unbiased_preconditioners_by_fact = preconditioners
 
         self._unbiased_structural_built = True
 
