@@ -151,6 +151,7 @@ class Row:
     footprint: FrozenSet[Segment]
     alternatives: Tuple[FrozenSet[Segment], ...] = ()
     complete: bool = True
+    origin: Optional[str] = None  # emitting action name: same origin = RETRY class
 
     def alts(self) -> Tuple[FrozenSet[Segment], ...]:
         """The disjunctive footprints — the single ``footprint`` if none stored."""
@@ -785,20 +786,43 @@ def and_cumulative_bound(fact_rows: Mapping[Fact, Sequence[Row]],
 
 
 def cumulative_merge_truncate(table: List[Row], k: int) -> List[Row]:
-    """Sum-PRESERVING truncation for a cumulative (free-summed) table: while over
-    ``k`` rows, merge the two weakest into one FREE, INCOMPLETE row (prob summed,
-    footprint erased, complete=False). Preserves the marginal V=sum(probs) exactly
-    (unlike ``dominance_prune`` which preserves the max) and honestly degrades the
-    merged paths to "some untracked route" so they can never certify mutex — the
-    coarse far-horizon rows of the resolution idea. In place; returns the table."""
+    """Sum-PRESERVING truncation for a cumulative (free-summed) table.
+
+    Two passes, both merge-only (NEVER drop — dropping a route's mass from a
+    cumulative table under-counts the union bound at the AND -> inadmissible):
+
+      1. DEDUPE: rows with the IDENTICAL footprint merge by prob-sum (both
+         route-classes guarantee the same segments, so the merged class does too;
+         ``complete`` = AND).
+      2. While over ``k`` rows, merge the two WEAKEST into one row: prob summed,
+         footprint = INTERSECTION (segments guaranteed by BOTH classes stay
+         guaranteed for the union of the classes — certified conflicts on the
+         shared part survive; disagreements degrade to uncertain), ``complete`` =
+         AND. Frechet per tuple stays valid for any grouping of routes, so the
+         AND union bound is unaffected in soundness, only (possibly) loosened.
+
+    Preserves the marginal V = sum(probs) exactly. In place; returns the table."""
+    if len(table) > 1:
+        by_fp: dict = {}
+        for r in table:
+            key = (r.footprint, r.alternatives, r.origin)
+            prev = by_fp.get(key)
+            if prev is None:
+                by_fp[key] = Row(r.prob, r.footprint, alternatives=r.alternatives,
+                                 complete=r.complete, origin=r.origin)
+            else:
+                prev.prob = _clamp01(min(1.0, prev.prob + r.prob))
+                prev.complete = prev.complete and r.complete
+        table[:] = list(by_fp.values())
     if len(table) <= k:
         return table
     table.sort(key=lambda r: r.prob)
     while len(table) > k:
         r1 = table.pop(0)
         r2 = table.pop(0)
-        merged = Row(_clamp01(min(1.0, r1.prob + r2.prob)), frozenset(),
-                     alternatives=(), complete=False)
+        merged = Row(_clamp01(min(1.0, r1.prob + r2.prob)),
+                     r1.footprint & r2.footprint,
+                     alternatives=(), complete=r1.complete and r2.complete)
         # insert keeping the ascending order cheap.
         lo, hi = 0, len(table)
         while lo < hi:
@@ -809,3 +833,185 @@ def cumulative_merge_truncate(table: List[Row], k: int) -> List[Row]:
                 hi = mid
         table.insert(lo, merged)
     return table
+
+
+# =====================================================================
+# v2: transitive (chained) footprints + multi-row AND emission
+# ---------------------------------------------------------------------
+# The chaining rule from the design session: an achiever's emitted row carries
+# not just its own [fire, arrival) segment but the segments of WHATEVER
+# occurrences made its preconditions true — per feasible COMBO (one row per
+# precondition), NEVER unioned across a fact's alternative rows (that would
+# claim "both alternatives happened" and over-certify).
+#
+# Soundness of every footprint here = the GUARANTEED reading: a segment may be
+# in a row's footprint only if EVERY realization of that row-class used it.
+#   * own segment: guaranteed (this row-class is "the achiever fired there").
+#   * a chosen combo row's footprint: guaranteed for realizations routed
+#     through that row-class — which is exactly what the combo row stands for.
+#   * a NON-contending precondition contributes its guaranteed REPRESENTATIVE:
+#     the INTERSECTION of its rows' footprints (segments used by EVERY route;
+#     incomplete rows contribute nothing, killing the intersection — honest).
+#   * RESOURCE PROJECTION: only segments of actions that participate in >= 1
+#     mutex pair are kept — provably lossless for certification (a non-resource
+#     segment can never conflict with anything) and the thing that keeps combo
+#     row-sets small and dedupe-able.
+# =====================================================================
+
+
+def retry_fold_arrivals(
+    table: List[Row],
+    arriving: Sequence[Row],
+    alt_cap: int = 8,
+) -> List[Row]:
+    """Fold a layer's arriving aux rows into the cumulative table with RETRY
+    semantics — the session rule "same-path re-firing -> g-discount, never sum".
+
+    Same ``origin`` (action name) = the same route-class re-firing:
+      * WITHIN the arriving batch (same layer): alternative concrete routes of
+        the class -> probs SUM (union bound over routes), windows accumulate as
+        alternatives.
+      * ACROSS layers (batch row vs existing table row): a RETRY of the class ->
+        probs fold by ``g(p, h) = p + (1-p) h`` (the DP's own cross-layer
+        algebra — summing here is the classic re-firing double-count that blows
+        a table row up to a free prob-1 mass and kills all tightening), windows
+        accumulate as alternatives.
+
+    The class row's ``alternatives`` are its possible windows; certification
+    (:func:`guaranteed_mutex`) demands a conflict with EVERY window — a retry
+    window that escapes the challenger correctly blocks the zero. ``footprint``
+    degrades to the intersection of the alternatives (the always-guaranteed
+    part). Over ``alt_cap`` windows the row keeps the first ``alt_cap`` but
+    drops ``complete`` — it can then never certify (honest degrade, admissible
+    direction). Rows without an origin never fold (safe: they only sum later).
+    """
+    batch: dict = {}
+    loose: List[Row] = []
+    for r in arriving:
+        if r.origin is None:
+            loose.append(r)
+            continue
+        prev = batch.get(r.origin)
+        if prev is None:
+            batch[r.origin] = Row(r.prob, r.footprint, alternatives=r.alternatives,
+                                  complete=r.complete, origin=r.origin)
+        else:
+            prev.prob = _clamp01(min(1.0, prev.prob + r.prob))  # same layer: routes sum
+            _accumulate_alternatives(prev, r, alt_cap)
+    for r in batch.values():
+        target = None
+        for row in table:
+            if row.origin is not None and row.origin == r.origin:
+                target = row
+                break
+        if target is None:
+            table.append(r)
+        else:
+            target.prob = _clamp01(target.prob + (1.0 - target.prob) * r.prob)  # retry: g
+            _accumulate_alternatives(target, r, alt_cap)
+    table.extend(loose)
+    return table
+
+
+def _accumulate_alternatives(row: Row, other: Row, alt_cap: int) -> None:
+    """Merge ``other``'s windows into ``row`` as disjunctive alternatives."""
+    alts = list(row.alts())
+    for a in other.alts():
+        if a not in alts:
+            alts.append(a)
+    if len(alts) > alt_cap:
+        alts = alts[:alt_cap]
+        row.complete = False
+    else:
+        row.complete = row.complete and other.complete
+    row.alternatives = tuple(alts)
+    inter = alts[0]
+    for a in alts[1:]:
+        inter = inter & a
+    row.footprint = inter
+
+
+def guaranteed_rep(rows: Sequence[Row]) -> FrozenSet[Segment]:
+    """Segments guaranteed by EVERY route of the fact = intersection over its
+    rows' footprints. An incomplete row (unknown routes) contributes nothing,
+    so it erases the intersection — the honest degrade."""
+    acc: Optional[FrozenSet[Segment]] = None
+    for r in rows:
+        fp = r.footprint if r.complete else frozenset()
+        acc = fp if acc is None else (acc & fp)
+        if not acc:
+            return frozenset()
+    return acc or frozenset()
+
+
+def and_emit_rows(
+    fact_rows: Mapping[Fact, Sequence[Row]],
+    marginals: Mapping[Fact, float],
+    support_value: float,
+    own_segment: Segment,
+    q: float,
+    mutex_fn: Callable[[Action, Action], bool],
+    project: Callable[[FrozenSet[Segment]], FrozenSet[Segment]],
+    combo_cap: int = 64,
+    out_cap: int = 5,
+) -> List[Row]:
+    """Multi-row AND emission: the achiever's contribution to its effect fact as
+    one row PER surviving feasible combo of contending-precondition routes, each
+    chaining the combo's (projected) footprints + the achiever's own segment.
+
+    Non-contending preconditions (no certified cross-fact mutex) are not
+    enumerated — they contribute their guaranteed representative footprint and
+    their marginal as a Frechet floor. If there is no contention (or the combo
+    product exceeds ``combo_cap``), degrades to ONE row with
+    ``prob = q * support_value`` and the fully-guaranteed footprint — exactly the
+    v1 emission, enriched with the guaranteed inherited segments.
+
+    Every returned row's prob is a valid upper bound on its route-class (Frechet
+    per combo), and together the rows COVER all routes (combos are enumerated,
+    merged on overflow, never dropped) — the two conditions the cumulative AND
+    union bound needs."""
+    facts = list(fact_rows)
+    own_fp = project(frozenset({own_segment}))
+    reps = {f: project(guaranteed_rep(fact_rows[f])) for f in facts}
+    all_reps: FrozenSet[Segment] = frozenset().union(own_fp, *reps.values()) if facts else own_fp
+
+    def fallback() -> List[Row]:
+        p = _clamp01(q * support_value)
+        return [Row(p, all_reps, alternatives=(), complete=True)] if p > 0.0 else []
+
+    contending = [f for comp in and_components(fact_rows, mutex_fn) if len(comp) > 1 for f in comp]
+    if not contending:
+        return fallback()
+    size = 1
+    for f in contending:
+        size *= max(1, len(fact_rows[f]))
+        if size > combo_cap:
+            return fallback()
+    if any(not fact_rows[f] for f in contending):
+        return fallback()
+
+    non_contending = [f for f in facts if f not in contending]
+    floor = min((_clamp01(marginals.get(f, 0.0)) for f in non_contending), default=1.0)
+    nc_fp: FrozenSet[Segment] = frozenset().union(own_fp, *(reps[f] for f in non_contending)) \
+        if non_contending else own_fp
+
+    out: List[Row] = []
+    for combo in product(*(fact_rows[f] for f in contending)):
+        feasible = True
+        for i in range(len(combo)):
+            for j in range(i + 1, len(combo)):
+                if guaranteed_mutex(combo[i], combo[j], mutex_fn):
+                    feasible = False
+                    break
+            if not feasible:
+                break
+        if not feasible:
+            continue
+        prob = _clamp01(q * min(min(r.prob for r in combo), floor))
+        if prob <= 0.0:
+            continue
+        fp = frozenset().union(nc_fp, *(project(r.footprint) for r in combo))
+        out.append(Row(prob, fp, alternatives=(),
+                       complete=all(r.complete for r in combo)))
+    cumulative_merge_truncate(out, out_cap)
+    return out

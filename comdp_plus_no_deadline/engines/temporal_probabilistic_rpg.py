@@ -43,8 +43,10 @@ from comdp_plus_no_deadline.engines.path_mutex import (
     Row,
     Segment,
     and_cumulative_bound,
+    and_emit_rows,
     combine_precondition_footprints,
     cumulative_merge_truncate,
+    retry_fold_arrivals,
     prune_expired,
     table_or_hazard,
     table_or_hazard_paths,
@@ -436,6 +438,15 @@ class TemporalProbabilisticRPGHeuristic:
         self._paths_table_and_nodes: int = 0
         self._paths_table_and_hits: int = 0
         self._paths_table_and_shaved: float = 0.0
+        # Chain instrumentation: emitted rows whose footprint carries inherited
+        # (transitive) resource segments beyond the achiever's own.
+        self._paths_table_chained_rows: int = 0
+        self._paths_table_emitted_rows: int = 0
+        # Actions participating in >= 1 mutex pair (incl. self-mutex) — the only
+        # ones whose segments can ever certify a conflict. Lazily built; used to
+        # PROJECT footprints so chains stay small (provably lossless for
+        # certification: non-resource segments conflict with nothing).
+        self._paths_resource_actions: Optional[set] = None
         # AND-layer gamma correction (baseline_survival_and_gamma). Config is
         # overridable per-instance before the first query; everything else is
         # built lazily once on first use.
@@ -2177,6 +2188,26 @@ class TemporalProbabilisticRPGHeuristic:
             ),
         )
 
+    def _paths_resource_action_set(self) -> set:
+        """Names of actions participating in >= 1 certified mutex pair (incl.
+        self-mutex). Only their segments can ever certify a temporal conflict, so
+        footprints are PROJECTED onto this set — lossless for certification,
+        essential for keeping chained footprints (and combo row-sets) small.
+        Built once per instance via the memoized pairwise mutex."""
+        if self._paths_resource_actions is None:
+            self._ensure_unbiased_structural_extracted()
+            names = [m.name for m in self._action_models]
+            res = set()
+            for i, a in enumerate(names):
+                if self._path_actions_mutex(a, a):
+                    res.add(a)
+                for b in names[i + 1:]:
+                    if self._path_actions_mutex(a, b):
+                        res.add(a)
+                        res.add(b)
+            self._paths_resource_actions = res
+        return self._paths_resource_actions
+
     def _heuristic_propagate_baseline_admissible_paths_table(
         self,
         state,
@@ -2206,8 +2237,11 @@ class TemporalProbabilisticRPGHeuristic:
         union bound over compatible joint path-events, and every truncation keeps
         all mass as a free/incomplete row so nothing is dropped.
 
-        v1 scope: the emitted achiever row carries only its OWN segment (guaranteed);
-        deeper transitive footprints and multi-row AND emission are deferred.
+        v2 (chained): each emitted achiever row inherits the TRANSITIVE resource
+        footprints of the precondition routes it fired from — one row per feasible
+        combo of CONTENDING precondition routes (``and_emit_rows``), guaranteed-
+        intersection representatives for the non-contending rest, everything
+        projected onto resource actions (the only segments that can certify).
         """
         self._ensure_unbiased_structural_extracted()
         state_facts = _extract_state_facts(state)
@@ -2215,6 +2249,11 @@ class TemporalProbabilisticRPGHeuristic:
         facts = self._facts.union(state_facts)
         k = self._kmutex_k
         mutex_fn = self._path_actions_mutex
+        resource_actions = self._paths_resource_action_set()
+
+        def project(fp):
+            return frozenset(s for s in fp if s.action in resource_actions)
+
         max_duration = max(
             (int(m.effect_delay_steps) for m in self._action_models), default=0
         )
@@ -2227,16 +2266,23 @@ class TemporalProbabilisticRPGHeuristic:
 
         # Cumulative per-fact path table (auxiliary — carries footprints for the
         # AND mutex; the marginal lives in probabilities_by_layer). Initial facts
-        # start as one free/incomplete row (achieved, no resource commitment).
+        # start as one COMPLETE free row: "true at start" is a fully-known route
+        # that used no resources (empty footprint is its guaranteed evidence).
         fact_tables: Dict[Fact, List[Row]] = {
-            f: [Row(1.0, frozenset(), alternatives=(), complete=False)] for f in state_facts
+            f: [Row(1.0, frozenset(), alternatives=(), complete=True)] for f in state_facts
         }
+        # Marginal-side arrivals: ONE (name, B_e, guaranteed_fp) per achiever —
+        # identical shape to v1 so the marginal V_f (and its <= baseline proof)
+        # is untouched. Aux-side arrivals: the chained multi-row emission.
         pending_supports: Dict[Tuple[int, Fact], List[Row]] = {}
+        pending_aux: Dict[Tuple[int, Fact], List[Row]] = {}
         traces: List[TemporalLayerTrace] = []
         action_support_by_layer: Dict[int, Dict[str, float]] = {}
         self._paths_table_and_nodes = 0
         self._paths_table_and_hits = 0
         self._paths_table_and_shaved = 0.0
+        self._paths_table_chained_rows = 0
+        self._paths_table_emitted_rows = 0
 
         for layer in range(depth + 1):
             if layer > 0:
@@ -2245,31 +2291,34 @@ class TemporalProbabilisticRPGHeuristic:
                         probabilities_by_layer[layer][fact],
                         probabilities_by_layer[layer - 1][fact],
                     )
-                # Expire footprint segments that can no longer overlap anything new.
-                cutoff = layer - max_duration
-                for rows in fact_tables.values():
-                    for r in rows:
-                        if r.footprint:
-                            pruned = frozenset(s for s in r.footprint if s.end > cutoff)
-                            if pruned != r.footprint:
-                                r.footprint = pruned
+                # NOTE: no expiry pruning here. The cumulative tables feed the AND
+                # bound, where a conflict between two PAST windows still certifies
+                # "these two routes could not both have happened" (the serialization
+                # evidence itself) — segments compare on absolute times, so
+                # serialized routes ([0,5) then [5,10)) are correctly compatible.
+                # Expiry is only sound for comparisons against FUTURE arrivals.
 
             arrivals: Dict[Fact, float] = {}
             for fact in facts:
                 sup = pending_supports.get((layer, fact))
-                if not sup:
+                aux = pending_aux.get((layer, fact), [])
+                if not sup and not aux:
                     continue
-                v_prev = probabilities_by_layer[layer][fact]
-                triples = [(idx, r.prob, r.footprint) for idx, r in enumerate(sup)]
-                hazard = table_or_hazard_paths(triples, mutex_fn, k).value
-                v_new = _clamp_probability(v_prev + (1.0 - v_prev) * hazard)
-                probabilities_by_layer[layer][fact] = max(v_prev, v_new)
-                arrivals[fact] = hazard
-                tbl = fact_tables.setdefault(fact, [])
-                for r in sup:
-                    tbl.append(Row(r.prob, r.footprint, alternatives=r.alternatives,
-                                   complete=r.complete))
-                cumulative_merge_truncate(tbl, k)
+                if sup:
+                    v_prev = probabilities_by_layer[layer][fact]
+                    triples = [(idx, r.prob, r.footprint) for idx, r in enumerate(sup)]
+                    hazard = table_or_hazard_paths(triples, mutex_fn, k).value
+                    v_new = _clamp_probability(v_prev + (1.0 - v_prev) * hazard)
+                    probabilities_by_layer[layer][fact] = max(v_prev, v_new)
+                    arrivals[fact] = hazard
+                if aux:
+                    tbl = fact_tables.setdefault(fact, [])
+                    # Same-origin re-firings fold by retry g(p,h) with windows kept
+                    # as disjunctive alternatives — never summed (the re-firing
+                    # double-count would build a free prob-1 row and kill all
+                    # tightening).
+                    retry_fold_arrivals(tbl, aux)
+                    cumulative_merge_truncate(tbl, k)
 
             if layer == depth:
                 if debug:
@@ -2306,8 +2355,33 @@ class TemporalProbabilisticRPGHeuristic:
                     success = _clamp_probability(support_value * add_prob)
                     if success <= 0.0:
                         continue
+                    if preconds:
+                        emitted = and_emit_rows(
+                            fr, marg, support_value, own_segment, add_prob,
+                            mutex_fn, project, combo_cap=64, out_cap=k,
+                        )
+                    else:
+                        emitted = [Row(success, project(frozenset({own_segment})),
+                                       alternatives=(), complete=True)]
+                    if not emitted:
+                        continue
+                    for r in emitted:
+                        r.origin = action_model.name
+                    # Marginal-side: ONE per-achiever contribution (v1 shape) whose
+                    # footprint is the fully-GUARANTEED part = intersection of the
+                    # emitted rows' footprints (present in every emitted route).
+                    marg_fp = emitted[0].footprint
+                    for r in emitted[1:]:
+                        marg_fp = marg_fp & r.footprint
                     pending_supports.setdefault((arrival_layer, fact), []).append(
-                        Row(success, frozenset({own_segment}), alternatives=(), complete=True)
+                        Row(success, marg_fp, alternatives=(), complete=True)
+                    )
+                    # Aux-side: the chained multi-row emission.
+                    pending_aux.setdefault((arrival_layer, fact), []).extend(emitted)
+                    self._paths_table_emitted_rows += len(emitted)
+                    own_only = project(frozenset({own_segment}))
+                    self._paths_table_chained_rows += sum(
+                        1 for r in emitted if r.footprint - own_only
                     )
             action_support_by_layer[layer] = dict(action_support)
 
@@ -4957,6 +5031,26 @@ class TemporalProbabilisticRPGHeuristic:
                 pass
         return 1
 
+    def _probe_fact_universe(self) -> Set[Fact]:
+        """
+        Every fact mentioned anywhere in the problem, used as the "all facts
+        true" probe state for state-dependent probabilistic effects (the
+        maximally delete-relaxed state). Computed once and cached.
+        """
+        universe = getattr(self, "_probe_fact_universe_cache", None)
+        if universe is not None:
+            return universe
+        universe = set(self._facts)
+        for action in self._actions:
+            universe.update(getattr(action, "pos_preconditions", set()) or set())
+            universe.update(getattr(action, "neg_preconditions", set()) or set())
+            universe.update(getattr(action, "add_effects", set()) or set())
+            universe.update(getattr(action, "del_effects", set()) or set())
+            for pe in getattr(action, "probabilistic_effects", []) or []:
+                universe.update(getattr(pe, "fluents", []) or [])
+        self._probe_fact_universe_cache = universe
+        return universe
+
     def _extract_add_probabilities(self, action) -> Dict[Fact, float]:
         add_probabilities: Dict[Fact, float] = {}
         for fact in getattr(action, "add_effects", set()):
@@ -4965,19 +5059,29 @@ class TemporalProbabilisticRPGHeuristic:
         for probabilistic_effect in getattr(action, "probabilistic_effects", []):
             per_effect_probability: MutableMapping[Fact, float] = {}
 
-            # Preferred path: execute the outcome function to read the exact
-            # per-fluent add probabilities. This works whenever the callable is
-            # evaluable in the current context.
-            outcomes = None
-            try:
-                outcomes = probabilistic_effect.probability_function(
-                    SimpleNamespace(predicates=set()),
-                    None,
-                )
-            except Exception:
-                outcomes = None
-
-            if outcomes:
+            # Execute the outcome function to read the exact per-fluent add
+            # probabilities. Probability functions may be STATE-DEPENDENT
+            # (branch on `state.predicates`), so a single probe only reveals
+            # one branch. Probe with both extreme states — nothing true and
+            # everything true (the maximally delete-relaxed state) — and keep
+            # the per-fluent MAX across probes: for an optimistic upper bound
+            # we must credit the most favorable reachable branch. A single
+            # empty-state probe silently dropped machine_shop move's
+            # `free(machine1) := True` branch (gated on `on(piece, machine1)`),
+            # leaving `free` with NO achiever and zeroing every state where a
+            # machine was busy.
+            probe_states = (set(), self._probe_fact_universe())
+            for probe_predicates in probe_states:
+                try:
+                    outcomes = probabilistic_effect.probability_function(
+                        SimpleNamespace(predicates=probe_predicates),
+                        None,
+                    )
+                except Exception:
+                    continue
+                if not outcomes:
+                    continue
+                probe_probability: Dict[Fact, float] = {}
                 for outcome_probability, assignments in outcomes.items():
                     p = _clamp_probability(outcome_probability)
                     for fact, value in assignments.items():
@@ -4986,24 +5090,26 @@ class TemporalProbabilisticRPGHeuristic:
                             "bool_constant_value",
                         ) else bool(value)
                         if is_positive:
-                            per_effect_probability[fact] = _clamp_probability(
-                                per_effect_probability.get(fact, 0.0) + p
+                            probe_probability[fact] = _clamp_probability(
+                                probe_probability.get(fact, 0.0) + p
                             )
-            else:
-                # Fallback: the outcome distribution could not be evaluated
-                # (the probability function is an opaque, state-dependent
-                # callable that may raise when probed with a placeholder
-                # state). Without this branch the affected fluents would get
-                # NO achiever and be silently treated as unreachable (P=0) —
-                # which is exactly what made machine_shop's probabilistic
-                # goals (shaped/smooth/painted/polished) score 0.
-                #
-                # The set of affected fluents is available *structurally* via
-                # `probabilistic_effect.fluents` without executing anything, so
-                # register each as an achiever with a fallback probability.
-                # Sign is assumed positive (add); deterministic deletes are
-                # captured separately from `del_effects`.
-                for fact in getattr(probabilistic_effect, "fluents", []):
+                for fact, probability in probe_probability.items():
+                    per_effect_probability[fact] = max(
+                        per_effect_probability.get(fact, 0.0), probability
+                    )
+
+            # Support safety net: the effect DECLARES the fluents it may touch
+            # via `probabilistic_effect.fluents` (no execution needed). Any
+            # declared fluent that no probe showed as a positive outcome —
+            # branches neither probe reaches, or functions that raise on both
+            # probes — still gets registered as an achiever at the fallback
+            # probability, so a declared outcome can never be silently lost
+            # and treated as unreachable (P=0). Sign is assumed positive
+            # (add); deterministic deletes are captured separately from
+            # `del_effects`. This may register a fluent the effect only ever
+            # deletes — loose but safe for an optimistic upper bound.
+            for fact in getattr(probabilistic_effect, "fluents", []):
+                if per_effect_probability.get(fact, 0.0) <= 0.0:
                     per_effect_probability[fact] = _clamp_probability(
                         self._FALLBACK_PROBABILISTIC_ADD_PROB
                     )

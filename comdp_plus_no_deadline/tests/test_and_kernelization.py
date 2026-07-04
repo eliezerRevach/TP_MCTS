@@ -294,8 +294,31 @@ class TestCumulativeMergeTruncate(unittest.TestCase):
         cumulative_merge_truncate(table, k=2)
         self.assertLessEqual(len(table), 2)
         self.assertAlmostEqual(sum(r.prob for r in table), before)  # sum preserved
-        # a merged row is free + incomplete (can't certify mutex).
-        self.assertTrue(any(not r.complete for r in table))
+        # merged rows keep only the INTERSECTION footprint (guaranteed by both);
+        # disagreeing merges degrade to empty fp, which certifies nothing.
+        for r in table:
+            self.assertIsInstance(r.footprint, frozenset)
+
+    def test_dedupe_identical_footprints_sums(self):
+        seg = frozenset({Segment("m", 0, 5)})
+        table = [Row(0.2, seg), Row(0.3, seg), Row(0.1, frozenset())]
+        cumulative_merge_truncate(table, k=5)
+        self.assertEqual(len(table), 2)  # the two identical-fp rows merged
+        merged = [r for r in table if r.footprint == seg][0]
+        self.assertAlmostEqual(merged.prob, 0.5)
+        self.assertTrue(merged.complete)  # both complete -> still certifies
+
+    def test_intersection_merge_keeps_shared_evidence(self):
+        shared = Segment("m", 0, 5)
+        r1 = Row(0.1, frozenset({shared, Segment("a", 0, 2)}))
+        r2 = Row(0.2, frozenset({shared, Segment("b", 3, 6)}))
+        r3 = Row(0.9, frozenset({Segment("c", 0, 9)}))
+        table = [r1, r2, r3]
+        cumulative_merge_truncate(table, k=2)
+        self.assertEqual(len(table), 2)
+        weakest = min(table, key=lambda r: r.prob)
+        self.assertEqual(weakest.footprint, frozenset({shared}))  # shared part survives
+        self.assertAlmostEqual(weakest.prob, 0.3)
 
 
 class TestTableStrategyEngine(unittest.TestCase):
@@ -377,6 +400,57 @@ class TestTableStrategyEngine(unittest.TestCase):
             # kernelized is a Frechet-min-family bound; no mutex here -> it equals
             # the min of the table marginals, which is <= baseline's min.
             self.assertLessEqual(kern, base_min + 1e-9, msg=f"min depth={depth}")
+
+
+class TestChainedFootprints(unittest.TestCase):
+    """v2: the machine conflict sits ONE LEVEL ABOVE the goal facts — only
+    transitive (chained) footprints can carry it to the goal AND."""
+
+    def _two_level_machine(self):
+        from comdp_plus_no_deadline.tests.test_path_mutex import SyntheticAction
+        from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
+            TemporalProbabilisticRPGHeuristic,
+        )
+        # use_m_xi consumes the shared machine (dur 3) -> prep_i; finish_i
+        # (dur 1, NO resource) -> goal_i. The goals' immediate achievers are
+        # resource-free; the contention is inherited from use_m_xi.
+        return TemporalProbabilisticRPGHeuristic(
+            actions=[
+                SyntheticAction("use_m_x1", frozenset({"free_m"}), frozenset({"prep_1"}),
+                                3, del_effects=frozenset({"free_m"})),
+                SyntheticAction("use_m_x2", frozenset({"free_m"}), frozenset({"prep_2"}),
+                                3, del_effects=frozenset({"free_m"})),
+                SyntheticAction("finish_1", frozenset({"prep_1"}), frozenset({"goal_1"}), 1),
+                SyntheticAction("finish_2", frozenset({"prep_2"}), frozenset({"goal_2"}), 1),
+            ],
+            facts={"free_m", "prep_1", "prep_2", "goal_1", "goal_2"},
+            initial_facts={"free_m"},
+            goal_facts={"goal_1", "goal_2"},
+        )
+
+    def test_chain_carries_machine_conflict_to_goals(self):
+        h = self._two_level_machine()
+        s, g = {"free_m"}, {"goal_1", "goal_2"}
+        # serial truth: use_m (3) + use_m (3) + finish (1) = 7 for both goals.
+        tight = h.heuristic_score(s, g, fixed_depth=4, strategy="baseline_admissible_paths_table",
+                                  aggregation="kernelized")
+        chained = h._paths_table_chained_rows
+        loose = h.heuristic_score(s, g, fixed_depth=12, strategy="baseline_admissible_paths_table",
+                                  aggregation="kernelized")
+        self.assertGreater(chained, 0, "no chained rows were emitted at all")
+        self.assertAlmostEqual(tight, 0.0,
+                               msg="chained footprints failed to zero the tight-deadline conjunction")
+        self.assertGreater(loose, 0.5, "loose deadline must recover (serialized windows)")
+
+    def test_chained_strategy_marginals_le_baseline(self):
+        h = self._two_level_machine()
+        s, g = {"free_m"}, {"goal_1", "goal_2"}
+        for depth in (4, 7, 12):
+            base = h.heuristic_score(s, g, fixed_depth=depth,
+                                     strategy="baseline_admissible", aggregation="product")
+            tbl = h.heuristic_score(s, g, fixed_depth=depth,
+                                    strategy="baseline_admissible_paths_table", aggregation="product")
+            self.assertLessEqual(tbl, base + 1e-9, msg=f"depth={depth}")
 
 
 if __name__ == "__main__":
