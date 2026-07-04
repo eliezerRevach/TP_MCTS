@@ -44,12 +44,21 @@ from comdp_plus_no_deadline.engines.path_mutex import (
     Segment,
     and_cumulative_bound,
     and_emit_rows,
+    and_has_mutex,
     combine_precondition_footprints,
     cumulative_merge_truncate,
     retry_fold_arrivals,
     prune_expired,
     table_or_hazard,
     table_or_hazard_paths,
+    CutRow,
+    cut_and_bound,
+    cut_emit_rows,
+    cut_or_hazard,
+    cut_retry_fold,
+    cut_truncate,
+    alts_or,
+    map_or_merge,
 )
 
 
@@ -442,6 +451,11 @@ class TemporalProbabilisticRPGHeuristic:
         # (transitive) resource segments beyond the achiever's own.
         self._paths_table_chained_rows: int = 0
         self._paths_table_emitted_rows: int = 0
+        # Detection instrumentation (distinct from value-drop hits): OR mutex
+        # events (max/add instead of sum), and AND nodes where a cross-fact mutex
+        # was CERTIFIED (potential), even if the value did not drop.
+        self._paths_table_or_mutex_events: int = 0
+        self._paths_table_and_potential: int = 0
         # Actions participating in >= 1 mutex pair (incl. self-mutex) — the only
         # ones whose segments can ever certify a conflict. Lazily built; used to
         # PROJECT footprints so chains stay small (provably lossless for
@@ -915,7 +929,7 @@ class TemporalProbabilisticRPGHeuristic:
                 for goal in goals_list
             }
             fr = {goal: self._paths_table_final.get(goal, []) for goal in goals_list}
-            score = and_cumulative_bound(fr, marg, self._path_actions_mutex)
+            score, _ = cut_and_bound(fr, marg)
         elif aggregation == "area":
             # Time-aware graded score: mean over ALL temporal layers of the
             # goal-product at that layer (an integral / area-under-curve of
@@ -2208,6 +2222,22 @@ class TemporalProbabilisticRPGHeuristic:
             self._paths_resource_actions = res
         return self._paths_resource_actions
 
+    def _paths_partners(self) -> Dict[str, tuple]:
+        """Per action: the mutex PARTNERS (actions it certifiably conflicts with,
+        incl. itself when self-mutex) — the keys of the row's mutex-CUT map.
+        Built once per instance from the memoized pairwise mutex."""
+        cached = getattr(self, "_paths_partners_map", None)
+        if cached is None:
+            self._ensure_unbiased_structural_extracted()
+            names = [m.name for m in self._action_models]
+            cached = {}
+            for a in names:
+                plist = tuple(b for b in names if self._path_actions_mutex(a, b))
+                if plist:
+                    cached[a] = plist
+            self._paths_partners_map = cached
+        return cached
+
     def _heuristic_propagate_baseline_admissible_paths_table(
         self,
         state,
@@ -2248,15 +2278,7 @@ class TemporalProbabilisticRPGHeuristic:
         depth = max(0, int(fixed_depth))
         facts = self._facts.union(state_facts)
         k = self._kmutex_k
-        mutex_fn = self._path_actions_mutex
-        resource_actions = self._paths_resource_action_set()
-
-        def project(fp):
-            return frozenset(s for s in fp if s.action in resource_actions)
-
-        max_duration = max(
-            (int(m.effect_delay_steps) for m in self._action_models), default=0
-        )
+        partners = self._paths_partners()
 
         probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
             t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
@@ -2264,18 +2286,18 @@ class TemporalProbabilisticRPGHeuristic:
         for fact in facts:
             probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
 
-        # Cumulative per-fact path table (auxiliary — carries footprints for the
-        # AND mutex; the marginal lives in probabilities_by_layer). Initial facts
-        # start as one COMPLETE free row: "true at start" is a fully-known route
-        # that used no resources (empty footprint is its guaranteed evidence).
-        fact_tables: Dict[Fact, List[Row]] = {
-            f: [Row(1.0, frozenset(), alternatives=(), complete=True)] for f in state_facts
+        # Cumulative per-fact CUT-row table (aux — carries the mutex-cut maps for
+        # the AND; the marginal lives in probabilities_by_layer). Initial facts:
+        # one row with empty maps ("true at start": occupies nothing, forbids
+        # nothing — dropping constraints is always the safe direction).
+        fact_tables: Dict[Fact, List[CutRow]] = {
+            f: [CutRow(1.0, ({},), {})] for f in state_facts
         }
-        # Marginal-side arrivals: ONE (name, B_e, guaranteed_fp) per achiever —
-        # identical shape to v1 so the marginal V_f (and its <= baseline proof)
-        # is untouched. Aux-side arrivals: the chained multi-row emission.
-        pending_supports: Dict[Tuple[int, Fact], List[Row]] = {}
-        pending_aux: Dict[Tuple[int, Fact], List[Row]] = {}
+        # Marginal-side arrivals: ONE row per achiever (B_e + the fully-guaranteed
+        # maps) so the marginal V_f keeps the v1 shape/proof. Aux-side arrivals:
+        # the chained multi-row emission.
+        pending_supports: Dict[Tuple[int, Fact], List[CutRow]] = {}
+        pending_aux: Dict[Tuple[int, Fact], List[CutRow]] = {}
         traces: List[TemporalLayerTrace] = []
         action_support_by_layer: Dict[int, Dict[str, float]] = {}
         self._paths_table_and_nodes = 0
@@ -2283,6 +2305,8 @@ class TemporalProbabilisticRPGHeuristic:
         self._paths_table_and_shaved = 0.0
         self._paths_table_chained_rows = 0
         self._paths_table_emitted_rows = 0
+        self._paths_table_or_mutex_events = 0
+        self._paths_table_and_potential = 0
 
         for layer in range(depth + 1):
             if layer > 0:
@@ -2306,19 +2330,20 @@ class TemporalProbabilisticRPGHeuristic:
                     continue
                 if sup:
                     v_prev = probabilities_by_layer[layer][fact]
-                    triples = [(idx, r.prob, r.footprint) for idx, r in enumerate(sup)]
-                    hazard = table_or_hazard_paths(triples, mutex_fn, k).value
+                    counter = [0]
+                    hazard = cut_or_hazard(sup, k, counter)
+                    self._paths_table_or_mutex_events += counter[0]
                     v_new = _clamp_probability(v_prev + (1.0 - v_prev) * hazard)
                     probabilities_by_layer[layer][fact] = max(v_prev, v_new)
                     arrivals[fact] = hazard
                 if aux:
                     tbl = fact_tables.setdefault(fact, [])
-                    # Same-origin re-firings fold by retry g(p,h) with windows kept
-                    # as disjunctive alternatives — never summed (the re-firing
+                    # Same-origin re-firings fold by retry g(p,h) + OR-maps (the
+                    # cut/intersection rule) — never summed (the re-firing
                     # double-count would build a free prob-1 row and kill all
                     # tightening).
-                    retry_fold_arrivals(tbl, aux)
-                    cumulative_merge_truncate(tbl, k)
+                    cut_retry_fold(tbl, aux)
+                    cut_truncate(tbl, k)
 
             if layer == depth:
                 if debug:
@@ -2335,10 +2360,12 @@ class TemporalProbabilisticRPGHeuristic:
                 if preconds:
                     marg = {f: probabilities_by_layer[layer].get(f, 0.0) for f in preconds}
                     fr = {f: fact_tables.get(f, []) for f in preconds}
-                    support_value = and_cumulative_bound(fr, marg, mutex_fn)
+                    support_value, detected = cut_and_bound(fr, marg)
                     if len(preconds) >= 2:
                         frechet = min(marg.values())
                         self._paths_table_and_nodes += 1
+                        if detected:
+                            self._paths_table_and_potential += 1
                         if support_value < frechet - 1e-9:
                             self._paths_table_and_hits += 1
                             self._paths_table_and_shaved += frechet - support_value
@@ -2350,38 +2377,42 @@ class TemporalProbabilisticRPGHeuristic:
                 arrival_layer = layer + action_model.effect_delay_steps
                 if arrival_layer > depth:
                     continue
-                own_segment = Segment(action_model.name, layer, arrival_layer)
+                name = action_model.name
+                own_iv = (layer, arrival_layer)
+                own_alts = ({name: (own_iv,)},)
+                own_cut = {x: (own_iv,) for x in partners.get(name, ())}
                 for fact, add_prob in action_model.add_probabilities.items():
                     success = _clamp_probability(support_value * add_prob)
                     if success <= 0.0:
                         continue
                     if preconds:
-                        emitted = and_emit_rows(
-                            fr, marg, support_value, own_segment, add_prob,
-                            mutex_fn, project, combo_cap=64, out_cap=k,
+                        emitted = cut_emit_rows(
+                            fr, marg, support_value, own_alts, own_cut, add_prob,
+                            combo_cap=64, out_cap=k,
                         )
                     else:
-                        emitted = [Row(success, project(frozenset({own_segment})),
-                                       alternatives=(), complete=True)]
+                        emitted = [CutRow(success, ({name: (own_iv,)},), dict(own_cut))]
                     if not emitted:
                         continue
                     for r in emitted:
-                        r.origin = action_model.name
-                    # Marginal-side: ONE per-achiever contribution (v1 shape) whose
-                    # footprint is the fully-GUARANTEED part = intersection of the
-                    # emitted rows' footprints (present in every emitted route).
-                    marg_fp = emitted[0].footprint
+                        r.origin = name
+                    # Marginal-side: ONE per-achiever contribution (v1 shape) with
+                    # the fully-GUARANTEED maps (OR-merge across emitted routes).
+                    g_alts = tuple(dict(g) for g in emitted[0].alts)
+                    g_cut = dict(emitted[0].cut)
                     for r in emitted[1:]:
-                        marg_fp = marg_fp & r.footprint
+                        g_alts = alts_or(g_alts, r.alts)
+                        g_cut = map_or_merge(g_cut, r.cut)
                     pending_supports.setdefault((arrival_layer, fact), []).append(
-                        Row(success, marg_fp, alternatives=(), complete=True)
+                        CutRow(success, g_alts, g_cut, origin=name)
                     )
                     # Aux-side: the chained multi-row emission.
                     pending_aux.setdefault((arrival_layer, fact), []).extend(emitted)
                     self._paths_table_emitted_rows += len(emitted)
-                    own_only = project(frozenset({own_segment}))
                     self._paths_table_chained_rows += sum(
-                        1 for r in emitted if r.footprint - own_only
+                        1 for r in emitted
+                        if any(set(g) - {name} for g in r.alts)
+                        or set(r.cut) - set(partners.get(name, ()))
                     )
             action_support_by_layer[layer] = dict(action_support)
 

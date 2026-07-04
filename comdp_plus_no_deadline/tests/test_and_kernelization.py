@@ -453,5 +453,63 @@ class TestChainedFootprints(unittest.TestCase):
             self.assertLessEqual(tbl, base + 1e-9, msg=f"depth={depth}")
 
 
+class TestCutAltsRegression(unittest.TestCase):
+    """The a,b->(c,d) hole: two rows whose CUTS point at each other's members
+    must stay certified-mutex after OR-merging, which requires the merged row to
+    still REVEAL its alternative paths (alts groups), not just its cut."""
+
+    def _mk(self, action, w, cut_actions, cut_w=None):
+        from comdp_plus_no_deadline.engines.path_mutex import CutRow
+        cw = cut_w or w
+        return CutRow(0.4, ({action: (w,)},), {x: (cw,) for x in cut_actions})
+
+    def test_ab_vs_cd_stays_mutex_after_or_merge(self):
+        from comdp_plus_no_deadline.engines.path_mutex import (
+            cutrow_mutex, cutrow_or_merge_into,
+        )
+        W = (0, 10)
+        ra = self._mk("a", W, ("c", "d"))
+        rb = self._mk("b", W, ("c", "d"))
+        rc = self._mk("c", W, ("a", "b"))
+        rd = self._mk("d", W, ("a", "b"))
+        # merge a|b and c|d (same-layer alternatives -> sum)
+        cutrow_or_merge_into(ra, rb, retry=False)   # ra now = (a|b)
+        cutrow_or_merge_into(rc, rd, retry=False)   # rc now = (c|d)
+        # alts must reveal both paths
+        self.assertEqual(len(ra.alts), 2)
+        # THE POINT: still certified mutex (every alternative of one is killed
+        # by the other's cut) -> max/exclusion, never sum.
+        self.assertTrue(cutrow_mutex(ra, rc))
+
+    def test_partial_cut_does_not_certify(self):
+        from comdp_plus_no_deadline.engines.path_mutex import (
+            cutrow_mutex, cutrow_or_merge_into,
+        )
+        W = (0, 10)
+        ra = self._mk("a", W, ("c",))      # a mutex ONLY to c
+        rb = self._mk("b", W, ("c", "d"))
+        rc = self._mk("c", W, ("a", "b"))
+        rd = self._mk("d", W, ("b",))      # d mutex ONLY to b
+        cutrow_or_merge_into(ra, rb, retry=False)   # (a|b): shared cut = {c}
+        cutrow_or_merge_into(rc, rd, retry=False)   # (c|d): shared cut = {b}
+        # realization a + d is compatible -> must NOT certify
+        self.assertFalse(cutrow_mutex(ra, rc))
+
+    def test_and_bound_zeroes_ab_vs_cd(self):
+        from comdp_plus_no_deadline.engines.path_mutex import (
+            cut_and_bound, cutrow_or_merge_into,
+        )
+        W = (0, 10)
+        ra = self._mk("a", W, ("c", "d"))
+        cutrow_or_merge_into(ra, self._mk("b", W, ("c", "d")), retry=False)
+        rc = self._mk("c", W, ("a", "b"))
+        cutrow_or_merge_into(rc, self._mk("d", W, ("a", "b")), retry=False)
+        value, detected = cut_and_bound(
+            {"f1": [ra], "f2": [rc]}, {"f1": 0.8, "f2": 0.8}
+        )
+        self.assertTrue(detected)
+        self.assertAlmostEqual(value, 0.0)  # only tuple is certified-infeasible
+
+
 if __name__ == "__main__":
     unittest.main()

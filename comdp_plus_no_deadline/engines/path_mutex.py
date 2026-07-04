@@ -78,7 +78,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product
-from typing import Callable, FrozenSet, Hashable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, FrozenSet, Hashable, List, Mapping, Optional, Sequence, Tuple
 
 
 Action = Hashable
@@ -929,6 +929,404 @@ def _accumulate_alternatives(row: Row, other: Row, alt_cap: int) -> None:
     for a in alts[1:]:
         inter = inter & a
     row.footprint = inter
+
+
+# =====================================================================
+# v3: MUTEX-CUT rows — store the CONCLUSION ("can't do c in [lo,hi)"),
+# not the evidence (paths). User-specified algebra:
+#   AND (chain parts, all definitely happen): per-partner interval UNION —
+#       c:[0,12] & c:[10,20] -> c:[0,20] (merge ONLY overlapping intervals;
+#       bridging a gap would over-forbid -> unsound; disjoint stay separate).
+#   OR  (alternative routes): per-partner interval CUT/INTERSECTION —
+#       c:[0,12] | c:[10,20] -> c:[10,12]; partner missing on either side ->
+#       dropped ("not guaranteed by all alternatives").
+# Dropping any entry is ALWAYS safe (certifies less) — so no completeness
+# flag is needed anywhere; the safe degrade direction is built into the
+# representation. Intervals are (lo, hi) pairs; an OR-intersection may go
+# INVERTED (lo >= hi) and stays MEANINGFUL: it demands the challenger span
+# [hi, lo], via the single uniform test  lo1 < hi2  and  lo2 < hi1.
+#
+# A row carries TWO maps with the same algebra:
+#   occ: own-action -> claims   "every realization runs this action so that
+#        any window conflicting per the uniform test really collides"
+#   cut: partner-action -> intervals  "any partner-window overlapping this is
+#        impossible together with every realization of this row"
+# Certified mutex(r1, r2) = some entry of r1.cut hits some claim of r2.occ
+# (or symmetrically) — an EXISTS test, because each cut interval and each occ
+# claim is individually a for-all guarantee over its row's realizations.
+# =====================================================================
+
+Interval = Tuple[int, int]
+CutMap = Mapping[Action, Tuple[Interval, ...]]
+
+
+Group = Dict[Action, Tuple[Interval, ...]]  # one chain's DEFINITE occupations
+GROUP_CAP = 4
+
+
+@dataclass
+class CutRow:
+    """``alts`` = alternative GROUPS: every realization of this row satisfies at
+    least ONE group; within a group every (action, interval) atom definitely
+    happened (a chain). This is the "reveal the path" store the cut alone lacks:
+    row(a|b) keeps ({a:W}, {b:W}) so row(c|d)'s cut still has atoms to hit.
+    Kill semantics: a challenger's cut KILLS this row iff EVERY group contains
+    some atom the cut collides with (for-all over groups, exists within a group
+    — a chain dies if any of its definite parts is impossible). An EMPTY group
+    can never be hit -> the row certifies nothing as a target (safe degrade;
+    replaces the old dropped-keys hole with explicit harmlessness). ``alts``
+    must never be the empty tuple (zero groups would be vacuously killed)."""
+
+    prob: float
+    alts: Tuple[Group, ...]
+    cut: Dict[Action, Tuple[Interval, ...]]
+    origin: Optional[str] = None
+
+
+def _iv_conflict(a: Interval, b: Interval) -> bool:
+    """The uniform claim/interval collision test: lo1 < hi2 and lo2 < hi1.
+    Exact for regular windows, hull-cores, and inverted OR-intersections."""
+    return a[0] < b[1] and b[0] < a[1]
+
+
+def _coalesce_union(ivs: List[Interval], cap: int = 4) -> Tuple[Interval, ...]:
+    """AND-union of intervals: sort, merge OVERLAPPING (never bridge gaps),
+    cap by dropping the shortest extras (dropping = certifies less = safe)."""
+    if not ivs:
+        return ()
+    ivs = sorted(ivs)
+    out: List[Interval] = [ivs[0]]
+    for lo, hi in ivs[1:]:
+        plo, phi = out[-1]
+        if lo <= phi:  # overlapping/touching definite windows -> exact union
+            out[-1] = (plo, max(phi, hi))
+        else:
+            out.append((lo, hi))
+    if len(out) > cap:
+        out.sort(key=lambda iv: iv[1] - iv[0], reverse=True)
+        out = sorted(out[:cap])
+    return tuple(out)
+
+
+def map_and_merge(m1: CutMap, m2: CutMap, cap: int = 4) -> Dict[Action, Tuple[Interval, ...]]:
+    """AND: both parts definitely happen -> keys union, intervals union."""
+    out: Dict[Action, Tuple[Interval, ...]] = {}
+    for key in set(m1) | set(m2):
+        out[key] = _coalesce_union(list(m1.get(key, ())) + list(m2.get(key, ())), cap)
+    return out
+
+
+def map_or_merge(m1: CutMap, m2: CutMap, cap: int = 4) -> Dict[Action, Tuple[Interval, ...]]:
+    """OR: only what BOTH alternatives guarantee -> shared keys, pairwise
+    (max lo, min hi) intersections. Inverted results are kept (still exact);
+    over cap the extras are dropped (safe)."""
+    out: Dict[Action, Tuple[Interval, ...]] = {}
+    for key in set(m1) & set(m2):
+        pairs: List[Interval] = []
+        for a in m1[key]:
+            for b in m2[key]:
+                iv = (max(a[0], b[0]), min(a[1], b[1]))
+                if iv not in pairs:
+                    pairs.append(iv)
+        out[key] = tuple(pairs[:cap])
+    return out
+
+
+def _cap_groups(groups: List[Group], cap: int = GROUP_CAP) -> Tuple[Group, ...]:
+    """Dedupe, then while over ``cap`` merge the two most key-similar groups via
+    the OR/core rule (map_or_merge). Merging groups only WEAKENS the row's kill
+    condition (shared keys shrink to cores, unshared keys drop) — the safe
+    degrade — and never breaks coverage, because the merged group is implied by
+    both originals. Never returns the empty tuple."""
+    uniq: List[Group] = []
+    for g in groups:
+        if g not in uniq:
+            uniq.append(g)
+    while len(uniq) > cap:
+        best_i, best_j, best_shared = 0, 1, -1
+        for i in range(len(uniq)):
+            for j in range(i + 1, len(uniq)):
+                s = len(set(uniq[i]) & set(uniq[j]))
+                if s > best_shared:
+                    best_i, best_j, best_shared = i, j, s
+        merged = map_or_merge(uniq[best_i], uniq[best_j])
+        rest = [g for idx, g in enumerate(uniq) if idx not in (best_i, best_j)]
+        uniq = rest + [merged]
+    return tuple(uniq) if uniq else ({},)
+
+
+def alts_and(a1: Tuple[Group, ...], a2: Tuple[Group, ...],
+             cap: int = GROUP_CAP) -> Tuple[Group, ...]:
+    """AND (chaining): a realization satisfies some group of each side, so the
+    joint groups are the pairwise AND-merges (interval UNION per key)."""
+    return _cap_groups([map_and_merge(g1, g2) for g1 in a1 for g2 in a2], cap)
+
+
+def alts_or(a1: Tuple[Group, ...], a2: Tuple[Group, ...],
+            cap: int = GROUP_CAP) -> Tuple[Group, ...]:
+    """OR (alternatives): the union of the group lists — this is the fix for the
+    a,b->(c,d) hole: merging routes a|b KEEPS ({a:W}, {b:W}) instead of dropping
+    the non-shared keys."""
+    return _cap_groups(list(a1) + list(a2), cap)
+
+
+def _row_atoms(r: CutRow) -> set:
+    return {(x, iv) for g in r.alts for x, ivs in g.items() for iv in ivs}
+
+
+def _killed_by_cut(alts: Tuple[Group, ...], cut: CutMap, skip: set) -> bool:
+    """EVERY group has some atom the cut collides with (a chain dies if any of
+    its definite parts is impossible; the row dies if every alternative dies)."""
+    for group in alts:
+        hit = False
+        for x, ivs in group.items():
+            if x in skip:
+                continue
+            cut_ivs = cut.get(x, ())
+            if cut_ivs and any(
+                _iv_conflict(I, c) for I in cut_ivs for c in ivs
+            ):
+                hit = True
+                break
+        if not hit:
+            return False
+    return True
+
+
+def cutrow_mutex(r1: CutRow, r2: CutRow) -> bool:
+    """Certified mutex: one row's cut kills the other (every alternative group
+    loses a definite part). Shared-occurrence guard: an action for which both
+    rows hold an IDENTICAL atom is skipped (may be the very same occurrence —
+    a shared step is not a contention)."""
+    shared_atoms = _row_atoms(r1) & _row_atoms(r2)
+    skip = {x for (x, _iv) in shared_atoms}
+    return (
+        _killed_by_cut(r1.alts, r2.cut, skip)
+        or _killed_by_cut(r2.alts, r1.cut, skip)
+    )
+
+
+def cutrow_or_merge_into(target: CutRow, other: CutRow, retry: bool) -> None:
+    """Fold ``other`` into ``target`` as an ALTERNATIVE: alts by group-union
+    (the path stays revealed), cut by intersection, prob by retry ``g(p,h)``
+    when ``retry`` (cross-layer re-firing of the same class) else by sum
+    (same-layer alternative routes, union bound)."""
+    if retry:
+        target.prob = _clamp01(target.prob + (1.0 - target.prob) * other.prob)
+    else:
+        target.prob = _clamp01(min(1.0, target.prob + other.prob))
+    target.alts = alts_or(target.alts, other.alts)
+    target.cut = map_or_merge(target.cut, other.cut)
+
+
+def cut_retry_fold(table: List[CutRow], arriving: Sequence[CutRow]) -> List[CutRow]:
+    """Same-origin re-firings fold by g(p,h) + OR-maps (the retry rule); the
+    within-batch same-origin routes sum + OR-maps. Distinct origins append."""
+    batch: Dict[Optional[str], CutRow] = {}
+    loose: List[CutRow] = []
+    for r in arriving:
+        if r.origin is None:
+            loose.append(r)
+            continue
+        prev = batch.get(r.origin)
+        if prev is None:
+            batch[r.origin] = CutRow(r.prob, tuple(dict(g) for g in r.alts),
+                                     dict(r.cut), r.origin)
+        else:
+            cutrow_or_merge_into(prev, r, retry=False)
+    for r in batch.values():
+        target = next((row for row in table
+                       if row.origin is not None and row.origin == r.origin), None)
+        if target is None:
+            table.append(r)
+        else:
+            cutrow_or_merge_into(target, r, retry=True)
+    table.extend(loose)
+    return table
+
+
+def cut_truncate(table: List[CutRow], k: int) -> List[CutRow]:
+    """K-truncation by OR-merging the two weakest rows (sum + map-intersection)
+    — the mutex-preserving truncation: what both classes forbid stays forbidden;
+    nothing is ever dropped, so the union-bound coverage is intact."""
+    while len(table) > k:
+        table.sort(key=lambda r: r.prob)
+        r1 = table.pop(0)
+        r2 = table.pop(0)
+        cutrow_or_merge_into(r1, r2, retry=False)
+        r1.origin = r1.origin if r1.origin == r2.origin else None
+        table.append(r1)
+    return table
+
+
+def cut_or_hazard(rows: Sequence[CutRow], k: int,
+                  counter: Optional[List[int]] = None) -> float:
+    """Marginal OR hazard over one layer's arriving achiever rows: certified-
+    mutex pairs fold by MAX (+ OR-maps), free pairs by SUM (+ OR-maps); value =
+    max over table <= union sum (each step is a sum or a max-into) — the same
+    admissibility skeleton as table_or_hazard. counter[0] += mutex events."""
+    table: List[CutRow] = []
+    for r in sorted(rows, key=lambda x: -x.prob):
+        merged = False
+        for row in table:
+            if cutrow_mutex(row, r):
+                if counter is not None:
+                    counter[0] += 1
+                row.prob = max(row.prob, r.prob)
+                row.alts = alts_or(row.alts, r.alts)
+                row.cut = map_or_merge(row.cut, r.cut)
+                merged = True
+                break
+        if not merged:
+            if table:
+                cutrow_or_merge_into(table[0], r, retry=False)
+            else:
+                table.append(CutRow(r.prob, tuple(dict(g) for g in r.alts),
+                                    dict(r.cut), r.origin))
+        if len(table) > k:
+            cut_truncate(table, k)
+    return _clamp01(max((r.prob for r in table), default=0.0))
+
+
+def cut_components(fact_rows: Mapping[Fact, Sequence[CutRow]]) -> List[List[Fact]]:
+    facts = list(fact_rows)
+    parent = {f: f for f in facts}
+
+    def find(x: Fact) -> Fact:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(len(facts)):
+        for j in range(i + 1, len(facts)):
+            if any(cutrow_mutex(r1, r2)
+                   for r1 in fact_rows[facts[i]] for r2 in fact_rows[facts[j]]):
+                parent[find(facts[i])] = find(facts[j])
+    comps: Dict[Fact, List[Fact]] = {}
+    for f in facts:
+        comps.setdefault(find(f), []).append(f)
+    return list(comps.values())
+
+
+def cut_and_bound(fact_rows: Mapping[Fact, Sequence[CutRow]],
+                  marginals: Mapping[Fact, float]) -> Tuple[float, bool]:
+    """AND bound over cumulative cut-tables: min( Frechet over marginals, union
+    bound over cross-fact row tuples that are NOT certified mutex ), per
+    connected component. Returns (value, any_mutex_detected)."""
+    facts = list(fact_rows)
+    if not facts:
+        return 1.0, False
+    frechet = min(_clamp01(marginals.get(f, 0.0)) for f in facts)
+    comps = cut_components(fact_rows)
+    detected = any(len(c) > 1 for c in comps)
+    if not detected:
+        return frechet, False
+    bound = frechet
+    for comp in comps:
+        if len(comp) < 2:
+            continue
+        total = 0.0
+        for combo in product(*(fact_rows[f] for f in comp)):
+            feasible = True
+            for i in range(len(combo)):
+                for j in range(i + 1, len(combo)):
+                    if cutrow_mutex(combo[i], combo[j]):
+                        feasible = False
+                        break
+                if not feasible:
+                    break
+            if feasible:
+                total += min(r.prob for r in combo)
+        if total < bound:
+            bound = total
+    return _clamp01(bound), True
+
+
+def cut_guaranteed_rep(rows: Sequence[CutRow]) -> Tuple[Tuple[Group, ...], Dict[Action, Tuple[Interval, ...]]]:
+    """What EVERY route of the fact guarantees = iterated OR-merge of all rows:
+    alts by group-union (paths stay revealed), cut by intersection."""
+    if not rows:
+        return ({},), {}
+    alts = tuple(dict(g) for g in rows[0].alts)
+    cut = dict(rows[0].cut)
+    for r in rows[1:]:
+        alts = alts_or(alts, r.alts)
+        cut = map_or_merge(cut, r.cut)
+    return alts, cut
+
+
+def cut_emit_rows(
+    fact_rows: Mapping[Fact, Sequence[CutRow]],
+    marginals: Mapping[Fact, float],
+    support_value: float,
+    own_alts: Tuple[Group, ...],
+    own_cut: Dict[Action, Tuple[Interval, ...]],
+    q: float,
+    combo_cap: int = 64,
+    out_cap: int = 5,
+) -> List[CutRow]:
+    """Chained multi-row AND emission in cut-space: one row per feasible combo
+    of CONTENDING precondition routes (alts chained by group-AND, cuts by
+    interval-union), guaranteed OR-merged reps for the non-contending rest.
+    Degrades to one fully-guaranteed row when there is no contention or the
+    combo product is too large."""
+    facts = list(fact_rows)
+    reps = {f: cut_guaranteed_rep(fact_rows[f]) for f in facts}
+
+    def with_reps(alts, cut, skip=()):
+        for f in facts:
+            if f in skip:
+                continue
+            ra, rc = reps[f]
+            alts = alts_and(alts, ra)
+            cut = map_and_merge(cut, rc)
+        return alts, cut
+
+    def fallback() -> List[CutRow]:
+        p = _clamp01(q * support_value)
+        if p <= 0.0:
+            return []
+        alts, cut = with_reps(tuple(dict(g) for g in own_alts), dict(own_cut))
+        return [CutRow(p, alts, cut)]
+
+    comps = cut_components(fact_rows)
+    contending = [f for c in comps if len(c) > 1 for f in c]
+    if not contending:
+        return fallback()
+    size = 1
+    for f in contending:
+        size *= max(1, len(fact_rows[f]))
+        if size > combo_cap:
+            return fallback()
+    if any(not fact_rows[f] for f in contending):
+        return fallback()
+    non_contending = [f for f in facts if f not in contending]
+    floor = min((_clamp01(marginals.get(f, 0.0)) for f in non_contending), default=1.0)
+
+    out: List[CutRow] = []
+    for combo in product(*(fact_rows[f] for f in contending)):
+        feasible = True
+        for i in range(len(combo)):
+            for j in range(i + 1, len(combo)):
+                if cutrow_mutex(combo[i], combo[j]):
+                    feasible = False
+                    break
+            if not feasible:
+                break
+        if not feasible:
+            continue
+        prob = _clamp01(q * min(min(r.prob for r in combo), floor))
+        if prob <= 0.0:
+            continue
+        alts, cut = tuple(dict(g) for g in own_alts), dict(own_cut)
+        for r in combo:
+            alts = alts_and(alts, r.alts)
+            cut = map_and_merge(cut, r.cut)
+        alts, cut = with_reps(alts, cut, skip=contending)
+        out.append(CutRow(prob, alts, cut))
+    cut_truncate(out, out_cap)
+    return out
 
 
 def guaranteed_rep(rows: Sequence[Row]) -> FrozenSet[Segment]:
