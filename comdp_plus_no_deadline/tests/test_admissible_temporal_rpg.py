@@ -200,5 +200,185 @@ class TestAdmissibleWiring(unittest.TestCase):
         self.assertEqual(parse("baseline_admissible"), "baseline_admissible")
 
 
+class TestAdmissibleResolutionStrategy(unittest.TestCase):
+    """baseline_admissible_resolution: goal-directed backward pass over the
+    2^(k/2) anchors, built from the same admissible operators. Its defining
+    guarantee is that it stays an UPPER bound relative to the dense
+    baseline_admissible (skipped layers charged, never dropped)."""
+
+    def _chain_heuristic(self):
+        # Chain A -> B -> G so the backward recursion has real depth, plus a
+        # second short achiever of G so the OR layer has multiple achievers.
+        actions = [
+            _prob_achiever("mk_a", [], "A", 0.5),
+            _prob_achiever("g_via_b", ["A"], "B", 0.6),
+            _prob_achiever("g_via_x", ["B"], "G", 0.7),
+            _prob_achiever("g_direct", [], "G", 0.2),
+        ]
+        return TemporalProbabilisticRPGHeuristic(
+            actions=actions, facts={"A", "B", "G"},
+            initial_facts=set(), goal_facts={"G"},
+        )
+
+    def test_strategy_is_registered(self):
+        h = TemporalProbabilisticRPGHeuristic(actions=[], facts={"x"})
+        self.assertEqual(
+            h._normalize_strategy("baseline_admissible_resolution"),
+            "baseline_admissible_resolution",
+        )
+
+    def test_parser_alias(self):
+        from unified_planning.parser import _parse_temporal_heuristic_strategy as parse
+        self.assertEqual(parse("30"), "baseline_admissible_resolution")
+        self.assertEqual(
+            parse("baseline_admissible_resolution"),
+            "baseline_admissible_resolution",
+        )
+
+    def test_experiment_common_alias(self):
+        import sys
+        from pathlib import Path
+
+        scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        import experiment_common as ec
+        for key in ("baseline_admissible_resolution", "admissible_resolution"):
+            self.assertIn(key, ec.HEURISTIC_ALIASES)
+            self.assertEqual(
+                ec.HEURISTIC_ALIASES[key]["temporal_heuristic_strategy"],
+                "baseline_admissible_resolution",
+            )
+
+    def test_resolution_dominates_dense_admissible(self):
+        # Skipping layers but charging the block width can only raise the
+        # estimate, so resolution >= dense baseline_admissible >= truth.
+        h = self._chain_heuristic()
+        for depth in range(1, 12):
+            dense = h.heuristic_score(
+                {}, ["G"], aggregation="product",
+                fixed_depth=depth, strategy="baseline_admissible",
+            )
+            res = h.heuristic_score(
+                {}, ["G"], aggregation="product",
+                fixed_depth=depth, strategy="baseline_admissible_resolution",
+                resolution_alpha=2.0,
+            )
+            self.assertGreaterEqual(
+                float(res) + 1e-9, float(dense),
+                msg=f"resolution < dense admissible at depth {depth}",
+            )
+
+    def test_matches_dense_when_no_layers_skipped(self):
+        # With depth small enough that every completion layer is its own anchor
+        # (delta_min=1, alpha=2 -> first deltas are 1,1,2,...), the earliest
+        # layers are represented exactly, so a depth-1 goal matches dense.
+        h = self._chain_heuristic()
+        dense = h.heuristic_propagate(
+            {}, goal_facts=["G"], fixed_depth=1, strategy="baseline_admissible",
+        )
+        res = h.heuristic_propagate(
+            {}, goal_facts=["G"], fixed_depth=1,
+            strategy="baseline_admissible_resolution", resolution_alpha=2.0,
+        )
+        self.assertAlmostEqual(
+            res.probabilities_by_layer[1]["G"],
+            dense.probabilities_by_layer[1]["G"],
+        )
+
+    def test_probability_stays_in_unit_interval(self):
+        h = self._chain_heuristic()
+        for depth in range(0, 20):
+            res = h.heuristic_propagate(
+                {}, goal_facts=["G"], fixed_depth=depth,
+                strategy="baseline_admissible_resolution", resolution_alpha=2.0,
+            )
+            val = res.probabilities_by_layer[depth]["G"]
+            self.assertGreaterEqual(val, 0.0)
+            self.assertLessEqual(val, 1.0)
+
+
+class TestAdmissibleResolutionForwardStrategy(unittest.TestCase):
+    """baseline_admissible_resolution_forward: forward anchor-jump with a
+    per-block relaxed fixpoint. Must stay an UPPER bound (>= dense) at every
+    depth, including the just-reachable band where naive layer-skipping (reading
+    preconditions from the block-start snapshot) collapsed to 0."""
+
+    def _chain_heuristic(self):
+        # Longer chain so a coarse block near the horizon spans several links:
+        # A -> B -> C -> G, forcing the intra-block fixpoint to matter.
+        actions = [
+            _prob_achiever("mk_a", [], "A", 0.5),
+            _prob_achiever("mk_b", ["A"], "B", 0.6),
+            _prob_achiever("mk_c", ["B"], "C", 0.7),
+            _prob_achiever("mk_g", ["C"], "G", 0.8),
+        ]
+        return TemporalProbabilisticRPGHeuristic(
+            actions=actions, facts={"A", "B", "C", "G"},
+            initial_facts=set(), goal_facts={"G"},
+        )
+
+    def test_strategy_and_parser_registered(self):
+        h = TemporalProbabilisticRPGHeuristic(actions=[], facts={"x"})
+        self.assertEqual(
+            h._normalize_strategy("baseline_admissible_resolution_forward"),
+            "baseline_admissible_resolution_forward",
+        )
+        from unified_planning.parser import _parse_temporal_heuristic_strategy as parse
+        self.assertEqual(parse("31"), "baseline_admissible_resolution_forward")
+        self.assertEqual(
+            parse("baseline_admissible_resolution_forward"),
+            "baseline_admissible_resolution_forward",
+        )
+
+    def test_experiment_common_alias(self):
+        import sys
+        from pathlib import Path
+
+        scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        import experiment_common as ec
+        for key in (
+            "baseline_admissible_resolution_forward",
+            "admissible_resolution_forward",
+        ):
+            self.assertIn(key, ec.HEURISTIC_ALIASES)
+            self.assertEqual(
+                ec.HEURISTIC_ALIASES[key]["temporal_heuristic_strategy"],
+                "baseline_admissible_resolution_forward",
+            )
+
+    def test_forward_dominates_dense_admissible(self):
+        # The per-block fixpoint must keep it an upper bound at EVERY depth,
+        # including the just-reachable band (chain resolves within a coarse block).
+        h = self._chain_heuristic()
+        for depth in range(1, 16):
+            dense = h.heuristic_score(
+                {}, ["G"], aggregation="product",
+                fixed_depth=depth, strategy="baseline_admissible",
+            )
+            fwd = h.heuristic_score(
+                {}, ["G"], aggregation="product",
+                fixed_depth=depth, strategy="baseline_admissible_resolution_forward",
+                resolution_alpha=2.0,
+            )
+            self.assertGreaterEqual(
+                float(fwd) + 1e-9, float(dense),
+                msg=f"forward < dense admissible at depth {depth}",
+            )
+
+    def test_probability_stays_in_unit_interval(self):
+        h = self._chain_heuristic()
+        for depth in range(0, 20):
+            res = h.heuristic_propagate(
+                {}, goal_facts=["G"], fixed_depth=depth,
+                strategy="baseline_admissible_resolution_forward", resolution_alpha=2.0,
+            )
+            val = res.probabilities_by_layer[depth]["G"]
+            self.assertGreaterEqual(val, 0.0)
+            self.assertLessEqual(val, 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

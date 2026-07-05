@@ -1010,6 +1010,10 @@ def _coalesce_union(ivs: List[Interval], cap: int = 4) -> Tuple[Interval, ...]:
 
 def map_and_merge(m1: CutMap, m2: CutMap, cap: int = 4) -> Dict[Action, Tuple[Interval, ...]]:
     """AND: both parts definitely happen -> keys union, intervals union."""
+    if not m1:
+        return dict(m2)
+    if not m2:
+        return dict(m1)
     out: Dict[Action, Tuple[Interval, ...]] = {}
     for key in set(m1) | set(m2):
         out[key] = _coalesce_union(list(m1.get(key, ())) + list(m2.get(key, ())), cap)
@@ -1038,6 +1042,8 @@ def _cap_groups(groups: List[Group], cap: int = GROUP_CAP) -> Tuple[Group, ...]:
     condition (shared keys shrink to cores, unshared keys drop) — the safe
     degrade — and never breaks coverage, because the merged group is implied by
     both originals. Never returns the empty tuple."""
+    if len(groups) <= 1:
+        return tuple(groups) if groups else ({},)
     uniq: List[Group] = []
     for g in groups:
         if g not in uniq:
@@ -1059,6 +1065,11 @@ def alts_and(a1: Tuple[Group, ...], a2: Tuple[Group, ...],
              cap: int = GROUP_CAP) -> Tuple[Group, ...]:
     """AND (chaining): a realization satisfies some group of each side, so the
     joint groups are the pairwise AND-merges (interval UNION per key)."""
+    # identity short-circuits: a single empty group adds no constraints.
+    if a1 == ({},):
+        return a2
+    if a2 == ({},):
+        return a1
     return _cap_groups([map_and_merge(g1, g2) for g1 in a1 for g2 in a2], cap)
 
 
@@ -1161,31 +1172,33 @@ def cut_truncate(table: List[CutRow], k: int) -> List[CutRow]:
 
 def cut_or_hazard(rows: Sequence[CutRow], k: int,
                   counter: Optional[List[int]] = None) -> float:
-    """Marginal OR hazard over one layer's arriving achiever rows: certified-
-    mutex pairs fold by MAX (+ OR-maps), free pairs by SUM (+ OR-maps); value =
-    max over table <= union sum (each step is a sum or a max-into) — the same
-    admissibility skeleton as table_or_hazard. counter[0] += mutex events."""
-    table: List[CutRow] = []
+    """Marginal OR hazard over one layer's arriving achiever rows — VALUE ONLY
+    (the folded table is discarded, so no map merging is performed; buckets keep
+    their FIRST member's maps as the certification representative — weaker
+    detection than a full merge, but the value stays admissible: every step is
+    a sum or a max-into, so max(buckets) <= union sum). counter[0] += mutex
+    events."""
+    buckets: List[Tuple[CutRow, float]] = []  # (representative row, bucket prob)
     for r in sorted(rows, key=lambda x: -x.prob):
-        merged = False
-        for row in table:
-            if cutrow_mutex(row, r):
+        placed = False
+        for idx, (rep, prob) in enumerate(buckets):
+            if cutrow_mutex(rep, r):
                 if counter is not None:
                     counter[0] += 1
-                row.prob = max(row.prob, r.prob)
-                row.alts = alts_or(row.alts, r.alts)
-                row.cut = map_or_merge(row.cut, r.cut)
-                merged = True
+                buckets[idx] = (rep, max(prob, r.prob))
+                placed = True
                 break
-        if not merged:
-            if table:
-                cutrow_or_merge_into(table[0], r, retry=False)
+        if not placed:
+            if buckets and len(buckets) >= k:
+                rep, prob = buckets[0]
+                buckets[0] = (rep, _clamp01(min(1.0, prob + r.prob)))
+            elif buckets:
+                # free w.r.t. all reps -> sums with the strongest bucket
+                rep, prob = buckets[0]
+                buckets[0] = (rep, _clamp01(min(1.0, prob + r.prob)))
             else:
-                table.append(CutRow(r.prob, tuple(dict(g) for g in r.alts),
-                                    dict(r.cut), r.origin))
-        if len(table) > k:
-            cut_truncate(table, k)
-    return _clamp01(max((r.prob for r in table), default=0.0))
+                buckets.append((r, r.prob))
+    return _clamp01(max((p for _, p in buckets), default=0.0))
 
 
 def cut_components(fact_rows: Mapping[Fact, Sequence[CutRow]]) -> List[List[Fact]]:
@@ -1245,15 +1258,60 @@ def cut_and_bound(fact_rows: Mapping[Fact, Sequence[CutRow]],
 
 def cut_guaranteed_rep(rows: Sequence[CutRow]) -> Tuple[Tuple[Group, ...], Dict[Action, Tuple[Interval, ...]]]:
     """What EVERY route of the fact guarantees = iterated OR-merge of all rows:
-    alts by group-union (paths stay revealed), cut by intersection."""
+    cut by intersection; alts COLLAPSED to a single group (the OR-core of all
+    groups) so downstream AND-chaining stays a 1x1 merge instead of a group
+    product — the rep is "what holds regardless of route" anyway, and group
+    collapsing only weakens (safe). Full multi-group alts live on the fact's own
+    table rows; only the inherited rep is compressed."""
     if not rows:
         return ({},), {}
-    alts = tuple(dict(g) for g in rows[0].alts)
     cut = dict(rows[0].cut)
+    groups: List[Group] = [dict(g) for g in rows[0].alts]
     for r in rows[1:]:
-        alts = alts_or(alts, r.alts)
         cut = map_or_merge(cut, r.cut)
-    return alts, cut
+        groups.extend(r.alts)
+    core: Group = dict(groups[0])
+    for g in groups[1:]:
+        core = map_or_merge(core, g)
+        if not core:
+            break
+    return (core,), cut
+
+
+def cut_fact_keys(rows: Sequence[CutRow]) -> Tuple[set, set]:
+    """(atom actions, cut keys) over a fact's rows — the cheap gate signature:
+    a fact PAIR can only ever certify a conflict if one side's cut keys
+    intersect the other side's atom actions."""
+    atoms: set = set()
+    cuts: set = set()
+    for r in rows:
+        for g in r.alts:
+            atoms.update(g)
+        cuts.update(r.cut)
+    return atoms, cuts
+
+
+def cut_pair_gate(keys1: Tuple[set, set], keys2: Tuple[set, set]) -> bool:
+    """True iff the pair has ANY mutex potential (cut keys hit atom actions)."""
+    return bool(keys1[1] & keys2[0]) or bool(keys2[1] & keys1[0])
+
+
+def cut_fallback_row(
+    reps: Sequence[Tuple[Tuple[Group, ...], Dict[Action, Tuple[Interval, ...]]]],
+    own_alts: Tuple[Group, ...],
+    own_cut: Dict[Action, Tuple[Interval, ...]],
+    prob: float,
+) -> List[CutRow]:
+    """The no-contention emission: ONE row = own maps AND-chained with every
+    precondition's guaranteed rep (same value/maps as cut_emit_rows' fallback)."""
+    if prob <= 0.0:
+        return []
+    alts = tuple(dict(g) for g in own_alts)
+    cut = dict(own_cut)
+    for ra, rc in reps:
+        alts = alts_and(alts, ra)
+        cut = map_and_merge(cut, rc)
+    return [CutRow(_clamp01(prob), alts, cut)]
 
 
 def cut_emit_rows(
@@ -1265,6 +1323,7 @@ def cut_emit_rows(
     q: float,
     combo_cap: int = 64,
     out_cap: int = 5,
+    reps: Optional[Mapping[Fact, Tuple[Tuple[Group, ...], Dict[Action, Tuple[Interval, ...]]]]] = None,
 ) -> List[CutRow]:
     """Chained multi-row AND emission in cut-space: one row per feasible combo
     of CONTENDING precondition routes (alts chained by group-AND, cuts by
@@ -1272,7 +1331,8 @@ def cut_emit_rows(
     Degrades to one fully-guaranteed row when there is no contention or the
     combo product is too large."""
     facts = list(fact_rows)
-    reps = {f: cut_guaranteed_rep(fact_rows[f]) for f in facts}
+    if reps is None:
+        reps = {f: cut_guaranteed_rep(fact_rows[f]) for f in facts}
 
     def with_reps(alts, cut, skip=()):
         for f in facts:

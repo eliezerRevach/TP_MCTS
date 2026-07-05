@@ -33,8 +33,12 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "27": "baseline_admissible_kmutex",
         "28": "baseline_admissible_paths",
         "29": "baseline_admissible_paths_table",
+        "30": "baseline_admissible_resolution",
+        "31": "baseline_admissible_resolution_forward",
         "baseline": "baseline",
         "baseline_admissible": "baseline_admissible",
+        "baseline_admissible_resolution": "baseline_admissible_resolution",
+        "baseline_admissible_resolution_forward": "baseline_admissible_resolution_forward",
         "baseline_admissible_lp": "baseline_admissible_lp",
         "baseline_admissible_kmutex": "baseline_admissible_kmutex",
         "baseline_admissible_paths": "baseline_admissible_paths",
@@ -90,7 +94,9 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "26|baseline_admissible_lp, "
             "27|baseline_admissible_kmutex, "
             "28|baseline_admissible_paths, "
-            "29|baseline_admissible_paths_table"
+            "29|baseline_admissible_paths_table, "
+            "30|baseline_admissible_resolution, "
+            "31|baseline_admissible_resolution_forward"
         )
     return aliases[normalized]
 
@@ -236,7 +242,19 @@ parser.add_argument(
         '29|baseline_admissible_paths_table (table-flowing paths: K-row achiever-path '
         'tables flow through the RPG so the AND layer and goal score can apply '
         'cross-fact temporal-mutex bounds via kernelized aggregation; ADMISSIBLE; '
-        'K via TP_MCTS_KMUTEX_K, aggregation via TP_MCTS_HEURISTIC_AGGREGATION)'
+        'K via TP_MCTS_KMUTEX_K, aggregation via TP_MCTS_HEURISTIC_AGGREGATION), '
+        '30|baseline_admissible_resolution (baseline_admissible operators -- Frechet-min '
+        'AND + union-bound OR -- computed as a goal-directed BACKWARD recursion that '
+        'evaluates achievers only at the 2^(k/2) resolution anchors; the skipped '
+        'completion layers are NOT dropped but charged n_b times at the block latest '
+        'time, so it stays an ADMISSIBLE upper bound (looser than dense '
+        'baseline_admissible); resolution knobs via --resolution-alpha etc.), '
+        '31|baseline_admissible_resolution_forward (FORWARD anchor-jump analogue of 30: '
+        'incremental forward sweep over only the 2^(k/2) anchors, jumping P with the '
+        'block closed form P=1-(1-P)(1-H)^n_b where H is the union hazard copied over '
+        'the n_b skipped earlier layers -- end-of-block anchors keep it ADMISSIBLE and '
+        'tighter than 30; computes all facts (no goal scoping); resolution knobs via '
+        '--resolution-alpha etc.)'
     ),
     nargs='?',
     default='baseline',

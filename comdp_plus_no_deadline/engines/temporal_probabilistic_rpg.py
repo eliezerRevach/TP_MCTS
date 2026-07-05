@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import prod
 from types import SimpleNamespace
+import bisect
 import math
 import os
 import random
@@ -57,6 +58,10 @@ from comdp_plus_no_deadline.engines.path_mutex import (
     cut_or_hazard,
     cut_retry_fold,
     cut_truncate,
+    cut_fact_keys,
+    cut_fallback_row,
+    cut_guaranteed_rep,
+    cut_pair_gate,
     alts_or,
     map_or_merge,
 )
@@ -261,6 +266,21 @@ def _resolution_anchors_ascending(
         t -= w
         backward.append(t)
     return list(reversed(backward))
+
+
+def _grid_ceil(anchors_asc: Sequence[int], t: int) -> int:
+    """Smallest anchor in ``anchors_asc`` that is >= ``t`` (clamped to the grid).
+
+    Used to snap an off-grid support-evaluation time UP to the fixed anchor grid:
+    rounding up keeps recursion horizons on the (logarithmic) grid AND over-
+    estimates monotone probabilities, so it preserves the admissible upper bound.
+    Falls back to the last/first anchor when ``t`` is out of range.
+    """
+    t = int(t)
+    idx = bisect.bisect_left(anchors_asc, t)
+    if idx >= len(anchors_asc):
+        return int(anchors_asc[-1]) if anchors_asc else t
+    return int(anchors_asc[idx])
 
 
 def _resolution_completion_times(
@@ -544,6 +564,7 @@ class TemporalProbabilisticRPGHeuristic:
             "atom_backtrack_exact_unbiased",
             "atom_backtrack_cached",
             "fast_atom_cache",
+            "baseline_admissible_resolution",
         ):
             query_key = query_key + (self._query_cache_goal_key(goal_facts, state_facts),)
         if chosen_strategy in (
@@ -551,6 +572,8 @@ class TemporalProbabilisticRPGHeuristic:
             "atom_backtrack_exact_resolution_and_gamma",
             "atom_backtrack_exact_unbiased",
             "baseline_survival_resolution",
+            "baseline_admissible_resolution",
+            "baseline_admissible_resolution_forward",
         ):
             query_key = query_key + (
                 float(2.0 if resolution_alpha is None else resolution_alpha),
@@ -667,6 +690,32 @@ class TemporalProbabilisticRPGHeuristic:
                 fixed_depth=fixed_depth,
                 start_time=start_time,
                 debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_admissible_resolution":
+            result = self._heuristic_propagate_baseline_admissible_resolution(
+                state=state,
+                goal_facts=goal_facts,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+                resolution_alpha=resolution_alpha,
+                resolution_forced_minimum=resolution_forced_minimum,
+                resolution_reference_t=resolution_reference_t,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "baseline_admissible_resolution_forward":
+            result = self._heuristic_propagate_baseline_admissible_resolution_forward(
+                state=state,
+                goal_facts=goal_facts,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+                resolution_alpha=resolution_alpha,
+                resolution_forced_minimum=resolution_forced_minimum,
+                resolution_reference_t=resolution_reference_t,
             )
             self._query_cache[query_key] = result
             return result
@@ -1369,6 +1418,8 @@ class TemporalProbabilisticRPGHeuristic:
         valid = {
             "baseline",
             "baseline_admissible",
+            "baseline_admissible_resolution",
+            "baseline_admissible_resolution_forward",
             "baseline_admissible_lp",
             "baseline_admissible_kmutex",
             "baseline_admissible_paths",
@@ -1390,7 +1441,7 @@ class TemporalProbabilisticRPGHeuristic:
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_admissible, baseline_admissible_lp, baseline_admissible_kmutex, baseline_admissible_paths, baseline_pdb, baseline_cached, baseline_survival, "
+                "Supported strategies: baseline, baseline_admissible, baseline_admissible_resolution, baseline_admissible_resolution_forward, baseline_admissible_lp, baseline_admissible_kmutex, baseline_admissible_paths, baseline_pdb, baseline_cached, baseline_survival, "
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "baseline_survival_resolution, "
                 "atom_half_split, "
@@ -1733,6 +1784,367 @@ class TemporalProbabilisticRPGHeuristic:
                 depth_used=depth,
                 start_layer=max(0, int(math.floor(start_time))),
             ),
+        )
+
+    def _heuristic_propagate_baseline_admissible_resolution(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+        *,
+        resolution_alpha: Optional[float] = None,
+        resolution_forced_minimum: bool = False,
+        resolution_reference_t: Optional[int] = None,
+    ) -> TemporalPropagationResult:
+        """Admissible PTRPG with a logarithmic (2^(k/2)) layer jump.
+
+        Built ONLY from the ``baseline_admissible`` operators (paper PTRPG_Cleaned
+        Sections 7-8, 11): Frechet ``min`` for the AND / precondition layer, the
+        union bound for the OR / achiever layer, and the monotone cumulative
+        update. It is NOT derived from ``atom_backtrack_exact_resolution`` (that is
+        a separate non-admissible heuristic which uses the independence product /
+        noisy-OR and DROPS the jumped-over layers).
+
+        Shape: forward layering is only needed to know where achievers can fire;
+        here the represented horizon is the dense integer grid ``0..depth`` (a
+        superset of the paper's sparse layers, so identical values), and the
+        expensive work is a GOAL-DIRECTED BACKWARD recursion that only ever
+        evaluates goal-relevant facts.
+
+        The speedup: instead of evaluating each achiever's precondition support
+        ``R_e`` at every integer completion time in ``[first_completion, horizon]``
+        (linear in the remaining horizon), evaluate it once per resolution anchor
+        block (``~log`` many blocks from the ``2^(k/2)`` schedule).
+
+        The admissibility fix (the defining idea): the ``n_b`` completion layers
+        skipped inside a block are NOT dropped. Each block charges its full width
+        ``n_b`` times, evaluated at ``t_b`` = the block's LATEST completion time
+        (largest ``avail_horizon = t_b - delay``, hence the largest / most
+        optimistic ``R_e`` because ``R_e`` is monotone non-decreasing in horizon).
+        The per-fact estimate is a single union bound across achievers AND retry
+        attempts:
+
+            P(f, h) = min(1, sum_e sum_b n_b * q_e * R_e(t_b))
+
+        Since the union bound dominates the noisy-OR / cumulative update and each
+        ``n_b`` block over-charges the exact per-layer contributions, this is a
+        (looser) upper bound relative to the dense ``baseline_admissible``:
+        ``resolution >= baseline_admissible >= true relaxed probability``. Status:
+        ADMISSIBLE under the delete-relaxed temporal RPG envelope (paper Sec. 11).
+        """
+        del start_time
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        target_facts: Set[Fact] = (
+            set(goal_facts) if goal_facts is not None else self._facts.union(state_facts)
+        )
+        anchors_asc = _resolution_anchors_ascending(
+            depth,
+            alpha=resolution_alpha,
+            t_ref=resolution_reference_t,
+            delta_min=1,
+            forced_minimum=resolution_forced_minimum,
+        )
+
+        fact_cache_hits = 0
+        action_cache_hits = 0
+        fact_memo: Dict[Tuple[Fact, int], float] = {}
+        action_term_memo: Dict[Tuple[str, Fact, int], float] = {}
+        recursion_stack: Set[Tuple[Fact, int]] = set()
+
+        def is_atom_action(action_model: TemporalRelaxedActionModel) -> bool:
+            return (
+                len(action_model.preconditions) == 0
+                or action_model.preconditions.issubset(state_facts)
+            )
+
+        def fact_probability(fact: Fact, horizon: int) -> float:
+            nonlocal fact_cache_hits
+            horizon = int(horizon)
+            if horizon < 0:
+                return 0.0
+            key = (fact, horizon)
+            if key in fact_memo:
+                fact_cache_hits += 1
+                return fact_memo[key]
+            if key in recursion_stack:
+                return 0.0
+
+            if fact in state_facts:
+                value = 1.0
+            elif horizon == 0:
+                value = 0.0
+            else:
+                recursion_stack.add(key)
+                # OR layer: union bound across achievers AND retry attempts.
+                union_total = 0.0
+                for action_model in self._actions_by_effect_fact.get(fact, []):
+                    action_key = (action_model.name, fact, horizon)
+                    if action_key in action_term_memo:
+                        action_cache_hits += 1
+                        union_total += action_term_memo[action_key]
+                        continue
+                    delay = max(0, int(action_model.effect_delay_steps))
+                    add_probability = _clamp_probability(
+                        action_model.add_probabilities.get(fact, 0.0)
+                    )
+                    if add_probability <= 0.0 or horizon < delay:
+                        action_term_memo[action_key] = 0.0
+                        continue
+                    first_completion = max(1, delay)
+                    if horizon < first_completion:
+                        action_term_memo[action_key] = 0.0
+                        continue
+                    completion_times = _resolution_completion_times(
+                        anchors_asc, first_completion, horizon
+                    )
+                    atom = is_atom_action(action_model)
+
+                    def support_at(eval_horizon: int) -> float:
+                        # AND layer: Frechet min over preconditions.
+                        if atom:
+                            return 1.0
+                        return admissible_and_support(
+                            action_model.preconditions,
+                            {
+                                precondition: fact_probability(
+                                    precondition, eval_horizon
+                                )
+                                for precondition in action_model.preconditions
+                            },
+                        )
+
+                    achiever_mass = 0.0
+                    # Each retained anchor t_b represents the block of skipped
+                    # completion layers (prev_anchor, t_b]; charge its full width
+                    # n_b at the block's latest time (largest, most optimistic R_e).
+                    # Recursion horizons are anchor - delay (drawn from the fixed
+                    # global grid), so the distinct (fact, horizon) memo cells stay
+                    # O(log depth) -- the key to the logarithmic speedup.
+                    prev_boundary = first_completion - 1
+                    for t_b in completion_times:
+                        n_b = t_b - prev_boundary
+                        prev_boundary = t_b
+                        if n_b <= 0:
+                            continue
+                        support = support_at(t_b - delay)
+                        step_success = _clamp_probability(add_probability * support)
+                        achiever_mass += n_b * step_success
+                    # Admissible on-grid tail: if the anchors stopped short of this
+                    # (nested) horizon, charge the remaining block (prev_boundary,
+                    # horizon] instead of dropping it (which would under-count and
+                    # break the upper bound). Evaluate its support at the nearest
+                    # anchor >= horizon - delay (grid_ceil): rounding the support
+                    # lookup UP keeps the recursion ON the global grid (no off-grid
+                    # horizon - k*delay chains) AND over-estimates support (P is
+                    # monotone in horizon), so it stays an admissible upper bound.
+                    if prev_boundary < horizon:
+                        n_tail = horizon - prev_boundary
+                        support = support_at(_grid_ceil(anchors_asc, horizon - delay))
+                        step_success = _clamp_probability(add_probability * support)
+                        achiever_mass += n_tail * step_success
+                    action_term_memo[action_key] = achiever_mass
+                    union_total += achiever_mass
+                recursion_stack.remove(key)
+                value = _clamp_probability(min(1.0, union_total))
+
+            fact_memo[key] = value
+            return value
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            0: {fact: (1.0 if fact in state_facts else 0.0) for fact in target_facts},
+            depth: {fact: fact_probability(fact, depth) for fact in target_facts},
+        }
+
+        traces: List[TemporalLayerTrace] = []
+        if debug:
+            traces.append(
+                TemporalLayerTrace(
+                    layer=0,
+                    fact_probabilities=dict(probabilities_by_layer[0]),
+                )
+            )
+            traces.append(
+                TemporalLayerTrace(
+                    layer=depth,
+                    fact_probabilities=dict(probabilities_by_layer[depth]),
+                )
+            )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=fact_cache_hits,
+            action_cache_hits=action_cache_hits,
+        )
+
+    def _heuristic_propagate_baseline_admissible_resolution_forward(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+        *,
+        resolution_alpha: Optional[float] = None,
+        resolution_forced_minimum: bool = False,
+        resolution_reference_t: Optional[int] = None,
+    ) -> TemporalPropagationResult:
+        """FORWARD anchor-jump admissible PTRPG (alternative to the backward
+        resolution).
+
+        Same admissible operators as ``baseline_admissible`` (Frechet ``min`` AND,
+        union-bound OR), but instead of a dense per-layer forward sweep it only
+        materialises the ``2^(k/2)`` anchor layers and jumps ``P`` from one anchor
+        to the next with the block closed form
+
+            P(f, t_cur) = 1 - (1 - P(f, t_prev)) * (1 - H_f)^{n_b}
+
+        where ``n_b = t_cur - t_prev`` is the block width and ``H_f`` is the OR /
+        union hazard evaluated ONCE for the block (the "copy H across the skipped
+        layers" idea). This is the forward analogue of the survival-resolution
+        strategy, but with admissible operators.
+
+        Admissibility (two conditions, both enforced here):
+        1. The anchor is the END of its block: ``H_f`` reads precondition support
+           at ``t_cur - delay`` using the most recent anchor <= that time. Because
+           ``P`` is monotone non-decreasing in time, that support (and hence
+           ``H_f``) is >= the true hazard at every EARLIER layer in the block, so
+           copying it back over the ``n_b`` skipped layers over-estimates.
+        2. ``H_f`` is only ever applied to layers <= its own anchor (the block
+           power ``(1 - H_f)^{n_b}`` covers ``(t_prev, t_cur]``), never forward
+           past ``t_cur``.
+        Then ``(1 - H_f)^{n_b} <= prod_i (1 - h_i)`` over the true per-layer
+        hazards, so the block cumulative is an upper bound. Status: ADMISSIBLE
+        under the delete-relaxed temporal RPG envelope (paper Sec. 11), and TIGHTER
+        than the backward union-bound variant since ``1-(1-H)^{n_b} <= min(1,n_b H)``.
+
+        Unlike the backward variant this computes ALL facts (no goal scoping): the
+        forward sweep is incremental (each anchor reuses the previous anchor's P),
+        which is the DP-table reuse that keeps it cheap on small fact sets.
+        """
+        del start_time, goal_facts  # forward pass is not goal-scoped
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+        anchor_times = _resolution_anchors_ascending(
+            depth,
+            alpha=resolution_alpha,
+            t_ref=resolution_reference_t,
+            delta_min=1,
+            forced_minimum=resolution_forced_minimum,
+        )
+
+        running_p: Dict[Fact, float] = {
+            fact: (1.0 if fact in state_facts else 0.0) for fact in facts
+        }
+        # Snapshots of P at each processed anchor, for the "round up to the nearest
+        # anchor >= needed time" (delta*) support read below.
+        processed_times: List[int] = [0]
+        anchor_snapshots: Dict[int, Dict[Fact, float]] = {0: dict(running_p)}
+        # Iteration cap for the per-block fixpoint below: at most one pass per
+        # fact suffices to resolve the longest relaxed chain inside a block.
+        fixpoint_cap = max(1, len(facts))
+        traces: List[TemporalLayerTrace] = []
+
+        for idx in range(1, len(anchor_times)):
+            cur = anchor_times[idx]
+            prev = anchor_times[idx - 1]
+            n_b = cur - prev
+            if n_b <= 0:
+                continue
+
+            # Base for this block's cumulative update is P at the block START
+            # (anchor ``prev``); the block hazard is applied over its ``n_b`` layers.
+            base_p: Dict[Fact, float] = dict(running_p)
+
+            def support_at(fact: Fact, target_time: int) -> float:
+                # Same edge-case rule as the backward variant: read the precondition
+                # at the nearest anchor >= target_time (round toward the deadline,
+                # delta*). By monotonicity that OVER-estimates the true support at
+                # target_time, keeping H an admissible upper bound. When target_time
+                # falls inside the CURRENT block (no processed anchor >= it), use the
+                # block's running (fixpoint) value so an intra-block chain can still
+                # advance. This is tighter than always reading the block end: a
+                # large-delay action whose needed time lands on an EARLIER anchor
+                # uses that anchor's (smaller) value instead of the block end.
+                best_time = None
+                for t in processed_times:
+                    if t >= target_time and (best_time is None or t < best_time):
+                        best_time = t
+                if best_time is not None:
+                    return _clamp_probability(
+                        anchor_snapshots[best_time].get(fact, 0.0)
+                    )
+                return _clamp_probability(running_p.get(fact, 0.0))
+
+            # Per-block relaxed fixpoint: recompute the union hazard and re-apply the
+            # block update until no fact increases, so a chain can advance WITHIN a
+            # coarse block instead of freezing at the block-start snapshot.
+            for _ in range(fixpoint_cap):
+                hazard_mass: Dict[Fact, float] = {}
+                for action_model in self._action_models:
+                    delay = max(0, int(action_model.effect_delay_steps))
+                    support_time = cur - delay
+                    if support_time < 0:
+                        continue
+                    # AND layer: Frechet min over preconditions (delta* read).
+                    if action_model.preconditions:
+                        support = admissible_and_support(
+                            action_model.preconditions,
+                            {
+                                precondition: support_at(precondition, support_time)
+                                for precondition in action_model.preconditions
+                            },
+                        )
+                    else:
+                        support = 1.0
+                    if support <= 0.0:
+                        continue
+                    for fact, add_prob in action_model.add_probabilities.items():
+                        hazard_mass[fact] = hazard_mass.get(
+                            fact, 0.0
+                        ) + _clamp_probability(add_prob) * support
+
+                changed = False
+                for fact, mass in hazard_mass.items():
+                    hazard = _clamp_probability(min(1.0, mass))
+                    updated = _clamp_probability(
+                        1.0 - (1.0 - base_p[fact]) * (1.0 - hazard) ** n_b
+                    )
+                    if updated > running_p[fact] + 1e-12:
+                        running_p[fact] = updated
+                        changed = True
+                if not changed:
+                    break
+
+            processed_times.append(cur)
+            anchor_snapshots[cur] = dict(running_p)
+
+        layer_zero = {fact: (1.0 if fact in state_facts else 0.0) for fact in facts}
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            0: layer_zero,
+            depth: dict(running_p),
+        }
+        if debug:
+            traces.append(
+                TemporalLayerTrace(layer=0, fact_probabilities=dict(layer_zero))
+            )
+            traces.append(
+                TemporalLayerTrace(layer=depth, fact_probabilities=dict(running_p))
+            )
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=0,
+            action_cache_hits=0,
         )
 
     def log_kmutex_summary(self, reset: bool = False) -> str:
@@ -2298,6 +2710,30 @@ class TemporalProbabilisticRPGHeuristic:
         # the chained multi-row emission.
         pending_supports: Dict[Tuple[int, Fact], List[CutRow]] = {}
         pending_aux: Dict[Tuple[int, Fact], List[CutRow]] = {}
+        # Version-keyed caches: a fact's guaranteed rep / gate key-sets only
+        # change when its table receives an arrival, so cache them across layers
+        # and invalidate by per-fact version counter (bumped on aux update).
+        table_version: Dict[Fact, int] = {}
+        rep_cache: Dict[Fact, tuple] = {}
+        keys_cache: Dict[Fact, tuple] = {}
+
+        def fact_rep(f):
+            ver = table_version.get(f, 0)
+            hit = rep_cache.get(f)
+            if hit is not None and hit[0] == ver:
+                return hit[1]
+            r = cut_guaranteed_rep(fact_tables.get(f, []))
+            rep_cache[f] = (ver, r)
+            return r
+
+        def fact_keys(f):
+            ver = table_version.get(f, 0)
+            hit = keys_cache.get(f)
+            if hit is not None and hit[0] == ver:
+                return hit[1]
+            r = cut_fact_keys(fact_tables.get(f, []))
+            keys_cache[f] = (ver, r)
+            return r
         traces: List[TemporalLayerTrace] = []
         action_support_by_layer: Dict[int, Dict[str, float]] = {}
         self._paths_table_and_nodes = 0
@@ -2344,6 +2780,7 @@ class TemporalProbabilisticRPGHeuristic:
                     # tightening).
                     cut_retry_fold(tbl, aux)
                     cut_truncate(tbl, k)
+                    table_version[fact] = table_version.get(fact, 0) + 1
 
             if layer == depth:
                 if debug:
@@ -2360,7 +2797,24 @@ class TemporalProbabilisticRPGHeuristic:
                 if preconds:
                     marg = {f: probabilities_by_layer[layer].get(f, 0.0) for f in preconds}
                     fr = {f: fact_tables.get(f, []) for f in preconds}
-                    support_value, detected = cut_and_bound(fr, marg)
+                    # Cheap key-set gate: a precondition pair can only certify a
+                    # conflict if one side's cut keys hit the other's atom
+                    # actions. No gated pair -> cut_and_bound would provably
+                    # return (frechet, False); skip it.
+                    gated = False
+                    if len(preconds) >= 2:
+                        for i in range(len(preconds)):
+                            for j in range(i + 1, len(preconds)):
+                                if cut_pair_gate(fact_keys(preconds[i]),
+                                                 fact_keys(preconds[j])):
+                                    gated = True
+                                    break
+                            if gated:
+                                break
+                    if gated:
+                        support_value, detected = cut_and_bound(fr, marg)
+                    else:
+                        support_value, detected = min(marg.values()), False
                     if len(preconds) >= 2:
                         frechet = min(marg.values())
                         self._paths_table_and_nodes += 1
@@ -2379,41 +2833,55 @@ class TemporalProbabilisticRPGHeuristic:
                     continue
                 name = action_model.name
                 own_iv = (layer, arrival_layer)
-                own_alts = ({name: (own_iv,)},)
+                # Resource projection: only actions with mutex partners can ever
+                # certify anything — a non-partner own atom would just bloat
+                # every downstream chain merge for zero certification power.
+                own_alts = ({name: (own_iv,)},) if name in partners else ({},)
                 own_cut = {x: (own_iv,) for x in partners.get(name, ())}
+                # Emission template computed ONCE PER ACTION (it does not depend
+                # on the effect fact — only the prob scale does). q=1 template;
+                # per-effect rows share the maps (all merges are copy-on-write).
+                if preconds and gated:
+                    template = cut_emit_rows(
+                        fr, marg, support_value, own_alts, own_cut, 1.0,
+                        combo_cap=64, out_cap=k,
+                        reps={f: fact_rep(f) for f in preconds},
+                    )
+                elif preconds:
+                    template = cut_fallback_row(
+                        [fact_rep(f) for f in preconds], own_alts, own_cut,
+                        support_value,
+                    )
+                else:
+                    template = [CutRow(1.0, tuple(dict(g) for g in own_alts),
+                                       dict(own_cut))]
+                if not template:
+                    continue
+                # Marginal-side representative maps: the first template row's
+                # (single-row templates are the common case; for multi-row ones
+                # this is a weaker-certification representative — the marginal
+                # OR value stays admissible either way, see cut_or_hazard).
+                g_alts, g_cut = template[0].alts, template[0].cut
+                t_chained = sum(
+                    1 for r in template
+                    if any(set(g) - {name} for g in r.alts)
+                    or set(r.cut) - set(partners.get(name, ()))
+                )
                 for fact, add_prob in action_model.add_probabilities.items():
                     success = _clamp_probability(support_value * add_prob)
                     if success <= 0.0:
                         continue
-                    if preconds:
-                        emitted = cut_emit_rows(
-                            fr, marg, support_value, own_alts, own_cut, add_prob,
-                            combo_cap=64, out_cap=k,
-                        )
-                    else:
-                        emitted = [CutRow(success, ({name: (own_iv,)},), dict(own_cut))]
-                    if not emitted:
-                        continue
-                    for r in emitted:
-                        r.origin = name
-                    # Marginal-side: ONE per-achiever contribution (v1 shape) with
-                    # the fully-GUARANTEED maps (OR-merge across emitted routes).
-                    g_alts = tuple(dict(g) for g in emitted[0].alts)
-                    g_cut = dict(emitted[0].cut)
-                    for r in emitted[1:]:
-                        g_alts = alts_or(g_alts, r.alts)
-                        g_cut = map_or_merge(g_cut, r.cut)
+                    emitted = [
+                        CutRow(_clamp_probability(r.prob * add_prob), r.alts,
+                               r.cut, origin=name)
+                        for r in template
+                    ]
                     pending_supports.setdefault((arrival_layer, fact), []).append(
                         CutRow(success, g_alts, g_cut, origin=name)
                     )
-                    # Aux-side: the chained multi-row emission.
                     pending_aux.setdefault((arrival_layer, fact), []).extend(emitted)
                     self._paths_table_emitted_rows += len(emitted)
-                    self._paths_table_chained_rows += sum(
-                        1 for r in emitted
-                        if any(set(g) - {name} for g in r.alts)
-                        or set(r.cut) - set(partners.get(name, ()))
-                    )
+                    self._paths_table_chained_rows += t_chained
             action_support_by_layer[layer] = dict(action_support)
 
             if debug:

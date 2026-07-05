@@ -57,6 +57,42 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_admissible",
         "label": "baseline_admissible",
     },
+    # baseline_admissible operators (Frechet-min AND + union-bound OR) computed as
+    # a GOAL-DIRECTED BACKWARD recursion that evaluates achievers only at the
+    # 2^(k/2) resolution anchors instead of every completion layer. The skipped
+    # completion layers are NOT dropped: each anchor block charges its full width
+    # n_b at the block's latest (most optimistic) time, so it stays an ADMISSIBLE
+    # upper bound -- looser than dense baseline_admissible, but faster (log layers).
+    # Resolution knobs via resolution_alpha / resolution_forced_minimum /
+    # resolution_reference_t (same as atom_backtrack_exact_resolution).
+    "baseline_admissible_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_resolution",
+        "label": "baseline_admissible_resolution",
+    },
+    # Synonym: shorthand for baseline_admissible_resolution.
+    "admissible_resolution": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_resolution",
+        "label": "baseline_admissible_resolution",
+    },
+    # FORWARD anchor-jump analogue of baseline_admissible_resolution: incremental
+    # forward sweep over only the 2^(k/2) anchors, jumping P with the block closed
+    # form P=1-(1-P)(1-H)^n_b (H = union hazard copied over the n_b skipped EARLIER
+    # layers; end-of-block anchors keep it ADMISSIBLE and tighter than the backward
+    # variant). Computes all facts (no goal scoping) but is cache-friendly/incremental.
+    # Same resolution knobs as baseline_admissible_resolution.
+    "baseline_admissible_resolution_forward": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_resolution_forward",
+        "label": "baseline_admissible_resolution_forward",
+    },
+    # Synonym: shorthand for baseline_admissible_resolution_forward.
+    "admissible_resolution_forward": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_resolution_forward",
+        "label": "baseline_admissible_resolution_forward",
+    },
     # baseline_admissible with the OR/fact layer tightened by the marginal-
     # consistent LP bound (PTRPG_Cleaned.docx Section 9.3). Per arrival fact it
     # solves max P(OR-of-AND achievers) over all local joint distributions
