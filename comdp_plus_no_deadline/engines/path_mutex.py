@@ -961,7 +961,13 @@ CutMap = Mapping[Action, Tuple[Interval, ...]]
 
 
 Group = Dict[Action, Tuple[Interval, ...]]  # one chain's DEFINITE occupations
-GROUP_CAP = 4
+# Max alternative routes a row distinguishes before collapsing (user's "max
+# nest" knob). DEFAULT 1 = the FLAT design: OR-merge of heterogeneous routes
+# empties the path (keeps only the shared cut), AND-merge unions — no nesting,
+# worst case actions x deadline. Raising it buys back cases like
+# (a|b)-vs-(c|d) certification at bounded extra cost.
+import os as _os
+GROUP_CAP = max(1, int(_os.environ.get("TP_MCTS_GROUP_CAP", "1")))
 
 
 @dataclass

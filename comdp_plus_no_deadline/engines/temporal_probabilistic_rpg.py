@@ -693,6 +693,15 @@ class TemporalProbabilisticRPGHeuristic:
             )
             self._query_cache[query_key] = result
             return result
+        if chosen_strategy == "baseline_forward":
+            result = self._heuristic_propagate_baseline_forward(
+                state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
         if chosen_strategy == "baseline_admissible_resolution":
             result = self._heuristic_propagate_baseline_admissible_resolution(
                 state=state,
@@ -1121,6 +1130,7 @@ class TemporalProbabilisticRPGHeuristic:
 
     _FORWARD_STRATEGIES_WITH_ACTION_SUPPORT = frozenset({
         "baseline",
+        "baseline_forward",
         "baseline_pdb",
         "baseline_cached",
         "baseline_survival",
@@ -1417,6 +1427,7 @@ class TemporalProbabilisticRPGHeuristic:
             value = "baseline"
         valid = {
             "baseline",
+            "baseline_forward",
             "baseline_admissible",
             "baseline_admissible_resolution",
             "baseline_admissible_resolution_forward",
@@ -1774,6 +1785,167 @@ class TemporalProbabilisticRPGHeuristic:
             cache_hit=False,
             fact_cache_hits=fact_cache_hits,
             action_cache_hits=action_cache_hits,
+            action_support_by_layer=action_support_by_layer,
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def _heuristic_propagate_baseline_forward(
+        self,
+        state,
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """Inadmissible, EVENT-DRIVEN forward expansion with independence ops.
+
+        Unlike ``baseline`` / ``baseline_admissible`` (which sweep EVERY integer
+        layer ``0..depth`` in unit steps), this advances time event-driven. From
+        the current anchor ``delta_t`` it expands every applicable action, lands
+        each effect at ``delta_t + d(a)``, then jumps to the NEXT scheduled
+        arrival time (the nearest ``delta``). The step between anchors is the
+        action durations themselves, NOT a unit ``1`` -- if the applicable
+        actions produce arrivals at 4.5 and 10, the next anchor is 4.5, then the
+        one after is whatever the next action produces.
+
+        At each anchor the retry recursion carries the PREVIOUS anchor (not the
+        previous unit layer)::
+
+            P(delta_t)(f) = P(delta_{t-1})(f)
+                            + (1 - P(delta_{t-1})(f)) * H_t(f)
+
+        with the independence-assumption operators (NOT the admissible bounds):
+
+        - AND / precondition support: independence PRODUCT
+          ``R(a) = prod_{f in pre(a)} P(f)`` (noisy-AND), evaluated on the DP
+          table at the anchor where the action is expanded.
+        - OR / arrival hazard: noisy-OR
+          ``H_t(f) = 1 - prod_e (1 - B_e)`` over the achievers landing at
+          ``delta_t``, with ``B_e = R(a) * Pr_a(f)``.
+
+        Because the grid is coarse (actions only re-fire once per anchor rather
+        than every unit layer) and the operators are the independence product /
+        noisy-OR, this is everywhere <= ``baseline`` / ``baseline_admissible`` and
+        is NOT an admissible upper bound.
+
+        Durations use the integer ``effect_delay_steps`` of the discretized
+        model, so anchors fall on integer times; layers between anchors just
+        persist the last anchor value (keeps the dense ``0..depth`` grid that
+        downstream aggregation and action scoring expect).
+        """
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        facts = self._facts.union(state_facts)
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            t: {fact: 0.0 for fact in facts} for t in range(depth + 1)
+        }
+        for fact in facts:
+            probabilities_by_layer[0][fact] = 1.0 if fact in state_facts else 0.0
+
+        traces: List[TemporalLayerTrace] = []
+        action_support_by_layer: Dict[int, Dict[str, float]] = {}
+
+        # pending[arrival_anchor][fact] -> list of independent success probs.
+        pending: Dict[int, Dict[Fact, List[float]]] = {}
+
+        def expand(anchor_time: int, probs: Dict[Fact, float]) -> Dict[str, float]:
+            """Fire every applicable action at ``anchor_time`` and schedule each
+            effect at ``anchor_time + d(a)`` (independence product AND support)."""
+            support: Dict[str, float] = {}
+            for action_model in self._action_models:
+                # AND layer: independence product instead of the Frechet min.
+                action_support_value = 1.0
+                for fact in action_model.preconditions:
+                    action_support_value *= _clamp_probability(probs.get(fact, 0.0))
+                action_support_value = _clamp_probability(action_support_value)
+                support[action_model.name] = action_support_value
+                if action_support_value <= 0.0:
+                    continue
+
+                arrival = anchor_time + int(action_model.effect_delay_steps)
+                if arrival <= anchor_time or arrival > depth:
+                    continue
+                for fact, add_prob in action_model.add_probabilities.items():
+                    success = _clamp_probability(action_support_value * add_prob)
+                    pending.setdefault(arrival, {}).setdefault(fact, []).append(success)
+            return support
+
+        # Anchor 0: the current state. Expand it to seed the first arrivals.
+        current_probs: Dict[Fact, float] = dict(probabilities_by_layer[0])
+        anchor_snapshots: Dict[int, Dict[Fact, float]] = {0: dict(current_probs)}
+        support0 = expand(0, current_probs)
+        action_support_by_layer[0] = dict(support0)
+        if debug:
+            traces.append(
+                TemporalLayerTrace(
+                    layer=0,
+                    fact_probabilities=dict(current_probs),
+                    action_support=support0,
+                    arrivals={},
+                )
+            )
+
+        prev_probs = current_probs
+        # Process anchors in increasing time: each is the next scheduled arrival.
+        while pending:
+            anchor = min(pending)
+            if anchor > depth:
+                break
+            arrivals_here = pending.pop(anchor)
+
+            # Persistence carry from the previous anchor, then the retry update.
+            new_probs = dict(prev_probs)
+            arrivals: Dict[Fact, float] = {}
+            for fact, successes in arrivals_here.items():
+                # OR layer: noisy-OR under independence = 1 - prod_e (1 - B_e).
+                complement = 1.0
+                for probability in successes:
+                    complement *= (1.0 - _clamp_probability(probability))
+                arrival_hazard = _clamp_probability(1.0 - complement)
+                base_p = _clamp_probability(prev_probs.get(fact, 0.0))
+                new_probs[fact] = _clamp_probability(
+                    base_p + (1.0 - base_p) * arrival_hazard
+                )
+                arrivals[fact] = arrival_hazard
+
+            # Re-expand all actions at this anchor with the updated table.
+            support = expand(anchor, new_probs)
+            action_support_by_layer[anchor] = dict(support)
+            anchor_snapshots[anchor] = dict(new_probs)
+            if debug:
+                traces.append(
+                    TemporalLayerTrace(
+                        layer=anchor,
+                        fact_probabilities=dict(new_probs),
+                        action_support=support,
+                        arrivals=arrivals,
+                    )
+                )
+            prev_probs = new_probs
+
+        # Materialise the dense 0..depth grid by forward-filling anchor snapshots
+        # (probabilities persist between anchors).
+        last_snapshot = anchor_snapshots[0]
+        for layer in range(depth + 1):
+            if layer in anchor_snapshots:
+                last_snapshot = anchor_snapshots[layer]
+            probabilities_by_layer[layer] = dict(last_snapshot)
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=traces,
+            cache_hit=False,
+            fact_cache_hits=0,
+            action_cache_hits=0,
             action_support_by_layer=action_support_by_layer,
             cached_table=CachedPTRPGTable(
                 probabilities_by_layer={

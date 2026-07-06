@@ -454,32 +454,51 @@ class TestChainedFootprints(unittest.TestCase):
 
 
 class TestCutAltsRegression(unittest.TestCase):
-    """The a,b->(c,d) hole: two rows whose CUTS point at each other's members
-    must stay certified-mutex after OR-merging, which requires the merged row to
-    still REVEAL its alternative paths (alts groups), not just its cut."""
+    """The a,b->(c,d) case under the FLAT default (GROUP_CAP=1, user-specified):
+    OR-merging heterogeneous routes EMPTIES the path (keeps only the shared
+    cut), so (a|b)-vs-(c|d) is NOT certified (both paths free -> sum, the
+    accepted, sound loss). One-sided cases still certify via the surviving cut
+    hitting the other row's non-empty path. Raising GROUP_CAP (>=2) restores
+    the nested certification — tested via explicit alts_or with cap=2."""
 
     def _mk(self, action, w, cut_actions, cut_w=None):
         from comdp_plus_no_deadline.engines.path_mutex import CutRow
         cw = cut_w or w
         return CutRow(0.4, ({action: (w,)},), {x: (cw,) for x in cut_actions})
 
-    def test_ab_vs_cd_stays_mutex_after_or_merge(self):
+    def test_flat_ab_or_merge_empties_path_keeps_cut(self):
+        # FLAT default (GROUP_CAP=1): a|b -> path free, mutex on (c,d).
         from comdp_plus_no_deadline.engines.path_mutex import (
             cutrow_mutex, cutrow_or_merge_into,
         )
         W = (0, 10)
         ra = self._mk("a", W, ("c", "d"))
-        rb = self._mk("b", W, ("c", "d"))
-        rc = self._mk("c", W, ("a", "b"))
+        cutrow_or_merge_into(ra, self._mk("b", W, ("c", "d")), retry=False)
+        self.assertEqual(ra.alts, ({},))                       # path = free
+        self.assertEqual(set(ra.cut), {"c", "d"})              # shared cut kept
+        # one-sided certification still works: (a|b)'s cut hits d's path.
         rd = self._mk("d", W, ("a", "b"))
-        # merge a|b and c|d (same-layer alternatives -> sum)
-        cutrow_or_merge_into(ra, rb, retry=False)   # ra now = (a|b)
-        cutrow_or_merge_into(rc, rd, retry=False)   # rc now = (c|d)
-        # alts must reveal both paths
-        self.assertEqual(len(ra.alts), 2)
-        # THE POINT: still certified mutex (every alternative of one is killed
-        # by the other's cut) -> max/exclusion, never sum.
-        self.assertTrue(cutrow_mutex(ra, rc))
+        self.assertTrue(cutrow_mutex(ra, rd))
+        # both-sides-merged: paths both free -> NOT certified -> sum (the
+        # accepted flat-design loss; sound direction).
+        rc = self._mk("c", W, ("a", "b"))
+        cutrow_or_merge_into(rc, self._mk("d", W, ("a", "b")), retry=False)
+        self.assertFalse(cutrow_mutex(ra, rc))
+
+    def test_nested_cap2_restores_ab_vs_cd(self):
+        # Raising the nest knob (cap=2) keeps both routes revealed -> certified.
+        from comdp_plus_no_deadline.engines.path_mutex import (
+            CutRow, alts_or, cutrow_mutex, map_or_merge,
+        )
+        W = (0, 10)
+        ra, rb = self._mk("a", W, ("c", "d")), self._mk("b", W, ("c", "d"))
+        rc, rd = self._mk("c", W, ("a", "b")), self._mk("d", W, ("a", "b"))
+        r_ab = CutRow(0.8, alts_or(ra.alts, rb.alts, cap=2),
+                      map_or_merge(ra.cut, rb.cut))
+        r_cd = CutRow(0.8, alts_or(rc.alts, rd.alts, cap=2),
+                      map_or_merge(rc.cut, rd.cut))
+        self.assertEqual(len(r_ab.alts), 2)
+        self.assertTrue(cutrow_mutex(r_ab, r_cd))
 
     def test_partial_cut_does_not_certify(self):
         from comdp_plus_no_deadline.engines.path_mutex import (
@@ -495,20 +514,28 @@ class TestCutAltsRegression(unittest.TestCase):
         # realization a + d is compatible -> must NOT certify
         self.assertFalse(cutrow_mutex(ra, rc))
 
-    def test_and_bound_zeroes_ab_vs_cd(self):
+    def test_and_bound_flat_semantics(self):
         from comdp_plus_no_deadline.engines.path_mutex import (
             cut_and_bound, cutrow_or_merge_into,
         )
         W = (0, 10)
+        # One-sided case: (a|b) vs a plain d-row -> certified -> zero.
         ra = self._mk("a", W, ("c", "d"))
         cutrow_or_merge_into(ra, self._mk("b", W, ("c", "d")), retry=False)
-        rc = self._mk("c", W, ("a", "b"))
-        cutrow_or_merge_into(rc, self._mk("d", W, ("a", "b")), retry=False)
+        rd = self._mk("d", W, ("a", "b"))
         value, detected = cut_and_bound(
-            {"f1": [ra], "f2": [rc]}, {"f1": 0.8, "f2": 0.8}
+            {"f1": [ra], "f2": [rd]}, {"f1": 0.8, "f2": 0.4}
         )
         self.assertTrue(detected)
-        self.assertAlmostEqual(value, 0.0)  # only tuple is certified-infeasible
+        self.assertAlmostEqual(value, 0.0)
+        # Both-sides-merged (flat loss): paths free -> falls back to Frechet.
+        rc = self._mk("c", W, ("a", "b"))
+        cutrow_or_merge_into(rc, self._mk("d", W, ("a", "b")), retry=False)
+        value2, detected2 = cut_and_bound(
+            {"f1": [ra], "f2": [rc]}, {"f1": 0.8, "f2": 0.8}
+        )
+        self.assertFalse(detected2)
+        self.assertAlmostEqual(value2, 0.8)
 
 
 if __name__ == "__main__":
