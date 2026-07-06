@@ -39,6 +39,19 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_cached",
         "label": "baseline_cached",
     },
+    # Inadmissible, EVENT-DRIVEN forward expansion with independence operators.
+    # Unlike baseline (unit-layer sweep), this advances time anchor-to-anchor: at
+    # delta_t expand all applicable actions, land each effect at delta_t+d(a), then
+    # jump to the next scheduled arrival time (steps by durations, not unit 1). The
+    # retry recursion carries the previous anchor P(delta_t)=P(delta_{t-1})+
+    # (1-P(delta_{t-1}))H_t with noisy-AND product R(a)=prod_f P(f) and noisy-OR
+    # H_t(f)=1-prod_e(1-B_e). Coarse grid re-fires actions once per anchor
+    # (serialized) => everywhere <= baseline/baseline_admissible, NOT admissible.
+    "baseline_forward": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_forward",
+        "label": "baseline_forward",
+    },
     # Admissible upper-bound PTRPG (PTRPG_Cleaned.docx). Same layered forward DP
     # as baseline, but the AND/precondition layer uses the Frechet MIN bound
     # R_t(a)=min_f P_t(f) (instead of the independence product) and the OR/fact

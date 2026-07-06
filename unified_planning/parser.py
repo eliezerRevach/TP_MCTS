@@ -35,7 +35,9 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "29": "baseline_admissible_paths_table",
         "30": "baseline_admissible_resolution",
         "31": "baseline_admissible_resolution_forward",
+        "32": "baseline_forward",
         "baseline": "baseline",
+        "baseline_forward": "baseline_forward",
         "baseline_admissible": "baseline_admissible",
         "baseline_admissible_resolution": "baseline_admissible_resolution",
         "baseline_admissible_resolution_forward": "baseline_admissible_resolution_forward",
@@ -96,7 +98,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "28|baseline_admissible_paths, "
             "29|baseline_admissible_paths_table, "
             "30|baseline_admissible_resolution, "
-            "31|baseline_admissible_resolution_forward"
+            "31|baseline_admissible_resolution_forward, "
+            "32|baseline_forward"
         )
     return aliases[normalized]
 
@@ -254,7 +257,15 @@ parser.add_argument(
         'block closed form P=1-(1-P)(1-H)^n_b where H is the union hazard copied over '
         'the n_b skipped earlier layers -- end-of-block anchors keep it ADMISSIBLE and '
         'tighter than 30; computes all facts (no goal scoping); resolution knobs via '
-        '--resolution-alpha etc.)'
+        '--resolution-alpha etc.), '
+        '32|baseline_forward (EVENT-DRIVEN forward expansion with independence '
+        'operators: at each anchor delta_t expand all applicable actions, land each '
+        'effect at delta_t+d(a), then jump to the NEXT scheduled arrival time -- steps '
+        'by the action durations, NOT unit layers. Retry recursion carries the previous '
+        'anchor P(delta_t)=P(delta_{t-1})+(1-P(delta_{t-1}))H_t with noisy-AND product '
+        'R(a)=prod_f P(f) and noisy-OR H_t(f)=1-prod_e(1-B_e). Coarse grid re-fires '
+        'actions once per anchor (serialized), so everywhere <= baseline/baseline_admissible '
+        '-- NOT admissible)'
     ),
     nargs='?',
     default='baseline',
