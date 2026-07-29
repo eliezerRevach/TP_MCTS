@@ -7,11 +7,14 @@ Status: ADMISSIBLE. Every combination operator below is a provable UPPER BOUND o
 the relaxed probability that a fact is achieved by a given time, so the heuristic
 never under-estimates reachability under the delete-relaxed temporal RPG envelope.
 It is deliberately VERY OPTIMISTIC: the bounds are loose (Frechet min for
-conjunctions, union bound for disjunctions) but always safe — unlike the default
-``baseline`` strategy, which uses the *independence product* (AND) and *noisy-OR*
-(OR). Those two are tighter but NOT admissible in general (the product breaks under
-positively-correlated preconditions; noisy-OR breaks under negatively-correlated /
-mutex achievers). This strategy trades that tightness for an always-valid bound.
+conjunctions, union bound for disjunctions, union bound across layers) but always
+safe — unlike the default ``baseline`` strategy, which uses the *independence
+product* (AND), *noisy-OR* (OR) and the *retry update* ``p + (1 - p) h`` across
+layers. Those three are tighter but NOT admissible in general (the product breaks
+under positively-correlated preconditions; noisy-OR breaks under
+negatively-correlated / mutex achievers; the retry update breaks because ``h`` is
+an unconditional arrival bound, not a hazard conditioned on earlier failure). This
+strategy trades that tightness for an always-valid bound.
 
 Reference: PTRPG_Cleaned.docx ("Probabilistic Temporal RPG Heuristic — Starting
 Point"). The structure follows Hoffmann & Nebel (2001) FF relaxed planning graphs,
@@ -38,11 +41,25 @@ effect lands at ``t_i`` the start time is ``s_e(t_i) = t_i - tau_e`` (doc 3.2).
 Core recursion (doc Section 4)
 ------------------------------------------------------------------------------
 - Initial layer:  ``P_f(t_0) = 1`` if ``f`` holds in the state, else ``0``.
-- Later layers:   ``P_f(t_i) = P_f(t_{i-1}) + (1 - P_f(t_{i-1})) * H_f(t_i)``.
+- Later layers:   ``P_f(t_i) = min(1, P_f(t_{i-1}) + H_f(t_i))``   (union bound
+  over arrival layers, :func:`union_bound_cumulative_update`).
 
-The update ``g(p, h) = p + (1 - p) * h`` is monotone non-decreasing in both ``p``
-and ``h`` on ``[0, 1]^2`` (doc Section 9), which is what carries the
-upper-bound property through the induction over sorted layers.
+Why NOT the retry form ``g(p, h) = p + (1 - p) * h``: that form is the
+probability of the disjunction "already achieved by ``t_{i-1}``" OR "newly
+achieved at ``t_i``" under the assumption that the two events are INDEPENDENT
+(equivalently, that ``H_f(t_i)`` is the hazard *conditioned* on not having been
+achieved before). Neither holds in the relaxed graph — the same achievers,
+preconditions and resources drive both events, so the conditional arrival
+probability given earlier failure can be strictly larger than the unconditional
+``H_f(t_i)`` and ``g(p, h)`` under-estimates. Since ``g(p, h) <= p + h``, the
+retry form is not an upper bound while the union bound always is.
+
+The union-bound update is monotone non-decreasing in both ``p`` and ``h`` on
+``[0, 1]^2``, which is what carries the upper-bound property through the
+induction over sorted layers, and it dominates the retry form pointwise
+(``p + h >= p + (1 - p) h``), so the resulting ``P_f`` is looser but safe.
+Unrolled, the update is exactly the layer-wise union bound
+``P_f(t_i) = min(1, sum_{j <= i} H_f(t_j))``.
 
 ------------------------------------------------------------------------------
 AND layer — requirements of one achiever (doc Section 5)
@@ -137,15 +154,36 @@ def union_bound_or_hazard(success_probs: Iterable[float]) -> float:
 
 def cumulative_retry_update(previous_probability: float, hazard: float) -> float:
     """
-    Core recursion (doc 4.2 / 9.1): cumulative update ``g(p, h) = p + (1 - p) h``.
+    Retry-form cumulative update ``g(p, h) = p + (1 - p) h`` (doc 4.2 / 9.1).
 
-    ``f`` is true by ``t_i`` either because it was already true by the previous
-    represented layer, or because it was newly achieved at ``t_i``. Monotone
-    non-decreasing in both arguments on ``[0, 1]^2``.
+    Status: NOT ADMISSIBLE. Kept because several tighter strategies
+    (``baseline_admissible_lp`` / ``_kmutex`` / ``_paths``) are still specified
+    relative to it, but ``baseline_admissible`` no longer uses it. The ``(1 - p)``
+    factor treats "not achieved by the previous layer" and "newly achieved at this
+    layer" as independent events; in the relaxed graph they share achievers and
+    preconditions, so ``h`` (an unconditional arrival bound) is not the conditional
+    hazard the factor assumes and the result can fall below the true probability.
+    Use :func:`union_bound_cumulative_update` for the admissible version.
     """
     p = _clamp_probability(previous_probability)
     h = _clamp_probability(hazard)
     return _clamp_probability(p + (1.0 - p) * h)
+
+
+def union_bound_cumulative_update(previous_probability: float, hazard: float) -> float:
+    """
+    Core recursion, admissible form: ``min(1, p + h)``.
+
+    ``f`` is true by ``t_i`` either because it was already true by the previous
+    represented layer, or because it was newly achieved at ``t_i``; the union
+    bound charges both events at full weight without assuming anything about
+    their correlation. Monotone non-decreasing in both arguments on ``[0, 1]^2``
+    and pointwise ``>= cumulative_retry_update``, so it preserves the
+    upper-bound induction over layers.
+    """
+    p = _clamp_probability(previous_probability)
+    h = _clamp_probability(hazard)
+    return _clamp_probability(min(1.0, p + h))
 
 
 def propagate_admissible_temporal_rpg(
@@ -201,7 +239,7 @@ def propagate_admissible_temporal_rpg(
             hazard = union_bound_or_hazard(contributions)
             current = probabilities_by_layer[layer][fact]
             probabilities_by_layer[layer][fact] = max(
-                current, cumulative_retry_update(current, hazard)
+                current, union_bound_cumulative_update(current, hazard)
             )
 
         if layer == depth:

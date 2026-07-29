@@ -538,5 +538,51 @@ class TestCutAltsRegression(unittest.TestCase):
         self.assertAlmostEqual(value2, 0.8)
 
 
+class TestCutOrHazardMWIS(unittest.TestCase):
+    """cut_or_hazard = max-weight independent set of the certified-mutex graph.
+    Mutex is NOT transitive, so a rep-based max-into scheme is inadmissible:
+    a row mutex with the strongest route may still combine with another free
+    route. The bound must be max over pairwise-free sets of the union sum."""
+
+    def _row(self, action, prob, cut_actions=(), w=(0, 10)):
+        from comdp_plus_no_deadline.engines.path_mutex import CutRow
+        return CutRow(prob, ({action: (w,)},), {x: (w,) for x in cut_actions})
+
+    def test_no_mutex_is_union_sum(self):
+        from comdp_plus_no_deadline.engines.path_mutex import cut_or_hazard
+        rows = [self._row("a", 0.3), self._row("b", 0.2), self._row("c", 0.1)]
+        self.assertAlmostEqual(cut_or_hazard(rows, 1), 0.6)
+
+    def test_pair_mutex_max_plus_free(self):
+        # a mutex c, b free with both -> max(pa, pc) + pb.
+        from comdp_plus_no_deadline.engines.path_mutex import cut_or_hazard
+        rows = [self._row("a", 0.5, ("c",)), self._row("b", 0.2),
+                self._row("c", 0.3, ("a",))]
+        self.assertAlmostEqual(cut_or_hazard(rows, 1), 0.7)
+
+    def test_nontransitive_mutex_keeps_free_pair(self):
+        # THE admissibility corner: c (strongest) mutex to BOTH a and b, but
+        # a-b free. A policy can attempt a AND b, so the bound must be
+        # max(pc, pa + pb) = 0.8 — the old rep-based scheme returned 0.5.
+        from comdp_plus_no_deadline.engines.path_mutex import cut_or_hazard
+        rows = [self._row("c", 0.5, ("a", "b")),
+                self._row("a", 0.4, ("c",)), self._row("b", 0.4, ("c",))]
+        self.assertAlmostEqual(cut_or_hazard(rows, 1), 0.8)
+
+    def test_mutex_clique_is_max(self):
+        # All three pairwise mutex -> only singleton attempts -> max.
+        from comdp_plus_no_deadline.engines.path_mutex import cut_or_hazard
+        rows = [self._row("a", 0.5, ("b", "c")), self._row("b", 0.4, ("a", "c")),
+                self._row("c", 0.3, ("a", "b"))]
+        counter = [0]
+        self.assertAlmostEqual(cut_or_hazard(rows, 1, counter), 0.5)
+        self.assertEqual(counter[0], 3)
+
+    def test_clamped_at_one(self):
+        from comdp_plus_no_deadline.engines.path_mutex import cut_or_hazard
+        rows = [self._row("a", 0.9), self._row("b", 0.8)]
+        self.assertAlmostEqual(cut_or_hazard(rows, 1), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

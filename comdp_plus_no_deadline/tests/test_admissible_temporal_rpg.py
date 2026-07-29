@@ -16,6 +16,7 @@ from comdp_plus_no_deadline.engines.admissible_temporal_rpg import (
     admissible_and_support,
     union_bound_or_hazard,
     cumulative_retry_update,
+    union_bound_cumulative_update,
     propagate_admissible_temporal_rpg,
 )
 from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
@@ -85,6 +86,23 @@ class TestAdmissibleOperators(unittest.TestCase):
             cumulative_retry_update(0.5, 0.6), cumulative_retry_update(0.5, 0.4)
         )
         self.assertEqual(cumulative_retry_update(1.0, 0.5), 1.0)  # saturated
+
+    def test_union_bound_cumulative_update_is_sum_capped_at_one(self):
+        self.assertAlmostEqual(union_bound_cumulative_update(0.5, 0.3), 0.8)
+        self.assertEqual(union_bound_cumulative_update(0.5, 0.7), 1.0)  # capped
+        self.assertGreaterEqual(
+            union_bound_cumulative_update(0.5, 0.6),
+            union_bound_cumulative_update(0.5, 0.4),
+        )
+
+    def test_union_bound_cumulative_update_dominates_retry(self):
+        for p in (0.0, 0.2, 0.5, 0.9, 1.0):
+            for h in (0.0, 0.1, 0.5, 1.0):
+                self.assertGreaterEqual(
+                    union_bound_cumulative_update(p, h),
+                    cumulative_retry_update(p, h),
+                    msg=f"union bound below retry form at p={p} h={h}",
+                )
 
 
 class TestAdmissibleStrategy(unittest.TestCase):

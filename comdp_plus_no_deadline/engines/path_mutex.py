@@ -1000,6 +1000,8 @@ def _coalesce_union(ivs: List[Interval], cap: int = 4) -> Tuple[Interval, ...]:
     cap by dropping the shortest extras (dropping = certifies less = safe)."""
     if not ivs:
         return ()
+    if len(ivs) == 1:
+        return (ivs[0],)
     ivs = sorted(ivs)
     out: List[Interval] = [ivs[0]]
     for lo, hi in ivs[1:]:
@@ -1020,9 +1022,16 @@ def map_and_merge(m1: CutMap, m2: CutMap, cap: int = 4) -> Dict[Action, Tuple[In
         return dict(m2)
     if not m2:
         return dict(m1)
-    out: Dict[Action, Tuple[Interval, ...]] = {}
-    for key in set(m1) | set(m2):
-        out[key] = _coalesce_union(list(m1.get(key, ())) + list(m2.get(key, ())), cap)
+    # keys union without set materialization: start from a copy of one side,
+    # overwrite shared keys with the coalesced union (single-side keys are
+    # already coalesced).
+    out: Dict[Action, Tuple[Interval, ...]] = dict(m2)
+    for key, v1 in m1.items():
+        v2 = out.get(key)
+        if v2 is None:
+            out[key] = v1
+        else:
+            out[key] = _coalesce_union(list(v1) + list(v2), cap)
     return out
 
 
@@ -1030,11 +1039,22 @@ def map_or_merge(m1: CutMap, m2: CutMap, cap: int = 4) -> Dict[Action, Tuple[Int
     """OR: only what BOTH alternatives guarantee -> shared keys, pairwise
     (max lo, min hi) intersections. Inverted results are kept (still exact);
     over cap the extras are dropped (safe)."""
+    if not m1 or not m2:
+        return {}
+    if len(m1) > len(m2):
+        m1, m2 = m2, m1  # iterate the smaller side; key intersection either way
     out: Dict[Action, Tuple[Interval, ...]] = {}
-    for key in set(m1) & set(m2):
+    for key, iv1 in m1.items():
+        iv2 = m2.get(key)
+        if iv2 is None:
+            continue
+        if len(iv1) == 1 and len(iv2) == 1:
+            a, b = iv1[0], iv2[0]
+            out[key] = ((max(a[0], b[0]), min(a[1], b[1])),)
+            continue
         pairs: List[Interval] = []
-        for a in m1[key]:
-            for b in m2[key]:
+        for a in iv1:
+            for b in iv2:
                 iv = (max(a[0], b[0]), min(a[1], b[1]))
                 if iv not in pairs:
                     pairs.append(iv)
@@ -1123,22 +1143,31 @@ def cutrow_mutex(r1: CutRow, r2: CutRow) -> bool:
     )
 
 
-def cutrow_or_merge_into(target: CutRow, other: CutRow, retry: bool) -> None:
+def cutrow_or_merge_into(target: CutRow, other: CutRow, retry: bool) -> bool:
     """Fold ``other`` into ``target`` as an ALTERNATIVE: alts by group-union
     (the path stays revealed), cut by intersection, prob by retry ``g(p,h)``
     when ``retry`` (cross-layer re-firing of the same class) else by sum
-    (same-layer alternative routes, union bound)."""
+    (same-layer alternative routes, union bound). Returns True iff the MAPS
+    (alts/cut) changed — prob-only updates return False so callers can keep
+    version-keyed rep/gate caches warm."""
     if retry:
         target.prob = _clamp01(target.prob + (1.0 - target.prob) * other.prob)
     else:
         target.prob = _clamp01(min(1.0, target.prob + other.prob))
-    target.alts = alts_or(target.alts, other.alts)
-    target.cut = map_or_merge(target.cut, other.cut)
+    if target.alts == other.alts and target.cut == other.cut:
+        return False  # identical maps: the OR-merge is an exact no-op
+    alts = alts_or(target.alts, other.alts)
+    cut = map_or_merge(target.cut, other.cut)
+    changed = alts != target.alts or cut != target.cut
+    target.alts = alts
+    target.cut = cut
+    return changed
 
 
-def cut_retry_fold(table: List[CutRow], arriving: Sequence[CutRow]) -> List[CutRow]:
+def cut_retry_fold(table: List[CutRow], arriving: Sequence[CutRow]) -> bool:
     """Same-origin re-firings fold by g(p,h) + OR-maps (the retry rule); the
-    within-batch same-origin routes sum + OR-maps. Distinct origins append."""
+    within-batch same-origin routes sum + OR-maps. Distinct origins append.
+    Returns True iff any table row's MAPS changed or a row was appended."""
     batch: Dict[Optional[str], CutRow] = {}
     loose: List[CutRow] = []
     for r in arriving:
@@ -1151,21 +1180,27 @@ def cut_retry_fold(table: List[CutRow], arriving: Sequence[CutRow]) -> List[CutR
                                      dict(r.cut), r.origin)
         else:
             cutrow_or_merge_into(prev, r, retry=False)
+    changed = False
     for r in batch.values():
         target = next((row for row in table
                        if row.origin is not None and row.origin == r.origin), None)
         if target is None:
             table.append(r)
-        else:
-            cutrow_or_merge_into(target, r, retry=True)
-    table.extend(loose)
-    return table
+            changed = True
+        elif cutrow_or_merge_into(target, r, retry=True):
+            changed = True
+    if loose:
+        table.extend(loose)
+        changed = True
+    return changed
 
 
-def cut_truncate(table: List[CutRow], k: int) -> List[CutRow]:
+def cut_truncate(table: List[CutRow], k: int) -> bool:
     """K-truncation by OR-merging the two weakest rows (sum + map-intersection)
     — the mutex-preserving truncation: what both classes forbid stays forbidden;
-    nothing is ever dropped, so the union-bound coverage is intact."""
+    nothing is ever dropped, so the union-bound coverage is intact. Returns
+    True iff the table changed."""
+    changed = False
     while len(table) > k:
         table.sort(key=lambda r: r.prob)
         r1 = table.pop(0)
@@ -1173,38 +1208,87 @@ def cut_truncate(table: List[CutRow], k: int) -> List[CutRow]:
         cutrow_or_merge_into(r1, r2, retry=False)
         r1.origin = r1.origin if r1.origin == r2.origin else None
         table.append(r1)
-    return table
+        changed = True
+    return changed
+
+
+# Max row count for the exact independent-set OR bound; above it the plain
+# union sum is used (always sound, never tighter than the exact bound).
+_OR_MWIS_CAP = 20
 
 
 def cut_or_hazard(rows: Sequence[CutRow], k: int,
                   counter: Optional[List[int]] = None) -> float:
-    """Marginal OR hazard over one layer's arriving achiever rows — VALUE ONLY
-    (the folded table is discarded, so no map merging is performed; buckets keep
-    their FIRST member's maps as the certification representative — weaker
-    detection than a full merge, but the value stays admissible: every step is
-    a sum or a max-into, so max(buckets) <= union sum). counter[0] += mutex
-    events."""
-    buckets: List[Tuple[CutRow, float]] = []  # (representative row, bucket prob)
-    for r in sorted(rows, key=lambda x: -x.prob):
-        placed = False
-        for idx, (rep, prob) in enumerate(buckets):
-            if cutrow_mutex(rep, r):
+    """Marginal OR hazard over one layer's arriving achiever rows — VALUE ONLY.
+    In any single realization the ATTEMPTED routes form an independent set of
+    the certified-mutex graph (mutex = the two routes cannot co-occur), so
+    P(f) <= max over independent sets S of sum_{r in S} r.prob — the union
+    bound within S, the commitment argument across alternatives. Computed
+    EXACTLY by branch-and-bound on bitmasks (mutex is NOT transitive: a row
+    mutex with one route may still combine with another, so any rep-based
+    max-into scheme under-counts and breaks admissibility). Degrades to the
+    plain union sum when no mutex is certified or n exceeds the cap.
+    ``k`` is unused (kept for call compatibility). counter[0] += certified
+    mutex pairs."""
+    rs = [r for r in rows if r.prob > 0.0]
+    n = len(rs)
+    if n == 0:
+        return 0.0
+    probs = [r.prob for r in rs]
+    total = sum(probs)
+    if n == 1 or n > _OR_MWIS_CAP:
+        return _clamp01(min(1.0, total))
+    # Row-level key gate (same idea as cut_pair_gate): a pair can only be
+    # mutex if one side's cut keys hit the other's atom actions — skip the
+    # full cutrow_mutex test otherwise.
+    keysets: List[Tuple[set, set]] = []
+    for r in rs:
+        atoms: set = set()
+        for g in r.alts:
+            atoms.update(g)
+        keysets.append((atoms, set(r.cut)))
+    adj = [0] * n
+    any_mutex = False
+    for i in range(n):
+        ai, ci = keysets[i]
+        for j in range(i + 1, n):
+            aj, cj = keysets[j]
+            if not (ci & aj) and not (cj & ai):
+                continue
+            if cutrow_mutex(rs[i], rs[j]):
+                adj[i] |= 1 << j
+                adj[j] |= 1 << i
+                any_mutex = True
                 if counter is not None:
                     counter[0] += 1
-                buckets[idx] = (rep, max(prob, r.prob))
-                placed = True
-                break
-        if not placed:
-            if buckets and len(buckets) >= k:
-                rep, prob = buckets[0]
-                buckets[0] = (rep, _clamp01(min(1.0, prob + r.prob)))
-            elif buckets:
-                # free w.r.t. all reps -> sums with the strongest bucket
-                rep, prob = buckets[0]
-                buckets[0] = (rep, _clamp01(min(1.0, prob + r.prob)))
-            else:
-                buckets.append((r, r.prob))
-    return _clamp01(max((p for _, p in buckets), default=0.0))
+    if not any_mutex:
+        return _clamp01(min(1.0, total))
+
+    order = sorted(range(n), key=lambda i: -probs[i])
+    best = 0.0
+
+    def _sum_avail(avail: int) -> float:
+        s = 0.0
+        while avail:
+            bit = avail & -avail
+            s += probs[bit.bit_length() - 1]
+            avail ^= bit
+        return s
+
+    def _bb(avail: int, acc: float) -> None:
+        nonlocal best
+        if acc > best:
+            best = acc
+        if best >= 1.0 or acc + _sum_avail(avail) <= best:
+            return
+        v = next((i for i in order if avail & (1 << i)), None)
+        if v is None:
+            return
+        bit = 1 << v
+        _bb(avail & ~bit & ~adj[v], acc + probs[v])  # include v
+        _bb(avail & ~bit, acc)                       # exclude v
+    _bb((1 << n) - 1, 0.0)
+    return _clamp01(min(1.0, best))
 
 
 def cut_components(fact_rows: Mapping[Fact, Sequence[CutRow]]) -> List[List[Fact]]:

@@ -1,0 +1,2 @@
+domain,object_amount,deadline,heuristic,heuristic_label,runs_total,amount_success,success_rate,avg_success_time,std_success_time,seed,search_time,search_depth,k,selection_type,exploration_constant,discount_factor,step_penalty,reward_mode,value_mode,heuristic_depth,returncode
+nasa_rover,2,25,atomic_exact,atomic_exact,10,2,0.2,23,1.0,123,1,3,3,avg,0.0,1.0,0.0,terminal,greedy_matched,25,0

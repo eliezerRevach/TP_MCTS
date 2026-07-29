@@ -1,0 +1,3 @@
+heuristic,heuristic_label,heuristic_name_internal,strategy_internal,domain,object_amount,deadline,seed,heuristic_depth,max_steps,plan_success,plan_makespan,wrapper_total_calls,wrapper_total_time_sec,wrapper_first_call_sec,wrapper_avg_call_sec,worker_total_calls,worker_total_time_sec,worker_first_call_sec,worker_avg_call_sec,worker_cache_hits,worker_cache_misses,worker_cache_hit_avg_sec,worker_cache_miss_avg_sec
+ptrpg_old,ptrpg_old (trpg),trpg,n/a,nasa_rover,3,35,123,35,1000,True,22,1128,60.410956,0.044638,0.053556,0,,,,0,0,,
+baseline,baseline,temporal_probabilistic_rpg,baseline,nasa_rover,3,35,123,35,1000,True,23,1588,146.021915,0.1927,0.091953,1588,145.932396,0.12571,0.091897,178,1410,2.5e-05,0.103495

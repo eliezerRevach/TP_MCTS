@@ -1,0 +1,26 @@
+---
+description: Professor meeting summary — reward, admissible heuristic, planning graph, propagation
+alwaysApply: false
+---
+
+# Thesis: Professor Feedback (Current Status)
+
+Reference: advisor meeting summary. Use this for design choices and evaluation plans.
+
+## Durable Advisor Constraints
+
+### Reward framing
+- Keep evaluation centered on reward maximization under deadline, not only goal reachability.
+- Include intermediate reward behavior in analysis when relevant.
+
+### Heuristic interpretation
+- Separate time-to-goal estimation from probability-of-success estimation; conservatism in time does not imply conservatism in success probability.
+- If sampling is used to support admissibility claims, distinguish between many samples at one node and one sample across many nodes.
+
+### Planning graph usage
+- Treat root-graph reuse with caution: it can be optimistic because deeper nodes commit to only one realized action path.
+- Helpful actions should bias exploration, not restrict the action set.
+
+### Value propagation
+- Temporal constraints can break naive value propagation assumptions.
+- Arguments about convergence/optimality should clearly state optimism assumptions in both estimates and propagation.

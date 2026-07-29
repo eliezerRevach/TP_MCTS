@@ -1,0 +1,23 @@
+# Nested / duplicate trees (noise for the knowledge graph)
+.claude/worktrees/
+tp_mcts/
+
+# Binary / generated experiment artifacts
+pickle_domains/
+results/
+log/
+*.pkl
+*.log
+*.xlsx
+*.csv
+
+# Large local docs already covered by code + key markdown; skip heavy binaries
+*.pdf
+*.docx
+~$*
+
+# Caches / IDE
+.pytest_cache/
+.vscode/
+__pycache__/
+*.pyc

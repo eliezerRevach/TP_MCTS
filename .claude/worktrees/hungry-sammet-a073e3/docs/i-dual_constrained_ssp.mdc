@@ -1,0 +1,349 @@
+Title: Heuristic Search in Dual Space for Constrained Stochastic Shortest Path Problems (i-dual, ICAPS 2016)
+
+Source:
+- Felipe Trevizan, Sylvie Thiébaux, Pedro Santana, Brian Williams
+- Paper: "Heuristic Search in Dual Space for Constrained Stochastic Shortest Path Problems"
+- Venue: ICAPS 2016
+
+Purpose for Thesis:
+- This paper introduces **i-dual**, the first heuristic search algorithm for **constrained stochastic shortest path problems (C-SSPs)**.
+- It is directly relevant for:
+  - Understanding how to combine **value-function heuristics** with **constraints on expected costs**.
+  - Seeing how **admissible vs non-admissible heuristics** affect **optimality vs scalability** under constraints.
+  - Positioning our TP-MCTS work within the broader literature on **constrained MDPs / C-SSPs and dual-space methods**.
+
+------------------------------------------------------------
+1. Problem Setting
+------------------------------------------------------------
+
+- **Standard SSP**:
+  - Tuple \(S = \langle S, s_0, G, A, P, C \rangle\).
+  - \(S\): finite states, \(s_0\): initial state, \(G\): goal/terminal states.
+  - \(A\): actions, \(P(s' \mid s, a)\): transition probabilities.
+  - \(C(s, a) > 0\): immediate action cost.
+  - Goal: find a policy \(\pi\) minimising **expected total cost to reach a goal from \(s_0\)**.
+  - Optimal value function \(V^*(s)\) satisfies Bellman equations and defines optimal policies.
+
+- **Policies**:
+  - Deterministic or stochastic, partial or closed.
+  - For unconstrained SSPs, there always exists an optimal **deterministic** closed policy.
+
+- **Dead-ends in SSPs**:
+  - They assume dead-ends are possible (probability of reaching the goal may be < 1).
+  - They use the **fixed-cost approach**:
+    - If a state is a dead end, its value is a large penalty \(d\).
+    - Any state with \(V^*(s) \geq d\) is treated as a dead end.
+
+- **Constrained SSP (C-SSP)**:
+  - Extends SSP with **k+1 cost functions**:
+    - \(C_0\): primary cost to minimise.
+    - \(C_1, \dots, C_k\): secondary costs to be **upper-bounded in expectation**.
+  - Tuple \(C = \langle S, s_0, G, A, P, \mathbf{C}, \hat{\mathbf{c}} \rangle\) with:
+    - \(\mathbf{C} = [C_0, C_1, \dots, C_k]\).
+    - \(\hat{\mathbf{c}} = [\hat{c}_1, \dots, \hat{c}_k]\): upper bounds on **expected** secondary costs.
+    - Dead-end penalties become a vector \(\mathbf{d}\) (one penalty per cost).
+  - Constraints are **on expectations**, not on worst-case cost of each trajectory:
+    - This keeps C-SSPs feasible and allows loops.
+  - In general, the **optimal C-SSP policy may be stochastic**, but the problem is still solvable in polynomial time.
+
+------------------------------------------------------------
+2. Dual Linear Programming Formulation
+------------------------------------------------------------
+
+- **Dual LP for SSP (LP1)**:
+  - Decision variables: **occupation measures** \(x_{s,a}\):
+    - \(x_{s,a}\) = expected number of times action \(a\) is executed in state \(s\).
+  - Objective: minimise
+    \[
+      \sum_{s \in S, a \in A(s)} x_{s,a} C(s,a)
+    \]
+  - Constraints encode a **flow interpretation**:
+    - (C1) \(x_{s,a} \ge 0\).
+    - (C2) Define inflow \(in(s)\) from predecessors with transition probabilities.
+    - (C3) Flow conservation for intermediate states.
+    - (C4) Inject one unit of flow at \(s_0\).
+    - (C5) Define outflow \(out(s)\) as sum of \(x_{s,a}\).
+    - (C6) Total flow arriving at goal states is 1.
+  - Interpretation:
+    - Flow starts at \(s_0\), passes through states following the policy, and ends in goal states.
+    - The objective is the expected cost of this flow.
+  - Recover policy:
+    - \(\pi^*(s,a) = x_{s,a} / out(s)\) for states with \(out(s) > 0\).
+    - For SSPs without constraints, optimal policy is deterministic.
+
+- **Handling dead-ends (LP2)**:
+  - Introduce variables \(x^D_s\) to represent flow that **escapes to a dead-end sink**.
+  - Add constraints ensuring that flow not reaching goals is routed through these dead-end flows.
+  - Objective becomes:
+    \[
+      \sum_{s,a} x_{s,a} C(s,a) + \sum_s x^D_s d
+    \]
+  - \(\sum_s x^D_s\) equals the probability of reaching dead-ends from \(s_0\).
+
+- **Dual LP for C-SSPs**:
+  - Based on LP2 but adds constraints per secondary cost \(j\):
+    \[
+      \sum_{s,a} x_{s,a} C_j(s,a) + \sum_s x^D_s d_j \le \hat{c}_j \quad \forall j = 1,\dots,k
+    \]
+  - Observations:
+    - Dual (occupation-measure) space is attractive because all cost functions share the same flows \(x\).
+    - **Primary vs secondary value functions** (primal-space) would require multiple fixed-point systems plus additional constraints ensuring costs correspond to the *same* stochastic policy, leading to bilinear, non-convex constraints.
+
+------------------------------------------------------------
+3. Motivation for i-dual
+------------------------------------------------------------
+
+- Unconstrained SSPs:
+  - Strong heuristic search algorithms like **LAO\*** and **LRTDP** can focus computation on states **reachable and relevant** from \(s_0\), using **admissible heuristics**.
+  - They often greatly outperform LP and DP methods that must consider the entire state space.
+
+- Constrained SSPs:
+  - Prior state-of-the-art relied on **linear/dynamic programming** that explicitly encode **all reachable states**.
+  - There was **no heuristic search algorithm** exploiting admissible heuristics while respecting secondary cost constraints.
+  - Dual LP (occupation measures) is polynomial and handles multiple costs nicely, but:
+    - It is hard to derive **domain-independent lower bounds on occupation measures** \(x_{s,a}\).
+    - Thus early pruning in dual space is not straightforward.
+
+- Central idea of i-dual:
+  - Keep the **dual LP formulation** (for constraints and multiple costs), but:
+  - Use **heuristics over value functions** (primal space) as **terminal costs** in **incremental dual LPs** defined over a growing subset of states.
+  - This recovers heuristic search properties (focusing on promising areas) **without needing heuristics on \(x_{s,a}\)**.
+
+------------------------------------------------------------
+4. Heuristics and C-SSPs
+------------------------------------------------------------
+
+- They define a heuristic vector:
+  - \(\mathbf{H} = [H_0, \dots, H_k]\), with \(H_j: S \to \mathbb{R}_+\).
+  - \(H_j\) is a heuristic estimate for the **expected total \(C_j\)-cost** from a given state.
+
+- Relation to unconstrained SSPs:
+  - Given a C-SSP and an index \(j\), define the SSP \(S_j = \langle S, s_0, G, A, P, C_j \rangle\).
+  - The optimal value function \(V^*\) of \(S_j\) is an **admissible heuristic for \(C_j\)** in the C-SSP.
+  - Therefore, any admissible heuristic for \(S_j\) is also admissible for the C-SSP cost \(C_j\).
+  - Heuristics are obtained by relaxing probabilistic effects and constraints to unconstrained SSPs and applying **classical SSP heuristics** (e.g., \(h_0\), \(h_{\max}\), \(h_{add}\), \(h_{lmcut}\)).
+
+- Admissibility:
+  - A heuristic \(H_j\) is admissible if it is a **lower bound** on the total expected cost for \(C_j\).
+  - If all components of \(\mathbf{H}\) are admissible, i-dual is **optimal and complete**.
+  - If some components for **secondary** costs are non-admissible, i-dual can incorrectly prune truly feasible solutions and become **incomplete**.
+  - If only the **primary** heuristic \(H_0\) is non-admissible (but secondary ones are admissible), i-dual remains **complete but suboptimal**, similar to classical heuristic search.
+
+------------------------------------------------------------
+5. i-dual Algorithm
+------------------------------------------------------------
+
+- High-level idea:
+  - Define **incrementally larger partial problems** starting from \(s_0\).
+  - Use **artificial goals** representing frontier states (`fringe`) whose successors are not yet explored.
+  - Assign terminal costs to these artificial goals based on heuristics \(\mathbf{H}\).
+  - At each iteration, solve a dual LP (LP3) on the current partial envelope. The solution indicates:
+    - which fringe states have non-zero incoming flow (and should be expanded next),
+    - what stochastic policy (occupation measures) is currently best in the explored region.
+
+- Partial problem with terminal costs:
+  - Each intermediate partial problem is a C-SSP-with-terminal-costs:
+    \[
+      \langle \hat{S}, s_0, \hat{G}, \hat{A}, P, \mathbf{C}, \hat{\mathbf{c}}, \mathbf{H} \rangle
+    \]
+  - \(\hat{S}\): explored states.
+  - \(\hat{G}\): artificial goals = fringe states \(F\) plus any real goal states already in \(\hat{S}\).
+  - \(\hat{A}\): actions applicable in already expanded states.
+  - Terminal costs: when flow hits an artificial goal, a one-shot cost \(H_j(s_g)\) is incurred.
+
+- LP3 (dual LP with terminal costs):
+  - Objective includes:
+    - **Primary cost flows** over explored arcs.
+    - **Dead-end penalties**.
+    - **Heuristic terminal costs** at artificial goals.
+  - Secondary costs are constrained similarly, but with terminal heuristic terms (lower bounds) on their expectations.
+
+- Algorithm 1 (i-dual) structure:
+  - Initialise:
+    - \(\hat{S} = \{s_0\}\), fringe \(F = \{s_0\}\), reachable fringe \(FR = \{s_0\}\).
+  - Loop while \(FR \neq \emptyset\):
+    - Compute new states \(N\) reachable from states in \(FR\) by one action.
+    - Update:
+      - \(\hat{S} \leftarrow \hat{S} \cup N\).
+      - \(F \leftarrow (F \setminus FR) \cup (N \setminus G)\).
+      - \(\hat{G} \leftarrow F \cup (G \cap \hat{S})\).
+      - \(\hat{A} \leftarrow \{a \mid \exists s \in \hat{S}\setminus F, a \in A(s)\}\).
+    - Solve LP3 on current partial problem.
+    - Update \(FR\) as the subset of fringe states with non-zero inflow (meaning the current policy uses them).
+  - When \(FR = \emptyset\):
+    - All injected flow is absorbed only by original goals and dead-end sinks.
+    - The constructed policy \(\pi\) is closed and satisfies all constraints.
+
+- Guarantees:
+  - If all heuristics in \(\mathbf{H}\) are **admissible**, the final \(\pi\) is **optimal** for the original C-SSP.
+  - If only \(H_0\) is inadmissible, the policy is feasible but can be suboptimal.
+  - If any secondary heuristic is inadmissible, algorithm may fail to find a feasible solution even when one exists.
+
+- Interpretation:
+  - **AI / heuristic search perspective**:
+    - i-dual is analogous to A\* in a space where:
+      - \(g(n)\) (cost so far) is computed by solving LP3.
+      - \(h(n)\) comes from heuristics \(H_j\) at artificial goals.
+  - **Operations research / LP perspective**:
+    - i-dual is a **delayed column and row generation** method:
+      - States and their flow constraints are added gradually.
+      - LP is kept in memory and warm-started at each iteration.
+
+------------------------------------------------------------
+6. Empirical Evaluation
+------------------------------------------------------------
+
+Settings:
+- Implemented a domain-independent planner over an extended PPDDL (for C-SSPs).
+- Baseline: **dual LP** that directly solves LP2+constraints over the full reachable state set.
+- Compared i-dual(X,Y) variants:
+  - X: heuristic for primary cost \(C_0\).
+  - Y: heuristic for each secondary cost \(C_j\).
+  - Heuristics considered: \(h_0\), \(h_{\max}\), \(h_{add}\), \(h_{lmcut}\).
+- Gurobi used as LP solver; 30 min CPU and 4GB memory limits.
+
+Domains:
+1. **Search and Rescue**:
+   - Grid navigation.
+   - Objective: rescue a survivor and return to safety.
+   - Primary cost: **time**; constraint on **expected fuel consumption**.
+   - Actions have load-dependent durations and fuel costs; some high-demand moves may fail.
+   - Initial uncertainty about survivor presence on many cells.
+
+2. **Elevators**:
+   - Multi-elevator building, some people known, others arrive stochastically (geometric distribution).
+   - Constraints:
+     - Maximum expected waiting and travel times for each person.
+     - One passenger is VIP with tighter bounds.
+   - Primary cost: total number of elevator movements.
+   - Many secondary constraints: \(2(w + h)\) bounds on expected waiting/travel times.
+
+3. **Exploding Blocks World**:
+   - Probabilistic variant of blocks world where blocks and table can explode and be destroyed.
+   - Added **fix-table** action (cost 100) to make dead-ends avoidable.
+   - Primary cost: total action costs.
+   - Constraint: expected number of exploded blocks bounded by a threshold.
+
+Main findings:
+- **Search and Rescue**:
+  - Dual LP fails to scale; cannot solve even quite small instances when density of uncertain cells or grid size increases.
+  - i-dual (with admissible heuristics) solves many instances quickly (sub-second for easy cases).
+  - i-dual explores **one order of magnitude fewer states** than dual LP.
+  - Using **non-admissible heuristics** (e.g. \(h_{add}\)):
+    - Dramatically improves scalability and speed.
+    - Trades off provable optimality (and sometimes completeness).
+
+- **Elevators**:
+  - With 1 elevator and moderate state spaces (< ~40k states), dual LP dominates i-dual with admissible heuristics.
+  - With more elevators, the state space explodes and dual LP stops scaling.
+  - Admissible i-dual variants are sometimes slower due to expensive heuristics (e.g., \(h_{lmcut}\)).
+  - **Non-admissible \(h_{add}\)** variants allow i-dual to solve larger multi-elevator instances (up to 3 elevators) by focusing on a tiny fraction of the reachable state space.
+
+- **Exploding Blocks World**:
+  - Dual LP solves only small problems (up to 5 blocks).
+  - i-dual solves problems up to 8 blocks and is **two orders of magnitude faster** than dual LP on overlapping instances.
+  - Again, admissible vs non-admissible heuristics show the same trade-off: non-admissible heuristics greatly improve performance but may affect guarantees.
+
+- Performance breakdown:
+  - Table 4 shows average states visited and percentage of time spent:
+    - Encoding LP3.
+    - Computing the heuristic vector \(\mathbf{H}\).
+    - Solving LP3.
+  - In many cases, solving LP dominates, but heuristic computation cost can be significant (e.g. \(h_{lmcut}\)).
+
+------------------------------------------------------------
+7. Conclusions and Connections to Our Thesis
+------------------------------------------------------------
+
+Key contributions of the paper:
+- First **heuristic search algorithm** for constrained SSPs that:
+  - Operates in **dual (occupation-measure) space**.
+  - Uses **primal-space value heuristics** over multiple costs.
+  - Enforces **expected-cost constraints** exactly via LP.
+- Shows how to:
+  - **Incrementally build** the dual LP over an expanding envelope of relevant states.
+  - Use **heuristic terminal costs** at artificial goals to focus search.
+- Provides **theoretical guarantees**:
+  - With admissible heuristics for all costs, i-dual is **optimal and complete**.
+  - With only primary-cost heuristic inadmissible, i-dual is **complete but not optimal**.
+  - With any secondary-cost heuristic inadmissible, i-dual can be **incomplete**.
+- Empirical evidence:
+  - i-dual can be **orders of magnitude faster** and more memory-efficient than full dual LP.
+  - Non-admissible heuristics can be used to trade off optimality for scalability while respecting constraints in practice.
+
+Relevance to TP-MCTS and our thesis:
+- **Constrained vs deadline-based objectives**:
+  - Their constraints are on **expected secondary costs**, whereas in TP-MCTS we have **deadlines and temporal feasibility plus reward**.
+  - However, the structure is similar: there is a **primary objective** and **side constraints** (time, risk, resource limits).
+  - The paper is a key reference for **how to model and solve constrained problems in SSP/MDP settings**.
+
+- **Heuristic admissibility**:
+  - This paper is very explicit about:
+    - What happens when heuristics are admissible vs non-admissible.
+    - How inadmissibility in different components (primary vs secondary) affects **optimality vs completeness**.
+  - This connects directly to our **heuristic admissibility focus**:
+    - We can mirror their structure when discussing:
+      - Admissible vs non-admissible time / probability / reward heuristics.
+      - Which guarantees are still valid under each choice.
+
+- **Dual vs primal and envelope expansion**:
+  - Their **envelope expansion** in dual space is analogous in spirit to **search tree expansion** in TP-MCTS.
+  - Helpful analogy:
+    - i-dual uses dual LP to evaluate partial envelopes with heuristic terminal costs.
+    - TP-MCTS uses MCTS backups (and PTRPG heuristics) to evaluate partial search trees.
+  - Their use of **artificial goals with heuristic costs** is conceptually similar to:
+    - Our use of **heuristic rollout / PTRPG estimates** at leaf states.
+
+- **Handling dead-ends and probabilities**:
+  - They show how to handle dead-ends in a principled way via large penalties in expected cost.
+  - They mention how to adapt i-dual to work with **probability-to-goal as the primary cost**, then constrain other metrics.
+  - This is directly relevant to:
+    - Thinking about **probability of success before deadline** vs expected reward.
+    - Setting up **two-stage constrained formulations** (first optimise success probability, then optimise other metrics under a probability constraint).
+
+- **Non-admissible heuristics and trade-offs**:
+  - Their empirical section explicitly explores how **non-admissible heuristics like \(h_{add}\)** can boost scalability at the cost of formal guarantees.
+  - This is highly relevant for our thesis where:
+    - Some heuristics (e.g., PTRPG-based estimates) are structurally **inaccurate / non-admissible**.
+    - We need to argue clearly:
+      - Which guarantees we lose.
+      - Which empirical behaviors still hold.
+      - Whether we can bound the bias or provide "admissible on average" style guarantees.
+
+Potential uses in our writeup:
+- Cite this paper for:
+  - Background on **constrained MDPs / C-SSPs and dual formulations**.
+  - A clear treatment of **heuristic admissibility under constraints** (especially primary vs secondary heuristics).
+  - Examples showing **trade-offs between optimality and scalability** using non-admissible heuristics.
+- Use their structure as a template for:
+  - Clearly separating:
+    - Model definition (CoMDP+/deadline vs C-SSP).
+    - Algorithm description (TP-MCTS vs i-dual).
+    - Theoretical guarantees (when heuristics are admissible or not).
+    - Empirical evaluation (coverage, CPU-time, scaling).
+- Use their adaptation suggestion (two-stage C-SSP with probability constraints) as a reference point when:
+  - We discuss modeling **deadline success probability** as a constraint or objective.
+  - We separate **probability-of-success estimates** from **time or reward estimates** (as requested by the professor).
+
+------------------------------------------------------------
+8. Key Takeaways for Our Work
+------------------------------------------------------------
+
+- **Conceptual**:
+  - i-dual is a strong example of combining:
+    - Dual-space optimization (for constraints and multiple costs).
+    - Primal-space heuristics (for focused search).
+  - It makes assumptions and guarantees **very explicit** depending on heuristic admissibility, which we should emulate.
+
+- **For heuristic admissibility discussion**:
+  - We can:
+    - Reference their Theorem 1 as a model of how admissible heuristics give optimality under constraints.
+    - Contrast our situation where:
+      - Temporal, probabilistic, and reward heuristics may be only approximate or "admissible in expectation".
+      - Temporal constraints (deadlines, scheduling) complicate value propagation beyond the static C-SSP case.
+
+- **For evaluation**:
+  - Their metrics (coverage, CPU-time, states explored, distribution of time across LP-building vs heuristic computation) suggest:
+    - We should similarly break down where TP-MCTS time goes (simulation, heuristic computation, STN updates).
+    - We can compare **scalability trade-offs** when switching between more or less conservative heuristics.
+

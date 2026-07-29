@@ -29,6 +29,7 @@ from comdp_plus_no_deadline.engines.and_gamma import (
 from comdp_plus_no_deadline.engines.pdb_correction import PDBCorrection
 from comdp_plus_no_deadline.engines.admissible_temporal_rpg import (
     admissible_and_support,
+    union_bound_cumulative_update,
     union_bound_or_hazard,
 )
 from comdp_plus_no_deadline.engines.admissible_lp import (
@@ -63,7 +64,9 @@ from comdp_plus_no_deadline.engines.path_mutex import (
     cut_guaranteed_rep,
     cut_pair_gate,
     alts_or,
+    alts_and,
     map_or_merge,
+    map_and_merge,
 )
 
 
@@ -1661,7 +1664,7 @@ class TemporalProbabilisticRPGHeuristic:
         """Admissible upper-bound forward DP (see ``admissible_temporal_rpg``).
 
         Identical layered forward propagation to the plain ``baseline``, except
-        the two combination operators are replaced by their always-admissible
+        all three combination operators are replaced by their always-admissible
         (looser, more optimistic) upper bounds:
 
         - AND / precondition support uses the Frechet MIN bound
@@ -1670,12 +1673,20 @@ class TemporalProbabilisticRPGHeuristic:
         - OR / arrival hazard uses the UNION bound
           ``H_t(f) = min(1, sum_e B_e)`` instead of the noisy-OR
           ``1 - prod_e (1 - B_e)``.
+        - CUMULATIVE / across-layer update uses the union bound
+          ``P_t(f) = min(1, P_{t-1}(f) + H_t(f))`` instead of the retry form
+          ``P_{t-1}(f) + (1 - P_{t-1}(f)) * H_t(f)``. The ``(1 - P_{t-1})``
+          factor assumes "not achieved before ``t``" and "newly achieved at
+          ``t``" are independent (i.e. that ``H_t`` is conditioned on earlier
+          failure), which the relaxed graph does not give: the same achievers
+          and preconditions drive both events. Dropping the factor charges the
+          per-layer hazards at full weight and caps the running sum at 1.
 
-        Both replacements only ever raise the estimate (``min >= prod`` and the
-        union bound ``>= noisy-OR``), so this is a strict upper bound relative to
-        baseline: VERY optimistic, but admissible under the delete-relaxed
-        temporal RPG envelope. The cumulative retry update ``g(p, h)`` and the
-        single-achiever contribution ``B_e = q_e * R_t(a)`` are unchanged.
+        All three replacements only ever raise the estimate (``min >= prod``,
+        union bound ``>= noisy-OR``, ``p + h >= p + (1 - p) h``), so this is a
+        strict upper bound relative to baseline: VERY optimistic, but admissible
+        under the delete-relaxed temporal RPG envelope. The single-achiever
+        contribution ``B_e = q_e * R_t(a)`` is unchanged.
         """
         state_facts = _extract_state_facts(state)
         depth = max(0, int(fixed_depth))
@@ -1721,7 +1732,9 @@ class TemporalProbabilisticRPGHeuristic:
                 # OR layer: union bound instead of noisy-OR.
                 arrival_hazard = union_bound_or_hazard(successes)
                 current = probabilities_by_layer[layer][fact]
-                updated = _clamp_probability(current + (1.0 - current) * arrival_hazard)
+                # Across-layer: union bound min(1, p + h), not the retry form
+                # p + (1 - p) h (which assumes independence across layers).
+                updated = union_bound_cumulative_update(current, arrival_hazard)
                 probabilities_by_layer[layer][fact] = max(current, updated)
                 arrivals[fact] = arrival_hazard
                 fact_support_cache[(fact, layer)] = probabilities_by_layer[layer][fact]
@@ -2908,6 +2921,19 @@ class TemporalProbabilisticRPGHeuristic:
             return r
         traces: List[TemporalLayerTrace] = []
         action_support_by_layer: Dict[int, Dict[str, float]] = {}
+        # Per-action statics hoisted out of the layer loop, plus a version-keyed
+        # emission cache: the pair-gate verdict and the reps-chain (AND-fold of
+        # the preconditions' guaranteed reps — the expensive part of the no-
+        # contention emission) depend only on the precondition tables, so they
+        # are recomputed ONLY when some precondition's table version changed.
+        # Sharing the chained maps across layers/rows is safe: every merge is
+        # copy-on-write (rows are reassigned, never mutated in place).
+        action_static = [
+            (m, m.name, list(m.preconditions), m.name in partners,
+             tuple(partners.get(m.name, ())))
+            for m in self._action_models
+        ]
+        emit_cache: Dict[str, tuple] = {}  # name -> (vv, gated, chain_alts, chain_cut)
         self._paths_table_and_nodes = 0
         self._paths_table_and_hits = 0
         self._paths_table_and_shaved = 0.0
@@ -2950,9 +2976,13 @@ class TemporalProbabilisticRPGHeuristic:
                     # cut/intersection rule) — never summed (the re-firing
                     # double-count would build a free prob-1 row and kill all
                     # tightening).
-                    cut_retry_fold(tbl, aux)
-                    cut_truncate(tbl, k)
-                    table_version[fact] = table_version.get(fact, 0) + 1
+                    changed = cut_retry_fold(tbl, aux)
+                    changed = cut_truncate(tbl, k) or changed
+                    if changed:
+                        # Maps-only versioning: prob-only folds leave reps, key
+                        # sets, gate verdicts and reps-chains all intact, so the
+                        # per-action emission caches stay warm.
+                        table_version[fact] = table_version.get(fact, 0) + 1
 
             if layer == depth:
                 if debug:
@@ -2964,26 +2994,38 @@ class TemporalProbabilisticRPGHeuristic:
                 break
 
             action_support: Dict[str, float] = {}
-            for action_model in self._action_models:
-                preconds = list(action_model.preconditions)
+            for action_model, name, preconds, has_own_atom, own_cut_keys in action_static:
                 if preconds:
                     marg = {f: probabilities_by_layer[layer].get(f, 0.0) for f in preconds}
-                    fr = {f: fact_tables.get(f, []) for f in preconds}
                     # Cheap key-set gate: a precondition pair can only certify a
                     # conflict if one side's cut keys hit the other's atom
                     # actions. No gated pair -> cut_and_bound would provably
-                    # return (frechet, False); skip it.
-                    gated = False
-                    if len(preconds) >= 2:
-                        for i in range(len(preconds)):
-                            for j in range(i + 1, len(preconds)):
-                                if cut_pair_gate(fact_keys(preconds[i]),
-                                                 fact_keys(preconds[j])):
-                                    gated = True
+                    # return (frechet, False); skip it. Gate verdict and reps-
+                    # chain are cached on the precondition version vector.
+                    vv = tuple(table_version.get(f, 0) for f in preconds)
+                    cached = emit_cache.get(name)
+                    if cached is not None and cached[0] == vv:
+                        _, gated, chain_alts, chain_cut = cached
+                    else:
+                        gated = False
+                        if len(preconds) >= 2:
+                            pkeys = [fact_keys(f) for f in preconds]
+                            for i in range(len(pkeys)):
+                                for j in range(i + 1, len(pkeys)):
+                                    if cut_pair_gate(pkeys[i], pkeys[j]):
+                                        gated = True
+                                        break
+                                if gated:
                                     break
-                            if gated:
-                                break
+                        chain_alts, chain_cut = ({},), {}
+                        if not gated:
+                            for f in preconds:
+                                ra, rc = fact_rep(f)
+                                chain_alts = alts_and(chain_alts, ra)
+                                chain_cut = map_and_merge(chain_cut, rc)
+                        emit_cache[name] = (vv, gated, chain_alts, chain_cut)
                     if gated:
+                        fr = {f: fact_tables.get(f, []) for f in preconds}
                         support_value, detected = cut_and_bound(fr, marg)
                     else:
                         support_value, detected = min(marg.values()), False
@@ -2997,19 +3039,18 @@ class TemporalProbabilisticRPGHeuristic:
                             self._paths_table_and_shaved += frechet - support_value
                 else:
                     support_value = 1.0
-                action_support[action_model.name] = support_value
+                action_support[name] = support_value
                 if support_value <= 0.0:
                     continue
                 arrival_layer = layer + action_model.effect_delay_steps
                 if arrival_layer > depth:
                     continue
-                name = action_model.name
                 own_iv = (layer, arrival_layer)
                 # Resource projection: only actions with mutex partners can ever
                 # certify anything — a non-partner own atom would just bloat
                 # every downstream chain merge for zero certification power.
-                own_alts = ({name: (own_iv,)},) if name in partners else ({},)
-                own_cut = {x: (own_iv,) for x in partners.get(name, ())}
+                own_alts = ({name: (own_iv,)},) if has_own_atom else ({},)
+                own_cut = {x: (own_iv,) for x in own_cut_keys}
                 # Emission template computed ONCE PER ACTION (it does not depend
                 # on the effect fact — only the prob scale does). q=1 template;
                 # per-effect rows share the maps (all merges are copy-on-write).
@@ -3020,10 +3061,17 @@ class TemporalProbabilisticRPGHeuristic:
                         reps={f: fact_rep(f) for f in preconds},
                     )
                 elif preconds:
-                    template = cut_fallback_row(
-                        [fact_rep(f) for f in preconds], own_alts, own_cut,
-                        support_value,
-                    )
+                    # Same row cut_fallback_row builds, but the reps-chain comes
+                    # from the version cache; only the per-layer own window is
+                    # merged in here.
+                    if support_value <= 0.0:
+                        template = []
+                    else:
+                        template = [CutRow(
+                            _clamp_probability(support_value),
+                            alts_and(own_alts, chain_alts),
+                            map_and_merge(own_cut, chain_cut),
+                        )]
                 else:
                     template = [CutRow(1.0, tuple(dict(g) for g in own_alts),
                                        dict(own_cut))]

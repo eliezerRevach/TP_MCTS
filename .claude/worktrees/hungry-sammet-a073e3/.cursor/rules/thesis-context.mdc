@@ -1,0 +1,16 @@
+---
+description: Thesis continuation context and admissibility reporting expectations
+alwaysApply: true
+---
+
+# Thesis Continuation Context
+
+Reference doc: `docs/Temporal_Planning___IJCAI25_Camera_Ready-2.txt`
+
+## Stable Project Context
+- This thesis continuation focuses on online temporal planning under deadlines in stochastic domains.
+- Frame the objective as **reward maximization with a deadline**; goal-reachability is the special case with reward `1` on goal before deadline and `0` otherwise.
+
+## Persistent Advisor Constraints
+- Be explicit about heuristic status: admissible, inadmissible, or admissible only in expectation.
+- When discussing expectation-based admissibility, state the guarantee type (worst-case bound, confidence bound, or no formal guarantee).
