@@ -170,20 +170,5 @@
   "168": ".is_global",
   "169": ".calculate_shortest_path",
   "170": ".check_stn",
-  "171": ".copy_stn",
-  "172": "._max_approx_action_scores",
-  "173": ".__eq__",
-  "174": "cumulative_merge_truncate",
-  "175": ".__init__",
-  "176": "TestTableStrategyEngine",
-  "177": "TestChainedFootprints",
-  "178": "_WrapperTimer",
-  "179": "._compute_kmutex_actions_are_mutex",
-  "180": "presets.py",
-  "181": "sweep_paths_table_gap.py",
-  "182": ".credits_stream",
-  "183": "._ensure_admissible_lp_bound",
-  "184": "RealType",
-  "185": ".reset_search_budget",
-  "186": "Action"
+  "171": ".copy_stn"
 }

@@ -183,6 +183,29 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_admissible_paths_table",
         "label": "baseline_admissible_paths_table",
     },
+    # baseline_admissible tightened in the TEMPORAL direction by exact joint
+    # sweeps over small goal-directed patterns. The marginal-only cumulative
+    # bound min(1, sum_t H_t) is the tightest bound derivable from marginals
+    # alone (the exact recursion needs P(achieved at t | NOT by t-1), which the
+    # marginals do not determine), and it saturates to 1.0 as the deadline
+    # grows. Here a few facts are tracked JOINTLY, so the conditional is a ratio
+    # of stored values and there is no cap to hit: cross-layer discrimination
+    # survives at long deadlines. Patterns grow backwards from each goal fact,
+    # attaching whichever freed precondition the abstraction inflates most;
+    # everything outside stays relaxed (freed but gated by relaxed
+    # reachability), and the sweep clamps to min(marginal, pattern) — so this is
+    # an ADMISSIBLE upper bound. Knobs: SURVIVOR_PDB_* below.
+    "baseline_admissible_survivor_pdb": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_survivor_pdb",
+        "label": "baseline_admissible_survivor_pdb",
+    },
+    # Synonym: shorthand for baseline_admissible_survivor_pdb.
+    "survivor_pdb": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "baseline_admissible_survivor_pdb",
+        "label": "baseline_admissible_survivor_pdb",
+    },
     # Forward baseline DP whose AND/precondition layer is tightened by a
     # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
     # layer t) from a per-pattern backward DP (max over projected actions),

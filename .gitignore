@@ -5,6 +5,3 @@ CLAUDE.local.md
 
 # GCP local settings (project id)
 gcp/config.env
-
-# Graphify local cost tracking (commit graphify-out/ otherwise)
-graphify-out/cost.json

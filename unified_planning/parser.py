@@ -36,6 +36,7 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "30": "baseline_admissible_resolution",
         "31": "baseline_admissible_resolution_forward",
         "32": "baseline_forward",
+        "33": "baseline_admissible_survivor_pdb",
         "baseline": "baseline",
         "baseline_forward": "baseline_forward",
         "baseline_admissible": "baseline_admissible",
@@ -45,6 +46,7 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "baseline_admissible_kmutex": "baseline_admissible_kmutex",
         "baseline_admissible_paths": "baseline_admissible_paths",
         "baseline_admissible_paths_table": "baseline_admissible_paths_table",
+        "baseline_admissible_survivor_pdb": "baseline_admissible_survivor_pdb",
         "baseline_pdb": "baseline_pdb",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -99,7 +101,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "29|baseline_admissible_paths_table, "
             "30|baseline_admissible_resolution, "
             "31|baseline_admissible_resolution_forward, "
-            "32|baseline_forward"
+            "32|baseline_forward, "
+            "33|baseline_admissible_survivor_pdb"
         )
     return aliases[normalized]
 
