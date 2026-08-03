@@ -32,6 +32,8 @@ from comdp_plus_no_deadline.engines.survivor_pdb import (
     PATTERN_HARD_CAP as _SURVIVOR_PDB_PATTERN_HARD_CAP,
     DEFAULT_MAX_STATES as _SURVIVOR_PDB_DEFAULT_MAX_STATES,
     build_patterns as build_survivor_patterns,
+    compute_earliest_times as compute_survivor_earliest_times,
+    gates_for_pattern as survivor_gates_for_pattern,
     solve_survivor_pattern,
 )
 from comdp_plus_no_deadline.engines.admissible_temporal_rpg import (
@@ -435,6 +437,10 @@ class TemporalProbabilisticRPGHeuristic:
         )
         self._survivor_pdb_pattern_cache: Dict[Tuple[frozenset, int], List] = {}
         self._survivor_pdb_patterns_used: int = 0
+        # Pure-strategy solve memo, keyed by the ABSTRACT state: many concrete
+        # search nodes project to the same pattern configuration, so the joint
+        # sweep is done once per projection instead of once per node.
+        self._survivor_pdb_solve_memo: Dict[Tuple, Dict] = {}
         # Marginal-consistent LP OR-layer bound (strategy "baseline_admissible_lp").
         # ``max_local_facts`` caps the 2^|U| world enumeration; above it the layer
         # falls back to the union bound. ``value_mode`` is "union" (safe) or
@@ -598,6 +604,7 @@ class TemporalProbabilisticRPGHeuristic:
             "fast_atom_cache",
             "baseline_admissible_resolution",
             "baseline_admissible_survivor_pdb",
+            "survivor_pdb_pure",
         ):
             query_key = query_key + (self._query_cache_goal_key(goal_facts, state_facts),)
         if chosen_strategy in (
@@ -720,6 +727,16 @@ class TemporalProbabilisticRPGHeuristic:
         if chosen_strategy == "baseline_admissible":
             result = self._heuristic_propagate_baseline_admissible(
                 state=state,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "survivor_pdb_pure":
+            result = self._heuristic_propagate_survivor_pdb_pure(
+                state=state,
+                goal_facts=goal_facts,
                 fixed_depth=fixed_depth,
                 start_time=start_time,
                 debug=debug,
@@ -1479,6 +1496,7 @@ class TemporalProbabilisticRPGHeuristic:
             "baseline_admissible_paths",
             "baseline_admissible_paths_table",
             "baseline_admissible_survivor_pdb",
+            "survivor_pdb_pure",
             "baseline_pdb",
             "baseline_cached",
             "baseline_survival",
@@ -1926,6 +1944,167 @@ class TemporalProbabilisticRPGHeuristic:
             debug=debug,
             fact_upper_bounds=curves,
         )
+
+    def _heuristic_propagate_survivor_pdb_pure(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """The pattern DP alone — no RPG sweep in the per-node path.
+
+        Once every goal fact carries a pattern, the RPG contributes nothing: the
+        pattern bound is exact inside its own sub-world and was measured to be
+        the binding side of ``min(marginal, pattern)`` at every layer, so the
+        two full sweeps of the non-pure strategy compute a number that is then
+        discarded. This strategy keeps only what the pattern actually needs from
+        outside itself — the achiever GATES, which are pure delete-relaxed
+        reachability (``compute_earliest_times``), not probabilities.
+
+        Per node: one reachability fixpoint + one joint sweep per pattern, the
+        latter memoized on the ABSTRACT state (many concrete states project to
+        the same pattern configuration — that collapse is the whole point of a
+        pattern database).
+
+        The one-off RPG sweep still happens when a pattern is first BUILT, since
+        pattern growth ranks candidate facts by how much the marginals say the
+        "assume free" treatment inflates them. That is cached per
+        ``(goals, depth)`` and reused across the search tree.
+
+        Admissible: the pattern bound is an upper bound on its own (everything
+        outside the pattern is freed, gated only by reachability). A goal fact
+        with no usable pattern falls back to 1.0 — still an upper bound, just
+        uninformative for that conjunct.
+        """
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        targets = list(goal_facts) if goal_facts is not None else list(self._goal_facts)
+
+        patterns = self._survivor_pdb_patterns_for(
+            state_facts=state_facts, goal_facts=targets, depth=depth
+        )
+        if not patterns:
+            return self._heuristic_propagate_baseline_admissible(
+                state=state, fixed_depth=depth, start_time=start_time, debug=debug
+            )
+
+        earliest = compute_survivor_earliest_times(
+            set(state_facts), self._survivor_action_specs(), depth
+        )
+        action_preconditions = {
+            model.name: model.preconditions for model in self._action_models
+        }
+        action_delays = {
+            model.name: model.effect_delay_steps for model in self._action_models
+        }
+
+        curves: Dict[Fact, List[float]] = {}
+        for index, pattern in enumerate(patterns):
+            gates = survivor_gates_for_pattern(
+                pattern, earliest, action_preconditions, action_delays, depth
+            )
+            projection = frozenset(f for f in pattern.facts if f in state_facts)
+            memo_key = (
+                id(pattern),
+                projection,
+                tuple(sorted((k, v) for k, v in gates.items())),
+                depth,
+            )
+            solved = self._survivor_pdb_solve_memo.get(memo_key)
+            if solved is None:
+                solved = solve_survivor_pattern(
+                    pattern,
+                    set(state_facts),
+                    depth,
+                    max_states=self._survivor_pdb_max_states,
+                    gates=gates,
+                )
+                if len(self._survivor_pdb_solve_memo) < 20000:
+                    self._survivor_pdb_solve_memo[memo_key] = solved
+            for fact, curve in solved.items():
+                existing = curves.get(fact)
+                curves[fact] = (
+                    curve if existing is None
+                    else [min(a, b) for a, b in zip(existing, curve)]
+                )
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            layer: {} for layer in range(depth + 1)
+        }
+        for fact, curve in curves.items():
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer][fact] = curve[layer]
+        for fact in state_facts:
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer].setdefault(fact, 1.0)
+        # Uncovered goals: no pattern bounds them, so 1.0 is the only safe value.
+        for goal in targets:
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer].setdefault(goal, 1.0)
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=[],
+            cache_hit=False,
+            fact_cache_hits=0,
+            action_cache_hits=0,
+            action_support_by_layer={},
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def _survivor_action_specs(self):
+        """(name, preconditions, delay, add facts) tuples for the gate fixpoint."""
+        cached = getattr(self, "_survivor_action_specs_cache", None)
+        if cached is None:
+            cached = [
+                (
+                    model.name,
+                    model.preconditions,
+                    model.effect_delay_steps,
+                    tuple(model.add_probabilities.keys()),
+                )
+                for model in self._action_models
+            ]
+            self._survivor_action_specs_cache = cached
+        return cached
+
+    def _survivor_pdb_patterns_for(
+        self,
+        *,
+        state_facts: Set[Fact],
+        goal_facts: Sequence[Fact],
+        depth: int,
+    ) -> List:
+        """Cached pattern structures, building them (one RPG sweep) on first use."""
+        targets = [fact for fact in goal_facts if fact not in state_facts]
+        if not targets:
+            return []
+        structure_key = (frozenset(targets), int(depth))
+        patterns = self._survivor_pdb_pattern_cache.get(structure_key)
+        if patterns is not None:
+            return patterns
+        base = self._heuristic_propagate_baseline_admissible(
+            state=SimpleNamespace(predicates=set(state_facts)),
+            fixed_depth=depth,
+            start_time=0.0,
+            debug=False,
+        )
+        self._survivor_pdb_curves(
+            state_facts=state_facts, goal_facts=goal_facts, depth=depth,
+            base_result=base,
+        )
+        return self._survivor_pdb_pattern_cache.get(structure_key, [])
 
     def _survivor_pdb_curves(
         self,

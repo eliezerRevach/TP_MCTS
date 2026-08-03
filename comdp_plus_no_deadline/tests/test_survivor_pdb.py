@@ -308,6 +308,63 @@ def test_strategy_beats_saturation_on_the_escape_house():
     assert values[4] < values[6] < values[10] < 1.0
 
 
+def test_pure_strategy_matches_the_rpg_wrapped_one():
+    """The RPG sweep is redundant once every goal fact carries a pattern."""
+    heuristic = _heuristic_for(_escape_house_actions(), ["door"])
+    for depth in (3, 5, 8, 14):
+        wrapped = heuristic.heuristic_score(
+            {}, ["door"], aggregation="product", fixed_depth=depth,
+            strategy="baseline_admissible_survivor_pdb",
+        )
+        pure = heuristic.heuristic_score(
+            {}, ["door"], aggregation="product", fixed_depth=depth,
+            strategy="survivor_pdb_pure",
+        )
+        assert float(pure) == pytest.approx(float(wrapped), abs=1e-9)
+
+
+def test_earliest_times_are_a_reachability_fixpoint():
+    from comdp_plus_no_deadline.engines.survivor_pdb import compute_earliest_times
+
+    specs = [
+        ("make_a", frozenset(), 2, ("a",)),
+        ("make_b", frozenset({"a"}), 3, ("b",)),
+        ("unreachable", frozenset({"never"}), 1, ("c",)),
+    ]
+    earliest = compute_earliest_times({"start"}, specs, horizon=10)
+    assert earliest["start"] == 0
+    assert earliest["a"] == 2
+    assert earliest["b"] == 5  # 2 + 3
+    assert "c" not in earliest  # precondition never achievable
+
+
+def test_earliest_times_respect_the_horizon():
+    from comdp_plus_no_deadline.engines.survivor_pdb import compute_earliest_times
+
+    specs = [("slow", frozenset(), 9, ("late",))]
+    assert "late" not in compute_earliest_times(set(), specs, horizon=5)
+    assert compute_earliest_times(set(), specs, horizon=9)["late"] == 9
+
+
+def test_gates_recomputed_per_state_get_earlier_not_later():
+    """A deeper state has more facts true, so its gates must not be LATER.
+
+    Caching a root gate for a descendant would suppress achievers that really
+    are available, which would push the bound below the true value.
+    """
+    from comdp_plus_no_deadline.engines.survivor_pdb import compute_earliest_times
+
+    specs = [
+        ("make_a", frozenset(), 4, ("a",)),
+        ("use_a", frozenset({"a"}), 1, ("g",)),
+    ]
+    root = compute_earliest_times(set(), specs, horizon=20)
+    deeper = compute_earliest_times({"a"}, specs, horizon=20)
+    assert root["g"] == 5
+    assert deeper["g"] == 1
+    assert deeper["g"] <= root["g"]
+
+
 def test_state_dependent_branch_is_not_silently_dropped():
     """Admissibility guard for probe-invisible achievers.
 

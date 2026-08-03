@@ -268,11 +268,84 @@ def compute_gate(
     return earliest_pre + max(1, int(delay))
 
 
+def compute_earliest_times(
+    initial_facts: Set[Fact],
+    action_specs: Sequence[Tuple[str, frozenset, int, Iterable[Fact]]],
+    horizon: int,
+) -> Dict[Fact, int]:
+    """Delete-relaxed earliest achievement layer per fact.
+
+    The only thing the pattern needs from outside itself: when a FREED achiever
+    is first allowed to fire. That is pure reachability — no probabilities — so
+    it does not need the full probabilistic RPG sweep that used to supply it
+    (via each fact's first positive layer). Plain fixpoint over
+    ``earliest[f] = min over achievers of max(earliest[pre]) + duration``.
+
+    Must be recomputed per state, never cached from the root: a deeper state
+    has more facts already true, so a root-derived gate would be too LATE,
+    which would suppress real achievers and break the upper bound.
+    """
+    earliest: Dict[Fact, int] = {fact: 0 for fact in initial_facts}
+    changed = True
+    while changed:
+        changed = False
+        for _name, preconditions, delay, adds in action_specs:
+            start = 0
+            usable = True
+            for precondition in preconditions:
+                when = earliest.get(precondition)
+                if when is None:
+                    usable = False
+                    break
+                if when > start:
+                    start = when
+            if not usable:
+                continue
+            landing = start + max(1, int(delay))
+            if landing > horizon:
+                continue
+            for fact in adds:
+                previous = earliest.get(fact)
+                if previous is None or previous > landing:
+                    earliest[fact] = landing
+                    changed = True
+    return earliest
+
+
+def gates_for_pattern(
+    pattern: "SurvivorPattern",
+    earliest: Mapping[Fact, int],
+    action_preconditions: Mapping[str, frozenset],
+    action_delays: Mapping[str, int],
+    horizon: int,
+) -> Dict[str, Optional[int]]:
+    """Per-achiever earliest landing layer for THIS state (None = unusable)."""
+    gates: Dict[str, Optional[int]] = {}
+    for achiever in pattern.achievers:
+        base_name = achiever.name.split("#topup:")[0]
+        preconditions = action_preconditions.get(base_name, frozenset())
+        start = 0
+        usable = True
+        for precondition in preconditions:
+            when = earliest.get(precondition)
+            if when is None:
+                usable = False
+                break
+            start = max(start, when)
+        if not usable:
+            gates[achiever.name] = None
+            continue
+        landing = start + max(1, int(action_delays.get(base_name, achiever.delay)))
+        gates[achiever.name] = landing if landing <= horizon else None
+    return gates
+
+
 def solve_survivor_pattern(
     pattern: SurvivorPattern,
     initial_facts: Set[Fact],
     horizon: int,
     max_states: int = DEFAULT_MAX_STATES,
+    gates: Optional[Mapping[str, Optional[int]]] = None,
 ) -> Dict[Fact, List[float]]:
     """Forward sweep of the joint distribution over the pattern's facts.
 
@@ -315,6 +388,9 @@ def solve_survivor_pattern(
 
     prepared: List[Tuple[int, int, Tuple[int, ...], Tuple[Tuple[int, float], ...]]] = []
     for achiever in pattern.achievers:
+        gate = achiever.gate if gates is None else gates.get(achiever.name, achiever.gate)
+        if gate is None:
+            continue
         pre_mask = 0
         for fact in achiever.pattern_pre:
             pre_mask |= 1 << index[fact]
@@ -330,7 +406,7 @@ def solve_survivor_pattern(
             for fact in add:
                 mask |= 1 << index[fact]
             outcome_masks.append((mask, probability))
-        prepared.append((achiever.gate, pre_mask, required, tuple(outcome_masks)))
+        prepared.append((int(gate), pre_mask, required, tuple(outcome_masks)))
 
     curves: Dict[Fact, List[float]] = {
         fact: [0.0] * (horizon + 1) for fact in facts

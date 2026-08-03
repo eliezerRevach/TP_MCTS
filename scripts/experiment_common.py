@@ -206,6 +206,22 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline_admissible_survivor_pdb",
         "label": "baseline_admissible_survivor_pdb",
     },
+    # PURE survivor-PDB: the pattern DP with NO RPG sweep in the per-node path.
+    # Once every goal fact has a pattern the RPG contributes nothing -- the
+    # pattern bound is exact inside its own sub-world and is always the binding
+    # side of min(marginal, pattern), so the sweep computes a number that is
+    # then discarded. Only the achiever GATES are still needed from outside the
+    # pattern, and those are pure delete-relaxed reachability (a cheap fixpoint,
+    # no probabilities). Pattern solves are memoized on the ABSTRACT state, so
+    # many concrete search nodes share one sweep. Same values as
+    # baseline_admissible_survivor_pdb, ~15x faster than baseline_admissible
+    # (~1.1ms vs ~16ms per node on nasa_rover obj2) -- which at a fixed search
+    # time is many more MCTS iterations. ADMISSIBLE.
+    "survivor_pdb_pure": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_pure",
+        "label": "survivor_pdb_pure",
+    },
     # Forward baseline DP whose AND/precondition layer is tightened by a
     # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
     # layer t) from a per-pattern backward DP (max over projected actions),
