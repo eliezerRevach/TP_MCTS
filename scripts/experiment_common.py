@@ -222,6 +222,64 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "survivor_pdb_pure",
         "label": "survivor_pdb_pure",
     },
+    # LAZY survivor-PDB: same abstraction as survivor_pdb_pure, cached on a
+    # horizon-INDEPENDENT key. NOT value-identical -- see the caveat below.
+    #
+    # survivor_pdb_pure keys the solve memo on (pattern, projection, gates,
+    # depth) and the pattern structure on (goals, depth). depth is
+    # min(configured, floor(deadline - current_time)), so it moves with the
+    # clock: every distinct time in the tree splits the cache, and the whole
+    # table is thrown away as the deadline draws in -- including the pattern
+    # BUILD, which runs a full baseline_admissible sweep for its growth scoring
+    # (~110ms on nasa_rover(3) vs ~1ms for a cached solve).
+    #
+    # Dropping depth is exact, not an approximation: in solve_survivor_pattern
+    # an achiever fires at layer t only when t >= gate, so layer t depends on no
+    # achiever gated later than t. A sweep to horizon H therefore contains the
+    # sweep to any d <= H as a literal PREFIX, and a query at remaining time d
+    # is a column read. So: sweep once to the largest depth requested, index by
+    # remaining. Entries then survive across MCTS decisions, and nodes at
+    # different clocks sharing a projection+gates share one sweep.
+    #
+    # gates deliberately STAY in the key. Deriving them from the pattern facts
+    # alone would make the value a function of the abstract state (a true PDB,
+    # ~12x fewer sweeps) but was measured on nasa_rover(3) to move the estimate
+    # from 0.083 to 0.953 at deadline 12 -- looser on 60/60 sampled states. The
+    # gates carry nearly all of the discriminating information.
+    #
+    # Given the SAME pattern set this returns exactly the same numbers as
+    # survivor_pdb_pure -- verified on nasa_rover(3), 25 states at depth 15,
+    # fresh heuristic instance per state: 0/25 differ.
+    #
+    # CAVEAT -- live numbers can still differ from pure, via a state-dependence
+    # that ALREADY EXISTS in pure: build_survivor_patterns takes
+    # initial_facts=state_facts, so a pattern is built from whichever state
+    # first populates its cache key and is reused for every later state sharing
+    # that key. pure keys on (targets, depth); this keys on (targets). Different
+    # key -> different builder state -> different Phi -> different (still
+    # admissible) bound. With shared instances, 10 of those same 25 states
+    # differed. Neither is "more correct": the pattern build is not a function
+    # of the pattern alone, which is worth fixing on its own terms.
+    #
+    # Smaller second effect: build_survivor_patterns does read the horizon. On
+    # nasa_rover(3) the pattern set is identical for horizons 12..25 and only
+    # changes at 10 and below (9 patterns -> 6).
+    #
+    # Speedup scales with how many distinct depths the search visits (sweeps stay
+    # flat while queries grow): 1.05x at 1 depth, 2.74x at 5, ~4x at 10-20.
+    #
+    # ADMISSIBLE.
+    "survivor_pdb_lazy": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_lazy",
+        "label": "survivor_pdb_lazy",
+    },
+    # Synonym.
+    "survivior_pdb_lazy": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_lazy",
+        "label": "survivor_pdb_lazy",
+    },
     # Forward baseline DP whose AND/precondition layer is tightened by a
     # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
     # layer t) from a per-pattern backward DP (max over projected actions),
@@ -390,6 +448,23 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "heuristic_name": "trpg",
         "temporal_heuristic_strategy": "baseline",  # unused for trpg
         "label": "ptrpg_old (trpg)",
+    },
+    # Exact small-pattern CoMDP+ MDP. NOT a PTRPG strategy and shares no code with
+    # that family: it is DELETE-AWARE (a consumable is genuinely consumed, so the
+    # estimate plateaus instead of saturating to 1.0 with the horizon) and it
+    # MAXIMISES over a real policy set instead of firing every applicable achiever.
+    # State is (pattern facts, in-flight ops, remaining time, sticky goal bit);
+    # one backward pass over a DAG -- no value/policy iteration. The only
+    # relaxations are the projection onto a small fact set, most-favourable-probe
+    # for state-dependent effect probabilities, and dropped at-end conditions
+    # (no shipped domain uses EndPreconditionTiming, so that one is vacuous here).
+    # Goals combine with MIN, not a product: min of upper bounds is an upper bound,
+    # a product of them can fall below the truth. Admissible.
+    # Knobs: TP_MCTS_EXACT_PDB_MAX_FACTS (default 4), _MAX_PATTERNS, _MAX_STATES.
+    "exact_pattern_mdp": {
+        "heuristic_name": "exact_pattern_mdp",
+        "temporal_heuristic_strategy": "baseline",  # unused for exact_pattern_mdp
+        "label": "exact_pattern_mdp",
     },
     # MCTS leaf: real stochastic rollout to terminal 0/1; PTRPG only guides action choice.
     "ptrpg_guided_rollout_baseline_survival_resolution": {

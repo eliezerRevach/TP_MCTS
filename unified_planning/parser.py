@@ -38,6 +38,7 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "32": "baseline_forward",
         "33": "baseline_admissible_survivor_pdb",
         "34": "survivor_pdb_pure",
+        "35": "survivor_pdb_lazy",
         "baseline": "baseline",
         "baseline_forward": "baseline_forward",
         "baseline_admissible": "baseline_admissible",
@@ -49,6 +50,7 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "baseline_admissible_paths_table": "baseline_admissible_paths_table",
         "baseline_admissible_survivor_pdb": "baseline_admissible_survivor_pdb",
         "survivor_pdb_pure": "survivor_pdb_pure",
+        "survivor_pdb_lazy": "survivor_pdb_lazy",
         "baseline_pdb": "baseline_pdb",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -105,7 +107,8 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "31|baseline_admissible_resolution_forward, "
             "32|baseline_forward, "
             "33|baseline_admissible_survivor_pdb, "
-            "34|survivor_pdb_pure"
+            "34|survivor_pdb_pure, "
+            "35|survivor_pdb_lazy"
         )
     return aliases[normalized]
 
@@ -190,7 +193,9 @@ parser.add_argument(
     '--heuristic_name',
     help=(
         'leaf heuristic: trpg | temporal_probabilistic_rpg | '
-        'baseline_pessimistic | baseline_passmistic | baseline_optimistic | baseline_optimstic'
+        'baseline_pessimistic | baseline_passmistic | baseline_optimistic | baseline_optimstic | '
+        'exact_pattern_mdp (exact small-pattern CoMDP+ MDP; delete-AWARE, maximises '
+        'over a real policy set, ignores --temporal_heuristic_strategy)'
     ),
     nargs='?',
     default='trpg',

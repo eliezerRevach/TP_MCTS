@@ -35,6 +35,10 @@ def _effective_temporal_depth(configured_depth: int, current_time: float, deadli
 # User-requested names include typos; aliases map to the same implementation.
 _CORR_PESSIMISTIC = frozenset({"baseline_pessimistic", "baseline_passmistic"})
 _CORR_OPTIMISTIC = frozenset({"baseline_optimistic", "baseline_optimstic"})
+# Exact small-pattern CoMDP+ MDP (comdp_plus_no_deadline.engines.exact_pattern_mdp).
+# NOT a PTRPG strategy: it is delete-AWARE and maximises over a real policy set,
+# so it is dispatched before the PTRPG heuristic is ever constructed.
+_EXACT_PDB = frozenset({"exact_pattern_mdp"})
 
 
 def _resolution_heuristic_kwargs_from_cli() -> dict:
@@ -91,10 +95,12 @@ def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
 
 
 def _uses_tprpg_family(heuristic_name: str) -> bool:
+    """Leaf heuristics evaluated through ``_temporal_heuristic`` (vs. plain trpg)."""
     return (
         heuristic_name == "temporal_probabilistic_rpg"
         or heuristic_name in _CORR_PESSIMISTIC
         or heuristic_name in _CORR_OPTIMISTIC
+        or heuristic_name in _EXACT_PDB
     )
 
 
@@ -467,10 +473,30 @@ def _temporal_heuristic(
     leaf_heuristic_name: str = "temporal_probabilistic_rpg",
     aligned_h_override=None,
 ):
+    from unified_planning.engines.heuristic_timing import WorkerTimer, is_active
+
+    # Exact pattern-MDP leaf. Dispatched first so the PTRPG heuristic is never
+    # built for it -- this heuristic shares no machinery with that family.
+    if leaf_heuristic_name in _EXACT_PDB:
+        from comdp_plus_no_deadline.engines.exact_pattern_mdp import (
+            ExactPatternMDPHeuristic,
+        )
+        exact = getattr(heuristic_mdp, "_exact_pattern_mdp_heuristic", None)
+        if exact is None:
+            exact = ExactPatternMDPHeuristic.from_problem(heuristic_mdp.problem)
+            setattr(heuristic_mdp, "_exact_pattern_mdp_heuristic", exact)
+        return exact.heuristic_score(
+            state,
+            heuristic_mdp.problem.goals,
+            fixed_depth=_effective_temporal_depth(
+                temporal_heuristic_depth, current_time, heuristic_mdp.deadline()
+            ),
+            start_time=current_time,
+        )
+
     from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (
         TemporalProbabilisticRPGHeuristic,
     )
-    from unified_planning.engines.heuristic_timing import WorkerTimer, is_active
 
     heuristic = getattr(heuristic_mdp, "_temporal_probabilistic_rpg_heuristic", None)
     if heuristic is None:

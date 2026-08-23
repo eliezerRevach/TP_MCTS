@@ -441,6 +441,26 @@ class TemporalProbabilisticRPGHeuristic:
         # search nodes project to the same pattern configuration, so the joint
         # sweep is done once per projection instead of once per node.
         self._survivor_pdb_solve_memo: Dict[Tuple, Dict] = {}
+        # ---- survivor_pdb_lazy -------------------------------------------
+        # Same abstraction as survivor_pdb_pure, but the cache key drops
+        # ``depth``. A sweep to horizon H already contains every shorter
+        # horizon as a prefix (layer t only sees achievers whose gate <= t), so
+        # one sweep to the LARGEST depth ever requested answers every query by
+        # column lookup. Consequences:
+        #   * entries survive across MCTS decisions instead of being discarded
+        #     when the remaining horizon shrinks;
+        #   * nodes at different clocks but the same projection+gates share a
+        #     single sweep.
+        # ``gates`` stay in the key on purpose: measured on nasa_rover(3), gates
+        # derived from Phi alone instead of the full state moved the value from
+        # 0.083 to 0.953 at deadline 12, i.e. they carry nearly all of the
+        # discriminating information.
+        self._survivor_pdb_lazy_memo: Dict[Tuple, Dict] = {}
+        self._survivor_pdb_lazy_pattern_cache: Dict[frozenset, List] = {}
+        self._survivor_pdb_lazy_horizon: int = 0
+        self._survivor_pdb_lazy_hits: int = 0
+        self._survivor_pdb_lazy_misses: int = 0
+        self._survivor_pdb_lazy_sweeps: int = 0
         # Marginal-consistent LP OR-layer bound (strategy "baseline_admissible_lp").
         # ``max_local_facts`` caps the 2^|U| world enumeration; above it the layer
         # falls back to the union bound. ``value_mode`` is "union" (safe) or
@@ -735,6 +755,16 @@ class TemporalProbabilisticRPGHeuristic:
             return result
         if chosen_strategy == "survivor_pdb_pure":
             result = self._heuristic_propagate_survivor_pdb_pure(
+                state=state,
+                goal_facts=goal_facts,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "survivor_pdb_lazy":
+            result = self._heuristic_propagate_survivor_pdb_lazy(
                 state=state,
                 goal_facts=goal_facts,
                 fixed_depth=fixed_depth,
@@ -1497,6 +1527,7 @@ class TemporalProbabilisticRPGHeuristic:
             "baseline_admissible_paths_table",
             "baseline_admissible_survivor_pdb",
             "survivor_pdb_pure",
+            "survivor_pdb_lazy",
             "baseline_pdb",
             "baseline_cached",
             "baseline_survival",
@@ -1514,7 +1545,7 @@ class TemporalProbabilisticRPGHeuristic:
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_admissible, baseline_admissible_resolution, baseline_admissible_resolution_forward, baseline_admissible_lp, baseline_admissible_kmutex, baseline_admissible_paths, baseline_admissible_survivor_pdb, baseline_pdb, baseline_cached, baseline_survival, "
+                "Supported strategies: baseline, baseline_admissible, baseline_admissible_resolution, baseline_admissible_resolution_forward, baseline_admissible_lp, baseline_admissible_kmutex, baseline_admissible_paths, baseline_admissible_survivor_pdb, survivor_pdb_pure, survivor_pdb_lazy, baseline_pdb, baseline_cached, baseline_survival, "
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "baseline_survival_resolution, "
                 "atom_half_split, "
@@ -2062,6 +2093,255 @@ class TemporalProbabilisticRPGHeuristic:
                 start_layer=max(0, int(math.floor(start_time))),
             ),
         )
+
+    def _survivor_pdb_lazy_patterns(
+        self,
+        *,
+        state_facts: Set[Fact],
+        goal_facts: Sequence[Fact],
+        horizon: int,
+    ) -> List:
+        """Pattern structures for the lazy strategy, cached on the GOALS alone.
+
+        ``survivor_pdb_pure`` keys this on ``(goals, depth)``, so the structure
+        is rebuilt every time the remaining horizon shrinks — and the build
+        includes a full ``baseline_admissible`` sweep for the growth scoring,
+        which is the expensive part. The structure does not depend on the
+        horizon in any load-bearing way: it uses it only to score candidates
+        over the firing window and to drop achievers that cannot land in time.
+        Building once at the LARGEST horizon keeps every achiever that could
+        ever be usable, which is also the admissible direction (dropping an
+        achiever is an OR-drop and would lower the bound below the truth).
+        """
+        targets = [fact for fact in goal_facts if fact not in state_facts]
+        if not targets:
+            return []
+        key = frozenset(targets)
+        cached = self._survivor_pdb_lazy_pattern_cache.get(key)
+        if cached is not None:
+            return cached
+
+        base = self._heuristic_propagate_baseline_admissible(
+            state=SimpleNamespace(predicates=set(state_facts)),
+            fixed_depth=horizon,
+            start_time=0.0,
+            debug=False,
+        )
+        marginals: Dict[Fact, List[float]] = {}
+        by_layer = base.probabilities_by_layer
+        for layer in range(horizon + 1):
+            for fact, value in by_layer.get(layer, {}).items():
+                curve = marginals.get(fact)
+                if curve is None:
+                    curve = [0.0] * (horizon + 1)
+                    marginals[fact] = curve
+                curve[layer] = value
+
+        raw_by_name = {
+            getattr(action, "name", repr(action)): action for action in self._actions
+        }
+        actions_by_effect_raw: Dict[Fact, List[object]] = {}
+        for fact, models in self._actions_by_effect_fact.items():
+            raw = [raw_by_name[m.name] for m in models if m.name in raw_by_name]
+            if raw:
+                actions_by_effect_raw[fact] = raw
+
+        patterns = build_survivor_patterns(
+            targets,
+            actions_by_effect_fact=actions_by_effect_raw,
+            action_preconditions={
+                model.name: model.preconditions for model in self._action_models
+            },
+            action_delays={
+                model.name: model.effect_delay_steps for model in self._action_models
+            },
+            action_add_probabilities={
+                model.name: model.add_probabilities for model in self._action_models
+            },
+            marginals=marginals,
+            initial_facts=set(state_facts),
+            probe_universe=self._probe_fact_universe(),
+            horizon=horizon,
+            max_facts=self._survivor_pdb_max_facts,
+            max_patterns=(
+                self._survivor_pdb_max_patterns
+                or min(len(targets), _SURVIVOR_PDB_PATTERN_HARD_CAP)
+            ),
+        )
+        self._survivor_pdb_lazy_pattern_cache[key] = patterns
+        return patterns
+
+    def _heuristic_propagate_survivor_pdb_lazy(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """``survivor_pdb_pure`` with a horizon-independent cache.
+
+        Same abstraction. **NOT the same values** — see the caveat at the end.
+
+        ``survivor_pdb_pure`` keys the solve memo on
+        ``(pattern, projection, gates, depth)``. ``depth`` is
+        ``min(configured, floor(deadline - current_time))``, so it changes with
+        the clock: every distinct time in the search tree splits the cache, and
+        the whole table is effectively discarded once the deadline draws in.
+
+        Dropping ``depth`` is exact, not an approximation. In
+        ``solve_survivor_pattern`` an achiever fires at layer ``t`` only when
+        ``t >= gate``, so the distribution at layer ``t`` depends on no achiever
+        gated later than ``t``. A sweep to horizon ``H`` therefore contains the
+        sweep to any ``d <= H`` as a literal prefix, and a query at remaining
+        time ``d`` is a column read. The gate values themselves agree below the
+        horizon for the same reason: ``compute_earliest_times`` only discards
+        landings beyond its cap, which can never have been the minimum for a
+        fact reachable earlier.
+
+        ``gates`` deliberately stay in the key. Deriving them from the pattern
+        facts alone (treating everything outside as free) would make the value
+        a function of the abstract state — a true pattern database — but it was
+        measured on nasa_rover(3) to move the estimate from 0.083 to 0.953 at
+        deadline 12, looser on 60 of 60 sampled states. The gates carry nearly
+        all of the discriminating information, so the cheaper key is not worth
+        taking.
+
+        Given the SAME pattern set this produces exactly the same numbers as
+        ``survivor_pdb_pure`` — verified on nasa_rover(3), 25 states at depth
+        15, with a fresh heuristic instance per state: 0/25 differ.
+
+        CAVEAT — numbers can still differ from ``survivor_pdb_pure`` in a live
+        run, because of a state-dependence that already exists in ``pure``:
+        ``build_survivor_patterns`` takes ``initial_facts=state_facts``, so a
+        pattern is built from whichever state first populates its cache key and
+        is then reused for every later state sharing that key. ``pure`` keys on
+        ``(targets, depth)``; this keys on ``(targets)``. Different key, so a
+        different state ends up being the builder, so a different Phi, so a
+        different (still admissible) bound. With shared instances, 10 of the
+        same 25 states differed. Neither variant is "more correct" — the
+        pattern build is simply not a function of the pattern alone, which is
+        worth fixing on its own terms.
+
+        Second, smaller effect: ``build_survivor_patterns`` does read the
+        horizon (it scores candidates over ``[gate, horizon]`` and drops
+        achievers that cannot land in time). On nasa_rover(3) the pattern set
+        is identical for horizons 12..25 and only changes at 10 and below
+        (9 patterns -> 6), so this matters only for very short remaining time.
+
+        Speedup is proportional to how many distinct depths the search visits
+        (sweep count stays flat while queries grow): 1.05x at 1 depth, 2.74x at
+        5, ~4x at 10-20, on 40 nasa_rover(3) states.
+        """
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        targets = list(goal_facts) if goal_facts is not None else list(self._goal_facts)
+
+        # Cached curves have length ``horizon + 1``; a deeper query would read
+        # past their end, so grow the shared horizon and start over. In practice
+        # the root node asks for the largest depth, so this fires once.
+        if depth > self._survivor_pdb_lazy_horizon:
+            self._survivor_pdb_lazy_horizon = depth
+            self._survivor_pdb_lazy_memo.clear()
+            self._survivor_pdb_lazy_pattern_cache.clear()
+        horizon = self._survivor_pdb_lazy_horizon
+
+        patterns = self._survivor_pdb_lazy_patterns(
+            state_facts=state_facts, goal_facts=targets, horizon=horizon
+        )
+        if not patterns:
+            return self._heuristic_propagate_baseline_admissible(
+                state=state, fixed_depth=depth, start_time=start_time, debug=debug
+            )
+
+        earliest = compute_survivor_earliest_times(
+            set(state_facts), self._survivor_action_specs(), horizon
+        )
+        action_preconditions = {
+            model.name: model.preconditions for model in self._action_models
+        }
+        action_delays = {
+            model.name: model.effect_delay_steps for model in self._action_models
+        }
+
+        curves: Dict[Fact, List[float]] = {}
+        for pattern in patterns:
+            gates = survivor_gates_for_pattern(
+                pattern, earliest, action_preconditions, action_delays, horizon
+            )
+            # The projection IS the seed: solve_survivor_pattern only inspects
+            # facts that belong to the pattern, so passing it rather than the
+            # full state makes key and seed provably the same object.
+            projection = frozenset(f for f in pattern.facts if f in state_facts)
+            memo_key = (
+                id(pattern),
+                projection,
+                tuple(sorted((k, v) for k, v in gates.items())),
+            )
+            solved = self._survivor_pdb_lazy_memo.get(memo_key)
+            if solved is None:
+                self._survivor_pdb_lazy_misses += 1
+                self._survivor_pdb_lazy_sweeps += 1
+                solved = solve_survivor_pattern(
+                    pattern,
+                    set(projection),
+                    horizon,
+                    max_states=self._survivor_pdb_max_states,
+                    gates=gates,
+                )
+                if len(self._survivor_pdb_lazy_memo) < 20000:
+                    self._survivor_pdb_lazy_memo[memo_key] = solved
+            else:
+                self._survivor_pdb_lazy_hits += 1
+            for fact, curve in solved.items():
+                existing = curves.get(fact)
+                curves[fact] = (
+                    curve if existing is None
+                    else [min(a, b) for a, b in zip(existing, curve)]
+                )
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            layer: {} for layer in range(depth + 1)
+        }
+        for fact, curve in curves.items():
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer][fact] = curve[layer]
+        for fact in state_facts:
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer].setdefault(fact, 1.0)
+        # Uncovered goals: no pattern bounds them, so 1.0 is the only safe value.
+        for goal in targets:
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer].setdefault(goal, 1.0)
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=[],
+            cache_hit=False,
+            fact_cache_hits=self._survivor_pdb_lazy_hits,
+            action_cache_hits=0,
+            action_support_by_layer={},
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def survivor_pdb_lazy_stats(self) -> Dict[str, int]:
+        """Cache telemetry for ``survivor_pdb_lazy`` (hits, misses, sweeps)."""
+        return {
+            "hits": self._survivor_pdb_lazy_hits,
+            "misses": self._survivor_pdb_lazy_misses,
+            "sweeps": self._survivor_pdb_lazy_sweeps,
+            "entries": len(self._survivor_pdb_lazy_memo),
+            "horizon": self._survivor_pdb_lazy_horizon,
+        }
 
     def _survivor_action_specs(self):
         """(name, preconditions, delay, add facts) tuples for the gate fixpoint."""
