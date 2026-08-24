@@ -15,13 +15,17 @@ codebase being right:
 """
 
 import itertools
+from types import SimpleNamespace
 
 import pytest
 
 from comdp_plus_no_deadline.engines.exact_pattern_mdp import (
+    ExactPatternMDPHeuristic,
     Pattern,
     PatternOp,
+    PatternSolver,
     _conflict_table,
+    _execution_conflict_table,
     solve_pattern,
 )
 
@@ -105,6 +109,77 @@ def test_exclusive_outcomes_are_not_decorrelated():
     assert solve_pattern(pat, set(), 2) == pytest.approx(1.0)
 
 
+def test_partial_dispatch_groups_do_not_become_pdb_rows():
+    """Redundant starts disappear and useful groups jump to their boundary."""
+    pat = _pattern(
+        ("f1", "goal"), "goal",
+        [
+            ("a1", 1, (), [((), (), 1.0)], [(("f1",), (), 1.0)]),
+            ("a2", 2, (), [((), (), 1.0)], [(("goal",), (), 1.0)]),
+        ],
+    )
+    solver = PatternSolver(pat)
+    assert solve_pattern(pat, {"f1"}, 3, solver=solver) == pytest.approx(1.0)
+
+    at_r3 = [key for key in solver.memo if key[2] == 3]
+    assert at_r3 == [(1, (), 3)]
+    at_r2 = {(m, rho) for m, rho, r in solver.memo if r == 2}
+    assert at_r2 == {(1, ())}
+    assert all(all(op_index != 0 for op_index, _rem in rho) for _m, rho, _r in solver.memo)
+
+
+def test_late_noop_starts_do_not_create_queue_subsets():
+    """An identity start whose end misses the deadline is never dispatched."""
+    pat = _pattern(
+        ("goal",), "goal",
+        [
+            (f"slow_{i}", 5, (), [((), (), 1.0)], [(("goal",), (), 0.5), ((), (), 0.5)])
+            for i in range(12)
+        ],
+    )
+    solver = PatternSolver(pat)
+    assert solve_pattern(pat, set(), 4, solver=solver) == pytest.approx(0.0)
+    assert list(solver.memo) == [(0, (), 4)]
+
+
+def test_projected_identical_actions_use_a_remaining_time_multiset():
+    """Swapping indistinguishable ground-action identities is one PDB state."""
+    pat = _pattern(
+        ("goal",), "goal",
+        [
+            ("try_store_0", 2, (), [((), (), 1.0)],
+             [(("goal",), (), 0.5), ((), (), 0.5)]),
+            ("try_store_1", 2, (), [((), (), 1.0)],
+             [(("goal",), (), 0.5), ((), (), 0.5)]),
+        ],
+    )
+    solver = PatternSolver(pat)
+    assert solver.symmetry_classes == ((0, 1),)
+    assert solver._canonical_rho(((1, 2),)) == ((0, 2),)
+    assert solver._canonical_rho(((0, 1), (1, 2))) == ((0, 1), (1, 2))
+    assert solver._canonical_rho(((0, 2), (1, 1))) == ((0, 1), (1, 2))
+    assert solve_pattern(pat, set(), 2, solver=solver) == pytest.approx(0.75)
+
+
+def test_deadline_aligned_grid_keeps_useful_non_event_start():
+    """Start-only conditions do not make completion epochs alone sufficient.
+
+    C produces q at t=5. A must start at the unchanged-world time t=4 so its
+    delete of f lands at the deadline, after B has used f and q at t=5.
+    """
+    pat = _pattern(
+        ("f", "q", "goal"), "goal",
+        [
+            ("C", 5, (), [((), (), 1.0)], [(("q",), (), 1.0)]),
+            ("A", 2, ("f",), [((), (), 1.0)],
+             [(("goal",), ("f",), 0.5), ((), ("f",), 0.5)]),
+            ("B", 1, ("f", "q"), [((), (), 1.0)],
+             [(("goal",), (), 0.5), ((), (), 0.5)]),
+        ],
+    )
+    assert solve_pattern(pat, {"f"}, 6) == pytest.approx(0.75)
+
+
 # ---------------------------------------------------------------- deletes
 def test_consumable_caps_the_value_forever():
     """The pin/lockpick domain -- the whole point of leaving delete relaxation.
@@ -161,6 +236,28 @@ def test_contradictory_effects_may_not_overlap():
     )
     assert pat.conflicts[0] & (1 << 1), "setter/clearer must be mutex"
     assert solve_pattern(pat, set(), 3) == pytest.approx(1.0)
+
+
+def test_converted_execution_markers_preserve_static_mutex():
+    class Marker:
+        def __init__(self, name):
+            self.name = name
+
+        def is_fluent_exp(self):
+            return True
+
+        def fluent(self):
+            return SimpleNamespace(name="inExecution")
+
+    marker_a = Marker("a")
+    marker_b = Marker("b")
+    actions = [
+        SimpleNamespace(add_effects={marker_a}, neg_preconditions={marker_a}),
+        SimpleNamespace(add_effects={marker_b}, neg_preconditions={marker_a, marker_b}),
+    ]
+    table = _execution_conflict_table(actions)
+    assert table[0] == 1 << 1
+    assert table[1] == 1 << 0
 
 
 # ---------------------------------------------------------------- A2
@@ -244,6 +341,18 @@ def test_deterministic_matches_exhaustive_schedule_search(D):
 def test_goal_already_true_is_one():
     pat = _pattern(("goal",), "goal", [("x", 1, (), [((), (), 1.0)], [((), (), 1.0)])])
     assert solve_pattern(pat, {"goal"}, 0) == pytest.approx(1.0)
+
+
+def test_from_problem_keeps_only_true_initial_facts():
+    true = SimpleNamespace(bool_constant_value=lambda: True)
+    false = SimpleNamespace(bool_constant_value=lambda: False)
+    problem = SimpleNamespace(
+        initial_values={"initially_true": true, "initially_false": false},
+        goals={"goal"},
+        actions=[],
+    )
+    heuristic = ExactPatternMDPHeuristic.from_problem(problem)
+    assert heuristic._initial_facts == {"initially_true"}
 
 
 # ---------------------------------------------------------------- relevance

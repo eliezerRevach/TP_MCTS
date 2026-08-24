@@ -37,46 +37,51 @@ The model
 State ``(m, rho, r, g)``:
 
 * ``m``    -- bitmask of the pattern facts currently true
-* ``rho``  -- in-flight operations as ``(op, remaining)``. Only operations whose
-  END effects touch ``Phi`` need a slot: an operation already in flight has
-  landed its start effects, so if its end effects miss ``Phi`` there is nothing
-  left to remember.
+* ``rho``  -- in-flight operations as ``(op, remaining)``. A running operation
+  keeps its slot even when its end effects miss ``Phi`` because the slot is what
+  forbids an overlapping copy of the same ground action.
 * ``r``    -- remaining time to the deadline
 * ``g``    -- sticky "goal has held at some point" bit. This encodes ACHIEVEMENT
   ("goal reached before the deadline") rather than MAINTENANCE ("goal holds at
   the deadline"). With deletes inside ``Phi`` the two genuinely differ.
 
-Decisions are ``start(op)`` or ``wait``. ``wait`` advances to the next completion,
-so reachable times are exactly the forward epochs -- no explicit time grid is
-needed, the queue generates it. Starting an operation does not advance time, and
-several may be started at the same instant (eps-separated), which yields full
-concurrency without enumerating action *sets*.
+At a decision boundary, zero or more operations may be dispatched before time
+advances. Constructing that same-time dispatch group is a *local* calculation;
+its partial subsets are not pattern-database states. The persistent table only
+contains canonical boundary states after time has advanced, so equivalent
+groups meet at the same ``(m, rho, r)`` key.
+
+Time advances to the earliest required boundary. If an idle applicable action
+remains, the next duration-GCD boundary is retained so a policy may deliberately
+delay its start. If no action can be started before the world changes, time jumps
+directly to the next running completion. Thus the GCD bounds the step size when
+a decision is possible, but does not force a one-tick sweep between events.
 
 Why one backward pass suffices
 ------------------------------
-``wait`` strictly decreases ``r``; ``start`` strictly grows ``rho`` and leaves ``r``
-fixed. So the transition graph is a DAG layered by ``(r desc, |rho| asc)`` and the
-value function is computed by memoised recursion -- no value iteration, no policy
-iteration, no discount factor, no convergence test.
+Every persistent transition strictly decreases ``r``. Inside one boundary,
+local dispatch recursion strictly grows ``rho`` and is discarded after the best
+group has been evaluated. Both recursions are acyclic, so no value iteration,
+policy iteration, discount factor, or convergence test is needed.
 
 Admissibility, and the one thing that breaks it
 -----------------------------------------------
 ``V^Phi >= V*`` because relaxations (1)-(3) all widen the set of available
 policies, and a max over a superset of policies is an upper bound.
 
-The restriction that would BREAK it is temporal: shrinking the set of times at
-which actions may start removes policies and pushes the value DOWN. Forward
-epochs are safe here only because at-end conditions are dropped -- verified
-exhaustively (0 losses over 430 solvable instances of the required-concurrency
-family; forward-only loses 29/351 once at-end conditions are present, and the
-repair needs the DEADLINE as a backward seed, not just action epochs). If ``P_E``
-is ever modelled, ``wait``-generated epochs are no longer sufficient.
+The restriction that would BREAK it is temporal: shrinking the set of start
+times removes policies and pushes the value DOWN. Durations are integral in this
+prototype, so the exact model retains deadline-aligned duration-GCD boundaries
+whenever an idle action could still be started. Pure event jumps are used only
+when no such decision is possible before the next running completion. At-end or
+overall conditions remain outside this model.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from math import gcd
 from types import SimpleNamespace
 from typing import Dict, FrozenSet, Hashable, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
@@ -236,12 +241,14 @@ def _mask_of(facts: Iterable[Fact], index: Mapping[Fact, int]) -> int:
 # ---------------------------------------------------------------------------
 
 class PatternSolver:
-    """Memoised backward induction over ``(m, rho, r, g)`` for one pattern.
+    """Memoised backward induction over boundary states of one pattern.
 
-    ``memo`` IS the pattern database. Its keys ``(m, rho, r)`` are exactly the
-    abstract states, so a solver instance must be kept ALIVE across heuristic
-    calls -- build the table once, then every later query is a lookup plus
-    whatever few states its own start point reaches for the first time.
+    ``memo`` IS the pattern database. Its keys ``(m, rho, r)`` are canonical
+    states at which a new dispatch decision may be made. Partial same-time
+    action groups live only in a local cache and never enter ``memo``. A solver
+    instance must be kept ALIVE across heuristic calls -- build the table once,
+    then every later query is a lookup plus whatever few boundary states its own
+    start point reaches for the first time.
     Constructing a fresh solver per call throws the database away and pays the
     full DP again on every node, which is the difference between a pattern
     database and an exhaustive per-node search.
@@ -254,6 +261,16 @@ class PatternSolver:
         self.memo: Dict[Tuple, float] = {}
         self.in_progress: Set[Tuple] = set()
         self.truncated = False
+        self.dispatch_states_evaluated = 0
+        self.quantum = 0
+        for op in pattern.ops:
+            self.quantum = gcd(self.quantum, max(1, int(op.duration)))
+        self.quantum = max(1, self.quantum)
+        self.symmetry_classes = self._build_symmetry_classes()
+        self.add_masks = tuple(
+            self._outcome_add_mask(op.start_outcomes + op.end_outcomes)
+            for op in pattern.ops
+        )
         # NOT admissible. Collapses each op to one atomic transition consuming
         # d(a) time, so actions can never overlap. That removes policies, which
         # pushes the value DOWN and can put it below the truth: two d=10 ops
@@ -303,16 +320,77 @@ class PatternSolver:
     def _apply(self, m: int, add: int, dele: int) -> int:
         return (m & ~dele) | add
 
-    # NOTE: in-flight ops are never dropped, not even when their remaining
-    # duration exceeds ``r`` and their end effects can therefore never land.
-    # Two reasons, and the first is a correctness one:
-    #   * an op occupying a slot is what forbids restarting the same ground
-    #     action while it runs (paper footnote 5). Dropping it would wrongly
-    #     permit an overlapping copy.
-    #   * the termination measure is lexicographic ``(r desc, |rho| asc)``:
-    #     ``wait`` strictly decreases ``r``, ``start`` strictly grows ``rho``.
-    #     Any transition that left ``rho`` unchanged would close a cycle and the
-    #     recursion would fall through to its own re-entry guard.
+    @staticmethod
+    def _op_signature(op: PatternOp) -> Tuple:
+        """Projected behaviour used to identify exchangeable ground actions."""
+        return (
+            op.duration,
+            op.pre_mask,
+            op.start_outcomes,
+            op.end_outcomes,
+            op.touches_end,
+            op.footprint,
+        )
+
+    @staticmethod
+    def _outcome_add_mask(outcomes: Sequence[Tuple[int, int, float]]) -> int:
+        add_mask = 0
+        for add, _dele, _prob in outcomes:
+            add_mask |= add
+        return add_mask
+
+    def _build_symmetry_classes(self) -> Tuple[Tuple[int, ...], ...]:
+        """Find projected action identities that can be safely permuted.
+
+        Members must have identical projected transitions, must not conflict
+        with one another, and must have the same conflict relation to every
+        outside operation. A class of q actions remains able to run q copies;
+        only their unobservable names are quotiented out.
+        """
+        unused = set(range(len(self.p.ops)))
+        classes: List[Tuple[int, ...]] = []
+        while unused:
+            i = min(unused)
+            unused.remove(i)
+            block = [i]
+            for j in sorted(unused):
+                if self._op_signature(self.p.ops[i]) != self._op_signature(self.p.ops[j]):
+                    continue
+                if self.p.conflicts[i] >> j & 1:
+                    continue
+                equivalent = True
+                for k in range(len(self.p.ops)):
+                    if k == i or k == j:
+                        continue
+                    if bool(self.p.conflicts[i] >> k & 1) != bool(self.p.conflicts[j] >> k & 1):
+                        equivalent = False
+                        break
+                if equivalent:
+                    block.append(j)
+            for j in block[1:]:
+                unused.remove(j)
+            if len(block) > 1:
+                classes.append(tuple(block))
+        return tuple(classes)
+
+    def _canonical_rho(
+        self, rho: Tuple[Tuple[int, int], ...],
+    ) -> Tuple[Tuple[int, int], ...]:
+        """Canonicalise remaining-time multisets inside symmetry classes."""
+        if not self.symmetry_classes or not rho:
+            return tuple(sorted(rho))
+        remaining_by_op = dict(rho)
+        class_members = {i for cls in self.symmetry_classes for i in cls}
+        canonical = [(i, rem) for i, rem in rho if i not in class_members]
+        for cls in self.symmetry_classes:
+            remaining = sorted(remaining_by_op[i] for i in cls if i in remaining_by_op)
+            canonical.extend((i, rem) for i, rem in zip(cls, remaining))
+        return tuple(sorted(canonical))
+
+    # An operation already in flight is retained because its slot forbids an
+    # overlapping copy. That does not justify STARTING a projected no-op whose
+    # end lies beyond the deadline; _late_projected_noop removes that dominated
+    # dispatch before it can manufacture useless rho combinations.
 
     def _running_mask(self, rho: Tuple[Tuple[int, int], ...]) -> int:
         m = 0
@@ -320,12 +398,48 @@ class PatternSolver:
             m |= 1 << i
         return m
 
+    def _late_projected_noop(self, op: PatternOp, r: int) -> bool:
+        """Return true when starting ``op`` can only occupy its running slot."""
+        return op.duration > r and all(
+            add == 0 and dele == 0 for add, dele, _prob in op.start_outcomes
+        )
+
+    def _startable_indices(
+        self, m: int, rho: Tuple[Tuple[int, int], ...], r: int,
+    ) -> List[int]:
+        running = self._running_mask(rho)
+        startable: List[int] = []
+        for i, op in enumerate(self.p.ops):
+            if running >> i & 1:
+                continue
+            if m & op.pre_mask != op.pre_mask:
+                continue
+            if self.p.conflicts[i] & running:
+                continue
+            if self._late_projected_noop(op, r):
+                continue
+            # Preconditions and goals are positive-only, and the conflict table
+            # forbids an overlapping operation from deleting anything this op
+            # may add. If every possible add is already true, starting the op
+            # can only preserve or delete facts and occupy a slot. Waiting until
+            # a later boundary if one of those facts is deleted is never worse.
+            if self.add_masks[i] & ~m == 0:
+                continue
+            startable.append(i)
+        return startable
+
+    def _grid_delta(self, r: int) -> int:
+        """Next deadline-aligned duration-GCD boundary in remaining time."""
+        phase = r % self.quantum
+        return phase if phase else self.quantum
+
     # -- value -----------------------------------------------------------
     def value(self, m: int, rho: Tuple[Tuple[int, int], ...], r: int, g: bool) -> float:
         if g:
             return 1.0                              # goal banked; absorbing
         if r <= 0:
             return 0.0                              # deadline reached without it
+        rho = self._canonical_rho(rho)
         key = (m, rho, r)
         hit = self.memo.get(key)
         if hit is not None:
@@ -339,42 +453,83 @@ class PatternSolver:
             return 1.0
         self.in_progress.add(key)
 
-        best = 0.0
-        running = self._running_mask(rho)
-
-        # --- option 1: start an operation --------------------------------
-        for i, op in enumerate(self.p.ops):
-            if running >> i & 1:
-                continue                            # no overlapping copies (paper fn.5)
-            if m & op.pre_mask != op.pre_mask:
-                continue
-            if self.p.conflicts[i] & running:
-                continue                            # genuine mutex: contradictory effects
-            total = 0.0
-            for add, dele, prob in op.start_outcomes:
-                m2 = self._apply(m, add, dele)
-                g2 = (m2 & self.p.goal_mask) == self.p.goal_mask
-                if g2:
-                    total += prob
-                    continue
-                rho2 = tuple(sorted(rho + ((i, op.duration),)))
-                total += prob * self.value(m2, rho2, r, False)
-            if total > best:
-                best = total
-
-        # --- option 2: wait for the next completion -----------------------
-        if rho:
-            delta = min(k for _i, k in rho)
-            if delta <= r:
-                finishing = [i for i, k in rho if k == delta]
-                rest = tuple(sorted((i, k - delta) for i, k in rho if k != delta))
-                total = self._expand_completions(finishing, 0, m, rest, r - delta, 1.0)
-                if total > best:
-                    best = total
+        # Same-time group construction is deliberately local. Persisting its
+        # partial subsets is what made a four-fact NASA pattern fill the table
+        # with non-boundary queue configurations.
+        dispatch_memo: Dict[Tuple[int, Tuple[Tuple[int, int], ...]], float] = {}
+        best = self._dispatch_value(m, rho, r, dispatch_memo)
 
         self.in_progress.discard(key)
         self.memo[key] = best
         return best
+
+    def _dispatch_value(
+        self,
+        m: int,
+        rho: Tuple[Tuple[int, int], ...],
+        r: int,
+        local_memo: Dict[Tuple[int, Tuple[Tuple[int, int], ...]], float],
+    ) -> float:
+        """Optimise one same-time dispatch group without adding PDB rows."""
+        if (m & self.p.goal_mask) == self.p.goal_mask:
+            return 1.0
+        rho = self._canonical_rho(rho)
+        key = (m, rho)
+        hit = local_memo.get(key)
+        if hit is not None:
+            return hit
+        if len(local_memo) >= self.max_states:
+            self.truncated = True
+            return 1.0
+        self.dispatch_states_evaluated += 1
+
+        # Stop adding operations and advance to a canonical boundary.
+        best = self._advance_value(m, rho, r)
+
+        # Or add one more operation at this same time. Start outcomes are
+        # observed immediately, so later choices in the group may adapt to them.
+        for i in self._startable_indices(m, rho, r):
+            op = self.p.ops[i]
+            total = 0.0
+            for add, dele, prob in op.start_outcomes:
+                m2 = self._apply(m, add, dele)
+                if (m2 & self.p.goal_mask) == self.p.goal_mask:
+                    total += prob
+                    continue
+                rho2 = self._canonical_rho(rho + ((i, op.duration),))
+                total += prob * self._dispatch_value(m2, rho2, r, local_memo)
+            if total > best:
+                best = total
+
+        local_memo[key] = best
+        return best
+
+    def _advance_value(
+        self, m: int, rho: Tuple[Tuple[int, int], ...], r: int,
+    ) -> float:
+        """Advance to the next completion or required decision-grid boundary."""
+        if r <= 0:
+            return 0.0
+        next_completion = min((k for _i, k in rho), default=None)
+        has_delayed_choice = bool(self._startable_indices(m, rho, r))
+
+        if has_delayed_choice:
+            delta = self._grid_delta(r)
+            if next_completion is not None:
+                delta = min(delta, next_completion)
+        elif next_completion is not None:
+            delta = next_completion
+        else:
+            return 0.0
+
+        if delta <= 0 or delta > r:
+            return 0.0
+        finishing = [i for i, k in rho if k == delta]
+        rest = self._canonical_rho(tuple((i, k - delta) for i, k in rho if k != delta))
+        r2 = r - delta
+        if finishing:
+            return self._expand_completions(finishing, 0, m, rest, r2, 1.0)
+        return self.value(m, rest, r2, False)
 
     def _expand_completions(
         self, finishing: List[int], idx: int, m: int,
@@ -495,6 +650,19 @@ def _add_mask(op: PatternOp) -> int:
     return m
 
 
+def _relevant_op_indices(ops: Sequence[PatternOp], goal_mask: int) -> List[int]:
+    adds = [_add_mask(op) for op in ops]
+    relevant = goal_mask
+    changed = True
+    while changed:
+        changed = False
+        for i, op in enumerate(ops):
+            if adds[i] & relevant and op.pre_mask & ~relevant:
+                relevant |= op.pre_mask
+                changed = True
+    return [i for i, op in enumerate(ops) if adds[i] & relevant]
+
+
 def relevant_ops(ops: Sequence[PatternOp], goal_mask: int) -> List[PatternOp]:
     """Backward regression from the goal -- keep only ops that can contribute.
 
@@ -518,16 +686,7 @@ def relevant_ops(ops: Sequence[PatternOp], goal_mask: int) -> List[PatternOp]:
     set, so pruning ops collapses the state space multiplicatively rather than
     shaving it.
     """
-    adds = [_add_mask(op) for op in ops]
-    relevant = goal_mask
-    changed = True
-    while changed:
-        changed = False
-        for i, op in enumerate(ops):
-            if adds[i] & relevant and op.pre_mask & ~relevant:
-                relevant |= op.pre_mask
-                changed = True
-    return [op for i, op in enumerate(ops) if adds[i] & relevant]
+    return [ops[i] for i in _relevant_op_indices(ops, goal_mask)]
 
 
 def _conflict_table(ops: Sequence[PatternOp]) -> Tuple[int, ...]:
@@ -553,6 +712,38 @@ def _conflict_table(ops: Sequence[PatternOp]) -> Tuple[int, ...]:
             if i != j and ((adds[i] & dels[j]) or (dels[i] & adds[j])):
                 bits |= 1 << j
         table.append(bits)
+    return tuple(table)
+
+
+def _execution_conflict_table(start_actions: Sequence[object]) -> Tuple[int, ...]:
+    """Static overlap mutexes encoded by converted ``inExecution`` facts.
+
+    ``convert_problem`` adds an action's execution marker at start and places
+    that marker in every action that may not overlap it as a negative start
+    precondition. These are genuine concrete-domain mutexes, not assumptions
+    about an untracked resource state, so retaining them in a projection is an
+    exact tightening and preserves the optimistic upper bound.
+    """
+    own_markers: List[Set[Fact]] = []
+    blocked_markers: List[Set[Fact]] = []
+    for action in start_actions:
+        markers = set()
+        for fact in getattr(action, "add_effects", set()) or set():
+            try:
+                if fact.is_fluent_exp() and fact.fluent().name == "inExecution":
+                    markers.add(fact)
+            except Exception:
+                continue
+        own_markers.append(markers)
+        blocked_markers.append(set(getattr(action, "neg_preconditions", set()) or set()))
+
+    table = [0] * len(start_actions)
+    for i in range(len(start_actions)):
+        for j in range(i + 1, len(start_actions)):
+            if ((own_markers[i] & blocked_markers[j])
+                    or (own_markers[j] & blocked_markers[i])):
+                table[i] |= 1 << j
+                table[j] |= 1 << i
     return tuple(table)
 
 
@@ -605,23 +796,29 @@ def build_pattern(
     index = {f: i for i, f in enumerate(facts)}
 
     ops: List[PatternOp] = []
+    source_starts: List[object] = []
     for sa, ea, dur, pre, eff in durative_ops:
         if not (eff & fact_set):
             continue                                  # no-op on Phi
         op = _op_from_action(sa, index, fact_set, probe_universe, dur, pre, ea)
         if op is not None:
             ops.append(op)
+            source_starts.append(sa)
 
     goal_mask = _mask_of({seed_goal}, index)
-    ops = relevant_ops(ops, goal_mask)
+    relevant = _relevant_op_indices(ops, goal_mask)
+    ops = [ops[i] for i in relevant]
+    source_starts = [source_starts[i] for i in relevant]
     if not ops:
         return None
+    effect_conflicts = _conflict_table(ops)
+    execution_conflicts = _execution_conflict_table(source_starts)
     return Pattern(
         facts=facts,
         seed_goal=seed_goal,
         ops=tuple(ops),
         goal_mask=goal_mask,
-        conflicts=_conflict_table(ops),
+        conflicts=tuple(a | b for a, b in zip(effect_conflicts, execution_conflicts)),
     )
 
 
@@ -661,7 +858,14 @@ class ExactPatternMDPHeuristic:
 
     @classmethod
     def from_problem(cls, problem) -> "ExactPatternMDPHeuristic":
-        initial = set(getattr(problem, "initial_values", {}).keys())
+        initial = set()
+        for fact, value in getattr(problem, "initial_values", {}).items():
+            try:
+                if value.bool_constant_value():
+                    initial.add(fact)
+            except Exception:
+                if bool(value):
+                    initial.add(fact)
         goals = set(getattr(problem, "goals", set()))
         return cls(getattr(problem, "actions", []), goal_facts=goals, initial_facts=initial)
 
