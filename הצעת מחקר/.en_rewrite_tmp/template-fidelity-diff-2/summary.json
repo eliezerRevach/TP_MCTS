@@ -1,0 +1,13 @@
+{
+  "a_docx": "C:\\Users\\eliezer\\Documents\\hw2_exam\\TP_MCTS\\\u05d4\u05e6\u05e2\u05ea \u05de\u05d7\u05e7\u05e8\\\u05d4\u05e6\u05e2\u05ea_\u05de\u05d7\u05e7\u05e8_PDB_\u05d0\u05dc\u05d9\u05e2\u05d6\u05e8_\u05e8\u05d5\u05d5\u05d7.docx",
+  "b_docx": "C:\\Users\\eliezer\\Documents\\hw2_exam\\TP_MCTS\\\u05d4\u05e6\u05e2\u05ea \u05de\u05d7\u05e7\u05e8\\Research_Proposal_PDB_Eliezer_Revach_EN.docx",
+  "pages_a": 4,
+  "pages_b": 4,
+  "changed_pages": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "num_changed_pages": 4
+}

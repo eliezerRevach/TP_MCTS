@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2463b3"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#15803d"/>
+    </marker>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#6d28d9"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Arial, sans-serif; fill: #111827; }
+      .cluster-title { font: 700 24px Arial, sans-serif; fill: #1e3a5f; }
+      .node-text { font: 700 23px Arial, sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .edge-label { font: 600 19px Arial, sans-serif; fill: #334155; text-anchor: middle; }
+      .small { font: 500 17px Arial, sans-serif; fill: #334155; }
+      .blue-node { fill: #eff6ff; stroke: #2463b3; stroke-width: 3; }
+      .fact-node { fill: #f0fdf4; stroke: #15803d; stroke-width: 3; }
+      .interval-node { fill: #faf5ff; stroke: #7e22ce; stroke-width: 3; }
+      .cluster { fill: #f8fbff; stroke: #bfd3ea; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="800" y="52" class="title" text-anchor="middle">Temporal Action–Fact Interaction Graph</text>
+
+  <!-- Action a1 -->
+  <rect x="45" y="100" width="650" height="205" rx="18" class="cluster"/>
+  <text x="75" y="137" class="cluster-title">Action a1</text>
+  <rect x="105" y="175" width="185" height="72" rx="13" class="blue-node"/>
+  <text x="197" y="212" class="node-text">S(a1)</text>
+  <rect x="435" y="175" width="185" height="72" rx="13" class="blue-node"/>
+  <text x="527" y="212" class="node-text">E(a1)</text>
+  <line x1="290" y1="211" x2="435" y2="211" stroke="#2463b3" stroke-width="4" marker-end="url(#arrow-blue)"/>
+  <text x="362" y="190" class="edge-label">d(a1)</text>
+  <text x="362" y="265" class="small" text-anchor="middle">duration edge weight</text>
+
+  <!-- f1 and action a2 -->
+  <circle cx="805" cy="211" r="49" class="fact-node"/>
+  <text x="805" y="212" class="node-text">f1</text>
+  <line x1="620" y1="211" x2="756" y2="211" stroke="#15803d" stroke-width="4" marker-end="url(#arrow-green)"/>
+  <text x="688" y="188" class="edge-label" fill="#15803d">+f1 / end effect</text>
+
+  <rect x="930" y="100" width="625" height="205" rx="18" class="cluster"/>
+  <text x="960" y="137" class="cluster-title">Action a2</text>
+  <rect x="985" y="175" width="185" height="72" rx="13" class="blue-node"/>
+  <text x="1077" y="212" class="node-text">S(a2)</text>
+  <rect x="1310" y="175" width="185" height="72" rx="13" class="blue-node"/>
+  <text x="1402" y="212" class="node-text">E(a2)</text>
+  <line x1="1170" y1="211" x2="1310" y2="211" stroke="#2463b3" stroke-width="4" marker-end="url(#arrow-blue)"/>
+  <text x="1240" y="190" class="edge-label">d(a2)</text>
+  <line x1="854" y1="211" x2="985" y2="211" stroke="#6d28d9" stroke-width="4" marker-end="url(#arrow-purple)"/>
+  <text x="919" y="188" class="edge-label" fill="#6d28d9">start-pre</text>
+
+  <!-- Temporary fact f2 -->
+  <circle cx="1135" cy="425" r="68" class="fact-node"/>
+  <text x="1135" y="410" class="node-text">f2</text>
+  <text x="1135" y="443" class="small" text-anchor="middle">temporary fact</text>
+  <path d="M1077 247 L1117 358" fill="none" stroke="#15803d" stroke-width="4" marker-end="url(#arrow-green)"/>
+  <text x="1045" y="326" class="edge-label" fill="#15803d">+f2 / start effect</text>
+  <path d="M1402 247 C1395 355,1295 419,1203 425" fill="none" stroke="#dc2626" stroke-width="4" marker-end="url(#arrow-red)"/>
+  <text x="1372" y="350" class="edge-label" fill="#dc2626">−f2 / end effect</text>
+
+  <!-- Legend -->
+  <rect x="65" y="350" width="420" height="190" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="90" y="386" class="cluster-title">Edge types</text>
+  <line x1="95" y1="420" x2="185" y2="420" stroke="#2463b3" stroke-width="4" marker-end="url(#arrow-blue)"/>
+  <text x="205" y="427" class="small">duration constraint / weight</text>
+  <line x1="95" y1="458" x2="185" y2="458" stroke="#15803d" stroke-width="4" marker-end="url(#arrow-green)"/>
+  <text x="205" y="465" class="small">add effect</text>
+  <line x1="95" y1="496" x2="185" y2="496" stroke="#6d28d9" stroke-width="4" marker-end="url(#arrow-purple)"/>
+  <text x="205" y="503" class="small">condition / dependency</text>
+  <line x1="95" y1="524" x2="185" y2="524" stroke="#dc2626" stroke-width="4" marker-end="url(#arrow-red)"/>
+  <text x="205" y="531" class="small">delete / threat</text>
+
+  <!-- Action a3 -->
+  <rect x="270" y="585" width="1080" height="250" rx="18" class="cluster"/>
+  <text x="300" y="622" class="cluster-title">Action a3</text>
+  <rect x="355" y="700" width="185" height="72" rx="13" class="blue-node"/>
+  <text x="447" y="737" class="node-text">S(a3)</text>
+  <path d="M710 736 L790 680 L870 736 L790 792 Z" class="interval-node"/>
+  <text x="790" y="727" class="node-text">R(a3)</text>
+  <text x="790" y="758" class="small" text-anchor="middle">running interval</text>
+  <rect x="1040" y="700" width="185" height="72" rx="13" class="blue-node"/>
+  <text x="1132" y="737" class="node-text">E(a3)</text>
+
+  <!-- Structural path and weighted duration edge -->
+  <line x1="540" y1="736" x2="710" y2="736" stroke="#64748b" stroke-width="2.5" stroke-dasharray="8 7" marker-end="url(#arrow-gray)"/>
+  <line x1="870" y1="736" x2="1040" y2="736" stroke="#64748b" stroke-width="2.5" stroke-dasharray="8 7" marker-end="url(#arrow-gray)"/>
+  <path d="M540 700 C680 620,900 620,1040 700" fill="none" stroke="#2463b3" stroke-width="4" marker-end="url(#arrow-blue)"/>
+  <text x="790" y="640" class="edge-label">d(a3)</text>
+  <text x="790" y="665" class="small" text-anchor="middle">t(E(a3)) − t(S(a3)) = d(a3)</text>
+
+  <!-- f2 conditions of a3 -->
+  <path d="M1081 461 C875 500,600 570,470 700" fill="none" stroke="#6d28d9" stroke-width="3.5" marker-end="url(#arrow-purple)"/>
+  <text x="680" y="544" class="edge-label" fill="#6d28d9">start-pre</text>
+  <path d="M1100 484 C1020 555,890 620,815 681" fill="none" stroke="#6d28d9" stroke-width="3.5" marker-end="url(#arrow-purple)"/>
+  <text x="960" y="582" class="edge-label" fill="#6d28d9">overall-pre</text>
+  <path d="M1150 491 C1175 555,1165 625,1140 700" fill="none" stroke="#6d28d9" stroke-width="3.5" marker-end="url(#arrow-purple)"/>
+  <text x="1210" y="600" class="edge-label" fill="#6d28d9">end-pre</text>
+
+  <!-- Derived scheduling boundary -->
+  <rect x="1260" y="390" width="285" height="105" rx="14" fill="#fff7ed" stroke="#f97316" stroke-width="2.5"/>
+  <text x="1402" y="424" class="small" text-anchor="middle" font-weight="700">Derived candidate boundary</text>
+  <text x="1402" y="459" class="edge-label" fill="#c2410c">t(S(a3)) = t(E(a2)) − d(a3)</text>
+  <text x="1402" y="483" class="small" text-anchor="middle">when a3 must finish by E(a2)</text>
+</svg>

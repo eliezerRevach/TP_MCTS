@@ -39,6 +39,10 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "33": "baseline_admissible_survivor_pdb",
         "34": "survivor_pdb_pure",
         "35": "survivor_pdb_lazy",
+        "36": "survivor_pdb_loop",
+        "37": "survivor_pdb_loop_direct",
+        "38": "survivor_pdb_lazy_direct",
+        "39": "survivor_pdb_pure_direct",
         "baseline": "baseline",
         "baseline_forward": "baseline_forward",
         "baseline_admissible": "baseline_admissible",
@@ -51,6 +55,10 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
         "baseline_admissible_survivor_pdb": "baseline_admissible_survivor_pdb",
         "survivor_pdb_pure": "survivor_pdb_pure",
         "survivor_pdb_lazy": "survivor_pdb_lazy",
+        "survivor_pdb_loop": "survivor_pdb_loop",
+        "survivor_pdb_loop_direct": "survivor_pdb_loop_direct",
+        "survivor_pdb_lazy_direct": "survivor_pdb_lazy_direct",
+        "survivor_pdb_pure_direct": "survivor_pdb_pure_direct",
         "baseline_pdb": "baseline_pdb",
         "atom_half_split": "atom_half_split",
         "atom_backtrack_exact": "atom_backtrack_exact",
@@ -108,7 +116,11 @@ def _parse_temporal_heuristic_strategy(value: str) -> str:
             "32|baseline_forward, "
             "33|baseline_admissible_survivor_pdb, "
             "34|survivor_pdb_pure, "
-            "35|survivor_pdb_lazy"
+            "35|survivor_pdb_lazy, "
+            "36|survivor_pdb_loop, "
+            "37|survivor_pdb_loop_direct, "
+            "38|survivor_pdb_lazy_direct, "
+            "39|survivor_pdb_pure_direct"
         )
     return aliases[normalized]
 

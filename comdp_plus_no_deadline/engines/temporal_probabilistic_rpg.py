@@ -36,6 +36,9 @@ from comdp_plus_no_deadline.engines.survivor_pdb import (
     gates_for_pattern as survivor_gates_for_pattern,
     solve_survivor_pattern,
 )
+from comdp_plus_no_deadline.engines.survivor_pdb_loop import (
+    solve_survivor_loop_pattern,
+)
 from comdp_plus_no_deadline.engines.admissible_temporal_rpg import (
     admissible_and_support,
     union_bound_cumulative_update,
@@ -78,6 +81,32 @@ from comdp_plus_no_deadline.engines.path_mutex import (
     map_and_merge,
 )
 
+
+# ---------------------------------------------------------------------------
+# Strategies that are NOT the PTRPG.
+#
+# The PTRPG is one heuristic: a per-fact, per-layer DP whose goal score is the
+# INDEPENDENCE PRODUCT of the goal marginals. The pattern/PDB family is a
+# different heuristic that happens to live in this file; it computes its own
+# value and should hand that value to TP-MCTS directly.
+#
+# Routing it through the PTRPG's scorer re-imposes the product at the very last
+# step, which is exactly the assumption the joint distribution exists to remove
+# -- and a product of upper bounds is NOT an upper bound on a conjunction when
+# the goals correlate. ``min`` is:
+#
+#     min(U(A), U(B))  >=  min(P(A), P(B))  >=  P(A and B)
+#
+# The "_direct" strategies are the same propagation with that fix: the value the
+# pattern computed, aggregated soundly, straight to TP-MCTS. They are the seam
+# where these heuristics should eventually be split out of this file into their
+# own modules -- until then this is one lookup and one aggregation, not a
+# rewrite.
+DIRECT_VALUE_BASE_STRATEGY: Dict[str, str] = {
+    "survivor_pdb_pure_direct": "survivor_pdb_pure",
+    "survivor_pdb_lazy_direct": "survivor_pdb_lazy",
+    "survivor_pdb_loop_direct": "survivor_pdb_loop",
+}
 
 Fact = Hashable
 
@@ -461,6 +490,31 @@ class TemporalProbabilisticRPGHeuristic:
         self._survivor_pdb_lazy_hits: int = 0
         self._survivor_pdb_lazy_misses: int = 0
         self._survivor_pdb_lazy_sweeps: int = 0
+        # ---- survivor_pdb_loop -------------------------------------------
+        # ``survivor_pdb_lazy`` with the phase-augmented ("time loop") solve:
+        # an achiever of duration d completes at most once every d layers
+        # instead of drawing a fresh coin at every layer. Same patterns, same
+        # gates, same horizon-independent cache; only the sweep differs, so the
+        # values are the lazy ones minus the re-execution optimism.
+        self._survivor_pdb_loop_memo: Dict[Tuple, Dict] = {}
+        self._survivor_pdb_loop_pattern_cache: Dict[frozenset, List] = {}
+        self._survivor_pdb_loop_horizon: int = 0
+        self._survivor_pdb_loop_hits: int = 0
+        self._survivor_pdb_loop_misses: int = 0
+        self._survivor_pdb_loop_sweeps: int = 0
+        # Restrict the sweep to the interest points T (v18 section 1) instead of
+        # every integer layer. Exact within the pattern's model (no completion
+        # lands strictly between two points of T) and cheaper; off by default so
+        # loop differs from lazy in exactly one mechanism.
+        self._survivor_pdb_loop_interest_points: bool = bool(
+            _env_int("TP_MCTS_SURVIVOR_LOOP_INTEREST_POINTS", 0)
+        )
+        # Instances of one grounded action allowed to overlap in time. 1 is the
+        # semantics of this codebase (no self-overlap); raising it re-adds
+        # exactly that many extra completions per step.
+        self._survivor_pdb_loop_concurrency: int = max(
+            1, _env_int("TP_MCTS_SURVIVOR_LOOP_CONCURRENCY", 1)
+        )
         # Marginal-consistent LP OR-layer bound (strategy "baseline_admissible_lp").
         # ``max_local_facts`` caps the 2^|U| world enumeration; above it the layer
         # falls back to the union bound. ``value_mode`` is "union" (safe) or
@@ -614,6 +668,10 @@ class TemporalProbabilisticRPGHeuristic:
         state_sig = frozenset(state_facts)
         start_layer = max(0, int(math.floor(start_time)))
         chosen_strategy = self._normalize_strategy(strategy)
+        # A "_direct" strategy PROPAGATES exactly like its base -- only the goal
+        # aggregation differs (see DIRECT_VALUE_BASE_STRATEGY), so collapse it
+        # here and let the two share one propagation cache.
+        chosen_strategy = DIRECT_VALUE_BASE_STRATEGY.get(chosen_strategy, chosen_strategy)
         query_key: Tuple = (state_sig, int(fixed_depth), start_layer, chosen_strategy)
         if chosen_strategy in (
             "atom_backtrack_exact",
@@ -765,6 +823,16 @@ class TemporalProbabilisticRPGHeuristic:
             return result
         if chosen_strategy == "survivor_pdb_lazy":
             result = self._heuristic_propagate_survivor_pdb_lazy(
+                state=state,
+                goal_facts=goal_facts,
+                fixed_depth=fixed_depth,
+                start_time=start_time,
+                debug=debug,
+            )
+            self._query_cache[query_key] = result
+            return result
+        if chosen_strategy == "survivor_pdb_loop":
+            result = self._heuristic_propagate_survivor_pdb_loop(
                 state=state,
                 goal_facts=goal_facts,
                 fixed_depth=fixed_depth,
@@ -1040,6 +1108,13 @@ class TemporalProbabilisticRPGHeuristic:
         resolution_forced_minimum: bool = False,
         resolution_reference_t: Optional[int] = None,
     ):
+        # NOT THE PTRPG: this heuristic computed its own value, so hand that
+        # value to the caller instead of re-deriving one with the PTRPG's
+        # independence product. Overrides whatever aggregation was requested
+        # (including TP_MCTS_HEURISTIC_AGGREGATION) -- the product is unsound
+        # for a conjunction of correlated goals, so it is not offered here.
+        if self._normalize_strategy(strategy) in DIRECT_VALUE_BASE_STRATEGY:
+            aggregation = "min"
         result = self.heuristic_propagate(
             state=state,
             goal_facts=goal_facts,
@@ -1528,6 +1603,10 @@ class TemporalProbabilisticRPGHeuristic:
             "baseline_admissible_survivor_pdb",
             "survivor_pdb_pure",
             "survivor_pdb_lazy",
+            "survivor_pdb_loop",
+            "survivor_pdb_pure_direct",
+            "survivor_pdb_lazy_direct",
+            "survivor_pdb_loop_direct",
             "baseline_pdb",
             "baseline_cached",
             "baseline_survival",
@@ -1545,7 +1624,7 @@ class TemporalProbabilisticRPGHeuristic:
         if value not in valid:
             raise ValueError(
                 f"Unknown temporal heuristic strategy: {strategy!r}. "
-                "Supported strategies: baseline, baseline_admissible, baseline_admissible_resolution, baseline_admissible_resolution_forward, baseline_admissible_lp, baseline_admissible_kmutex, baseline_admissible_paths, baseline_admissible_survivor_pdb, survivor_pdb_pure, survivor_pdb_lazy, baseline_pdb, baseline_cached, baseline_survival, "
+                "Supported strategies: baseline, baseline_admissible, baseline_admissible_resolution, baseline_admissible_resolution_forward, baseline_admissible_lp, baseline_admissible_kmutex, baseline_admissible_paths, baseline_admissible_survivor_pdb, survivor_pdb_pure, survivor_pdb_lazy, survivor_pdb_loop, survivor_pdb_pure_direct, survivor_pdb_lazy_direct, survivor_pdb_loop_direct, baseline_pdb, baseline_cached, baseline_survival, "
                 "baseline_survival_meanvar, baseline_survival_and_gamma, "
                 "baseline_survival_resolution, "
                 "atom_half_split, "
@@ -2100,6 +2179,7 @@ class TemporalProbabilisticRPGHeuristic:
         state_facts: Set[Fact],
         goal_facts: Sequence[Fact],
         horizon: int,
+        cache: Optional[Dict[frozenset, List]] = None,
     ) -> List:
         """Pattern structures for the lazy strategy, cached on the GOALS alone.
 
@@ -2117,7 +2197,14 @@ class TemporalProbabilisticRPGHeuristic:
         if not targets:
             return []
         key = frozenset(targets)
-        cached = self._survivor_pdb_lazy_pattern_cache.get(key)
+        # Each strategy owns its cache. Sharing one is not safe: the solve memos
+        # are keyed on ``id(pattern)``, so a strategy clearing the shared cache
+        # frees pattern objects whose ids another strategy's memo still holds —
+        # and CPython reuses ids, which would silently serve one pattern's
+        # curves for another.
+        if cache is None:
+            cache = self._survivor_pdb_lazy_pattern_cache
+        cached = cache.get(key)
         if cached is not None:
             return cached
 
@@ -2168,7 +2255,7 @@ class TemporalProbabilisticRPGHeuristic:
                 or min(len(targets), _SURVIVOR_PDB_PATTERN_HARD_CAP)
             ),
         )
-        self._survivor_pdb_lazy_pattern_cache[key] = patterns
+        cache[key] = patterns
         return patterns
 
     def _heuristic_propagate_survivor_pdb_lazy(
@@ -2332,6 +2419,158 @@ class TemporalProbabilisticRPGHeuristic:
                 start_layer=max(0, int(math.floor(start_time))),
             ),
         )
+
+    def _heuristic_propagate_survivor_pdb_loop(
+        self,
+        state,
+        goal_facts: Optional[Iterable[Fact]],
+        fixed_depth: int,
+        start_time: float,
+        debug: bool,
+    ) -> TemporalPropagationResult:
+        """``survivor_pdb_lazy`` with the one-instance-at-a-time TIME LOOP.
+
+        Identical in every respect except the pattern solve: same patterns
+        (``_survivor_pdb_lazy_patterns``), same delete-relaxed gates, same
+        horizon-independent memo key. The solve is
+        ``solve_survivor_loop_pattern`` instead of ``solve_survivor_pattern``,
+        which gives every achiever a PHASE and lets it complete only
+        ``n(a, Delta) = floor((c(a) + Delta) / d(a))`` times per step.
+
+        Why that matters. ``solve_survivor_pattern`` re-fires every applicable
+        achiever at EVERY layer, so an action of duration ``d`` draws ``d``
+        coins during the single execution it is actually running. Across a
+        horizon ``H`` it draws ``H`` times where at most ``H / d`` executions
+        can finish, and the inflation grows with the deadline — the same
+        saturation that flattens the estimate across MCTS layers. The phase
+        counter caps the draws at the number of executions that can physically
+        complete, so the curve rises at the rate the durations allow.
+
+        Strictly tighter and still ADMISSIBLE: the phase only removes
+        completions no single-instance execution could have made (see the module
+        docstring for the two-anchor argument), and the bounded-state fallback
+        forgets counters, which restores the old fire-every-layer behaviour.
+        Pointwise ``loop <= lazy``, so it is safe wherever lazy was.
+
+        Cost: the state is ``(mask, phases)`` rather than ``(mask, ages)``, and
+        only achievers with ``duration > 1`` carry a counter — a unit-duration
+        domain pays nothing and returns exactly the lazy numbers.
+        """
+        state_facts = _extract_state_facts(state)
+        depth = max(0, int(fixed_depth))
+        targets = list(goal_facts) if goal_facts is not None else list(self._goal_facts)
+
+        # Same prefix argument as lazy: a sweep to horizon H contains every
+        # shorter horizon as a literal prefix, so grow the shared horizon once
+        # and answer shallower queries by column lookup.
+        if depth > self._survivor_pdb_loop_horizon:
+            self._survivor_pdb_loop_horizon = depth
+            self._survivor_pdb_loop_memo.clear()
+            self._survivor_pdb_loop_pattern_cache.clear()
+        horizon = self._survivor_pdb_loop_horizon
+
+        patterns = self._survivor_pdb_lazy_patterns(
+            state_facts=state_facts,
+            goal_facts=targets,
+            horizon=horizon,
+            cache=self._survivor_pdb_loop_pattern_cache,
+        )
+        if not patterns:
+            return self._heuristic_propagate_baseline_admissible(
+                state=state, fixed_depth=depth, start_time=start_time, debug=debug
+            )
+
+        earliest = compute_survivor_earliest_times(
+            set(state_facts), self._survivor_action_specs(), horizon
+        )
+        action_preconditions = {
+            model.name: model.preconditions for model in self._action_models
+        }
+        action_delays = {
+            model.name: model.effect_delay_steps for model in self._action_models
+        }
+
+        # "interest" lets the solver build T from each pattern's own durations
+        # AND its resolved gates, which is what makes the restriction exact.
+        timestamps = "interest" if self._survivor_pdb_loop_interest_points else None
+
+        curves: Dict[Fact, List[float]] = {}
+        for pattern in patterns:
+            gates = survivor_gates_for_pattern(
+                pattern, earliest, action_preconditions, action_delays, horizon
+            )
+            projection = frozenset(f for f in pattern.facts if f in state_facts)
+            memo_key = (
+                id(pattern),
+                projection,
+                tuple(sorted((k, v) for k, v in gates.items())),
+            )
+            solved = self._survivor_pdb_loop_memo.get(memo_key)
+            if solved is None:
+                self._survivor_pdb_loop_misses += 1
+                self._survivor_pdb_loop_sweeps += 1
+                solved = solve_survivor_loop_pattern(
+                    pattern,
+                    set(projection),
+                    horizon,
+                    max_states=self._survivor_pdb_max_states,
+                    gates=gates,
+                    timestamps=timestamps,
+                    concurrency=self._survivor_pdb_loop_concurrency,
+                )
+                if len(self._survivor_pdb_loop_memo) < 20000:
+                    self._survivor_pdb_loop_memo[memo_key] = solved
+            else:
+                self._survivor_pdb_loop_hits += 1
+            for fact, curve in solved.items():
+                existing = curves.get(fact)
+                curves[fact] = (
+                    curve if existing is None
+                    else [min(a, b) for a, b in zip(existing, curve)]
+                )
+
+        probabilities_by_layer: Dict[int, Dict[Fact, float]] = {
+            layer: {} for layer in range(depth + 1)
+        }
+        for fact, curve in curves.items():
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer][fact] = curve[layer]
+        for fact in state_facts:
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer].setdefault(fact, 1.0)
+        # Uncovered goals: no pattern bounds them, so 1.0 is the only safe value.
+        for goal in targets:
+            for layer in range(depth + 1):
+                probabilities_by_layer[layer].setdefault(goal, 1.0)
+
+        return TemporalPropagationResult(
+            probabilities_by_layer=probabilities_by_layer,
+            depth_used=depth,
+            traces=[],
+            cache_hit=False,
+            fact_cache_hits=self._survivor_pdb_loop_hits,
+            action_cache_hits=0,
+            action_support_by_layer={},
+            cached_table=CachedPTRPGTable(
+                probabilities_by_layer={
+                    layer: dict(values)
+                    for layer, values in probabilities_by_layer.items()
+                },
+                state_facts=frozenset(state_facts),
+                depth_used=depth,
+                start_layer=max(0, int(math.floor(start_time))),
+            ),
+        )
+
+    def survivor_pdb_loop_stats(self) -> Dict[str, int]:
+        """Cache telemetry for ``survivor_pdb_loop`` (hits, misses, sweeps)."""
+        return {
+            "hits": self._survivor_pdb_loop_hits,
+            "misses": self._survivor_pdb_loop_misses,
+            "sweeps": self._survivor_pdb_loop_sweeps,
+            "entries": len(self._survivor_pdb_loop_memo),
+            "horizon": self._survivor_pdb_loop_horizon,
+        }
 
     def survivor_pdb_lazy_stats(self) -> Dict[str, int]:
         """Cache telemetry for ``survivor_pdb_lazy`` (hits, misses, sweeps)."""

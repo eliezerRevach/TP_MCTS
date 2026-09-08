@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="650" viewBox="0 0 1500 650">
+  <defs>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,7 L10,3.5 z" fill="#1f2937"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Arial, sans-serif; fill: #111827; }
+      .math { font: 500 23px Arial, sans-serif; fill: #1f2937; }
+      .node { stroke-width: 3; }
+      .action { fill: #eaf3ff; stroke: #2563ad; }
+      .fact { fill: #ecfdf3; stroke: #16803c; }
+      .node-text { font: 700 27px Arial, sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .edge { fill: none; stroke: #1f2937; stroke-width: 4; marker-end: url(#arrow); }
+      .weight-box { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; }
+      .weight { font: 700 20px Arial, sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .note { font: 500 20px Arial, sans-serif; fill: #334155; }
+      .legend { font: 600 19px Arial, sans-serif; fill: #334155; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="650" fill="#ffffff"/>
+  <text x="750" y="50" class="title" text-anchor="middle">Directed Weighted Action–Fact Graph</text>
+
+  <text x="90" y="105" class="math">G = (V, E, w)</text>
+  <text x="90" y="143" class="math">V = {a1, f1, a2, f2, a3, g}</text>
+  <text x="90" y="181" class="math">E = {(a1,f1), (f1,a2), (a2,f2), (f2,a3), (a3,g)}</text>
+
+  <!-- One ordinary directed path -->
+  <circle cx="125" cy="350" r="58" class="node action"/>
+  <text x="125" y="352" class="node-text">a1</text>
+
+  <circle cx="375" cy="350" r="58" class="node fact"/>
+  <text x="375" y="352" class="node-text">f1</text>
+
+  <circle cx="625" cy="350" r="58" class="node action"/>
+  <text x="625" y="352" class="node-text">a2</text>
+
+  <circle cx="875" cy="350" r="58" class="node fact"/>
+  <text x="875" y="352" class="node-text">f2</text>
+
+  <circle cx="1125" cy="350" r="58" class="node action"/>
+  <text x="1125" y="352" class="node-text">a3</text>
+
+  <circle cx="1375" cy="350" r="58" class="node fact"/>
+  <text x="1375" y="352" class="node-text">g</text>
+
+  <line x1="183" y1="350" x2="317" y2="350" class="edge"/>
+  <line x1="433" y1="350" x2="567" y2="350" class="edge"/>
+  <line x1="683" y1="350" x2="817" y2="350" class="edge"/>
+  <line x1="933" y1="350" x2="1067" y2="350" class="edge"/>
+  <line x1="1183" y1="350" x2="1317" y2="350" class="edge"/>
+
+  <!-- Scalar edge weights -->
+  <rect x="224" y="298" width="72" height="36" rx="9" class="weight-box"/>
+  <text x="260" y="317" class="weight">d(a1)</text>
+  <rect x="482" y="298" width="56" height="36" rx="9" class="weight-box"/>
+  <text x="510" y="317" class="weight">0</text>
+  <rect x="732" y="298" width="56" height="36" rx="9" class="weight-box"/>
+  <text x="760" y="317" class="weight">0</text>
+  <rect x="982" y="298" width="56" height="36" rx="9" class="weight-box"/>
+  <text x="1010" y="317" class="weight">0</text>
+  <rect x="1224" y="298" width="72" height="36" rx="9" class="weight-box"/>
+  <text x="1260" y="317" class="weight">d(a3)</text>
+
+  <!-- Mathematical meaning -->
+  <text x="90" y="495" class="note">Single edge relation: (u,v) ∈ E means that v causally depends on u.</text>
+  <text x="90" y="532" class="note">w(a,f) = 0 for a start effect, and w(a,f) = d(a) for an end effect.</text>
+  <text x="90" y="569" class="note">w(f,a) = 0: once fact f is available, action a may start immediately.</text>
+  <text x="90" y="610" class="note">BFS/DFS finds causal reachability. Temporal legality is checked separately by the MDP.</text>
+
+  <circle cx="1160" cy="525" r="20" class="node action"/>
+  <text x="1195" y="532" class="legend">action vertex</text>
+  <circle cx="1325" cy="525" r="20" class="node fact"/>
+  <text x="1360" y="532" class="legend">fact vertex</text>
+</svg>

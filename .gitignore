@@ -1,7 +1,30 @@
 __pycache__/
 
-# Local Claude memory (uncommitted)
+# Python tooling and test caches
+*.py[cod]
+.pytest_cache/
+
+# Local editor and AI-assistant configuration/workspaces
+.agents/
+.claude/
+.codex/
+.codex_tmp/
+.cursor/
+.vscode/
 CLAUDE.local.md
+
+# Generated analysis, document QA, and temporary working files
+graphify-out/
+.docx_ltr_qa/
+.proposal_work/
+tmp/
+
+# Generated logs and Office temporary lock files
+log/
+*.log
+*.inspect.ndjson
+~$*.docx
+~$*.pptx
 
 # GCP local settings (project id)
 gcp/config.env

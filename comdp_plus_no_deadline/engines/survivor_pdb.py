@@ -516,6 +516,27 @@ def conditional_hazards(curve: Sequence[float]) -> List[float]:
     return hazards
 
 
+def achievers_of_facts(
+    facts: Sequence[Fact],
+    actions_by_effect_fact: Mapping[Fact, Sequence[object]],
+) -> List[Tuple[Fact, object]]:
+    """Every ``(fact, action)`` pair where ``action`` can add ``fact``.
+
+    One action reached through two pattern facts appears once per fact; the
+    freeze step de-duplicates by name so its coin is only folded once.
+    """
+    collected: List[Tuple[Fact, object]] = []
+    seen: Set[Tuple[Fact, int]] = set()
+    for fact in facts:
+        for action in actions_by_effect_fact.get(fact, ()) or ():
+            key = (fact, id(action))
+            if key in seen:
+                continue
+            seen.add(key)
+            collected.append((fact, action))
+    return collected
+
+
 def build_pattern(
     seed_goal: Fact,
     *,
@@ -540,16 +561,7 @@ def build_pattern(
     pattern_facts: List[Fact] = [seed_goal]
 
     def achievers_of(facts: Sequence[Fact]) -> List[Tuple[Fact, object]]:
-        collected: List[Tuple[Fact, object]] = []
-        seen: Set[Tuple[Fact, int]] = set()
-        for fact in facts:
-            for action in actions_by_effect_fact.get(fact, ()) or ():
-                key = (fact, id(action))
-                if key in seen:
-                    continue
-                seen.add(key)
-                collected.append((fact, action))
-        return collected
+        return achievers_of_facts(facts, actions_by_effect_fact)
 
     while len(pattern_facts) < max_facts:
         best_candidate: Optional[Fact] = None
@@ -605,6 +617,42 @@ def build_pattern(
         if best_candidate is None:
             break
         pattern_facts.append(best_candidate)
+
+    return freeze_pattern(
+        pattern_facts,
+        seed_goal,
+        actions_by_effect_fact=actions_by_effect_fact,
+        action_preconditions=action_preconditions,
+        action_delays=action_delays,
+        action_add_probabilities=action_add_probabilities,
+        marginals=marginals,
+        probe_universe=probe_universe,
+        horizon=horizon,
+    )
+
+
+def freeze_pattern(
+    pattern_facts: Sequence[Fact],
+    seed_goal: Fact,
+    *,
+    actions_by_effect_fact: Mapping[Fact, Sequence[object]],
+    action_preconditions: Mapping[str, frozenset],
+    action_delays: Mapping[str, int],
+    action_add_probabilities: Mapping[str, Mapping[Fact, float]],
+    marginals: Mapping[Fact, Sequence[float]],
+    probe_universe: Set[Fact],
+    horizon: int,
+) -> Optional[SurvivorPattern]:
+    """Turn a chosen fact set into a solvable pattern.
+
+    Split out of ``build_pattern`` so that a growth POLICY (which facts to
+    attach) can be varied without re-implementing the freeze, which carries the
+    parts that are easy to get subtly wrong: the joint add-distribution probe,
+    the declared-fluents top-up guard, the gate, and the de-duplication of an
+    action reached through two pattern facts.
+    """
+    def achievers_of(facts):
+        return achievers_of_facts(facts, actions_by_effect_fact)
 
     facts = tuple(pattern_facts)
     fact_set = set(facts)

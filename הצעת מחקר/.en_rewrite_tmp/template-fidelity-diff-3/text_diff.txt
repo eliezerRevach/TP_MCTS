@@ -1,0 +1,107 @@
+--- a
++++ b
+@@ -1,54 +1,54 @@
+-אוניברסיטת בן-גוריון בנגב
+-הצעת מחקר לתזה
+-יוריסטיקות מסדי-דפוסים קבילות לתכנון טמפורלי הסתברותי תחת מועדי יעד
+-Admissible Pattern-Database Heuristics for Probabilistic Temporal Planning under Deadlines
+-סטודנט: אליעזר רווח
+-מנחה: פרופ' רונן ברפמן
+-מחלקה/תוכנית: [להשלמה]
+-מספר ת"ז: [להשלמה]
+-דוא"ל: [להשלמה]
+-תאריך: אוגוסט 2026
+-תקציר ממוקד
+-המחקר המוצע יפתח יוריסטיקת מסד-דפוסים (Pattern Database, PDB) קבילה לתכנון טמפורלי הסתברותי עם פעולות ממושכות ומקביליות, תחת מועד יעד. מטרת העל היא למקסם תוחלת תגמול שנצבר עד המועד; השגת יעד בינארית היא מקרה פרטי שבו התגמול הוא 1 אם היעד הושג בזמן ו-0 אחרת. בכיוון של מקסום תגמול, קבילות פירושה שהיוריסטיקה מספקת חסם עליון על הערך האופטימלי.
+-הרעיון המרכזי הוא לבנות תחילה PDB אופטימי ללא ייצוג זמן מפורש, לפתור את המודל המופשט באופן מדויק, לבדוק את גרף המדיניות שהתקבל באמצעות רשת זמנים פשוטה (STN), ולזקק את ההפשטה רק במקום שבו המדיניות מנצלת התנהגות טמפורלית שאינה אפשרית במודל המקורי. כך מתקבלת משפחת חסמים עליונים מסוג anytime: החסם ההתחלתי זול ורופף, וכל זיקוק תקף אמור להדק אותו מבלי לאבד קבילות.
+-רקע מדעי
+-תהליכי החלטה מרקוביים (MDPs) הם מודל יסודי לקבלת החלטות תחת אי-ודאות, אך בניסוח הרגיל פעולות הן מיידיות וסדרתיות. בתכנון טמפורלי הסתברותי הפעולות עשויות להימשך זמן, להתבצע במקביל ולהשפיע זו על זו דרך תנאי התחלה, תנאים מתמשכים ותנאי סיום. מודלים ואלגוריתמים קודמים הרחיבו MDPs לפעולות ממושכות ומקביליות, אך שילוב התזמון במצב מגדיל מאוד את מרחב המצבים [1,2].
+-TP-MCTS מציע תכנון מקוון במודל CoMDP+ ומשלב MCTS עם STN כדי לבחור הן איזו פעולה לשגר והן מתי לשגר אותה. הוא כולל גם PTRPG להערכת הסתברות הצלחה תחת אילוצים טמפורליים [1]. עבודה זו היא נקודת המוצא של התזה, ולא התרומה החדשה המוצעת: התרומה המבוקשת כאן היא חסם קביל מבוסס הפשטה, שניתן לחשבו מראש ולהדקו במהלך החיפוש.
+-מסדי-דפוסים פותרים בדיוק הפשטה קטנה של מרחב המצבים ושומרים את ערכי המצבים המופשטים בטבלה. בתכנון דטרמיניסטי הם משמשים מקור מרכזי ליוריסטיקות קבילות, ואיכותם תלויה בבחירת הדפוס ובשמירת יחס נכון בין המודל המקורי למופשט [3,4]. ב-MDPs, איחוד מצבים מוסיף קושי: מצבים קונקרטיים שממופים לאותו מצב מופשט עשויים להשרות התפלגויות מעבר שונות. לכן נדרש ניסוח אופטימי שמייצג את כל המעברים הקונקרטיים הרלוונטיים ואינו מחליף אותם בממוצע שעלול להקטין את הערך [5].
+-פער המחקר הוא בניית PDB קומפקטי לתכנון טמפורלי הסתברותי שאינו מכניס מלכתחילה את כל זמני ההתחלה והפעולות הרצות למצב, אך עדיין מספק חסם עליון פורמלי ומאפשר זיקוק טמפורלי ממוקד. בדיקת STN יכולה לזהות התנהגות מופשטת בלתי ישימה [7], ואילו פתרון MDP על גרף המצבים הנגיש יכול להתבצע בעזרת ‎LAO*‎ או שיטות דינמיות אחרות [6].
+-מטרת המחקר ושאלות המחקר
+-המטרה הראשית היא לפתח, לנתח ולהעריך יוריסטיקת PDB קבילה ואדפטיבית עבור CoMDP+, כך שהזמן ייוצג רק כאשר הוא נדרש כדי לסלק התנהגות אופטימית בלתי אפשרית. המחקר יבחן ארבע שאלות מרכזיות:
+-אילו תנאים על הפשטת העובדות, התגמולים והתפלגויות המעבר מספיקים כדי שערך ה-PDB יהיה חסם עליון על תוחלת התגמול האופטימלית עד המועד?
+-כיצד ניתן להפיק מכשל STN הסבר קטן ושימושי, ולתרגם אותו לחלוקת מצב או למאפיין טמפורלי שמסלק את ההתנהגות המדומה בלי לסלק שום התנהגות קונקרטית חוקית?
+-כיצד לפתור מחדש את ה-PDB ביעילות לאחר זיקוק מקומי, וכיצד לשלב זיקוק offline עם זיקוק online המתמקד במדיניות הנגישה מן המצב הנוכחי?
+-מהו האיזון בין זמן החישוב וגודל ה-PDB לבין הדוקות החסם, איכות בחירת הפעולות, תוחלת התגמול, הסתברות ההצלחה והישימות הטמפורלית?
+-הגדרה פורמלית ויעדי הוכחה
+-יהי s מצב קונקרטי, D הזמן שנותר, ו-R≤D התגמול המצטבר עד המועד. הערך האופטימלי הוא תוחלת התגמול המרבית על פני כל המדיניויות החוקיות. עבור דפוס Φ ומיפוי הפשטה αΦ, היוריסטיקה HΦ תיקרא קבילה אם לכל מצב:
++Ben-Gurion University of the Negev
++Master's Thesis Research Proposal
++יוריסטיקות קבילות מבוססות מסדי תבניות לתכנון טמפורלי הסתברותי תחת מועדי יעד
++Admissible Pattern Database Heuristics for Probabilistic Temporal Planning under Deadlines
++Student: Eliezer Revach
++Supervisor: Prof. Ronen I. Brafman
++Program: Computer Science
++Student ID: [TO COMPLETE]
++Email: [TO COMPLETE]
++Date: August 2026
++Abstract
++This research proposes an admissible pattern database (PDB) heuristic for probabilistic temporal planning with durative and concurrent actions under a deadline. The primary objective is to maximize the expected reward accumulated before the deadline; binary goal achievement is a special case in which the reward is 1 if the goal is reached in time and 0 otherwise. In this reward-maximization setting, admissibility means that the heuristic provides an upper bound on the optimal value.
++The central idea is to first construct an optimistic PDB without an explicit representation of time, solve the abstract model exactly, validate the resulting policy graph using a Simple Temporal Network (STN), and refine the abstraction only where the policy exploits temporal behavior that cannot occur in the original model. This process yields an anytime sequence of upper bounds: the initial bound is inexpensive and loose, and each sound refinement should tighten it without sacrificing admissibility.
++Scientific Background
++Markov decision processes (MDPs) are a fundamental model for decision making under uncertainty, but their standard formulation assumes instantaneous, sequential actions. In probabilistic temporal planning, actions may have duration, execute concurrently, and interact through start, invariant, and end conditions. Prior models and algorithms extend MDPs to durative and concurrent actions, but encoding scheduling information in the state can greatly enlarge the state space [1,2].
++TP-MCTS addresses online planning in the CoMDP+ model by combining Monte Carlo Tree Search with an STN to decide both which action to dispatch and when to dispatch it. It also introduces PTRPG, which estimates the probability of success under temporal constraints [1]. These components form the starting point of the thesis rather than its proposed contribution. The new contribution sought here is an admissible abstraction-based upper bound that can be precomputed and tightened during search.
++Pattern databases solve a small abstraction of the state space exactly and store the resulting abstract-state values in a table. In deterministic planning, PDBs are a major source of admissible heuristics; their quality depends on pattern selection and on preserving a sound relationship between the concrete and abstract models [3,4]. In MDPs, merging states creates an additional difficulty: concrete states mapped to the same abstract state may induce different transition distributions. An optimistic abstraction must therefore represent every relevant concrete transition rather than replace them by an average that may reduce the value [5].
++The research gap is a compact PDB for probabilistic temporal planning that does not initially encode every action start time or running action in the state, yet still yields a formal upper bound and supports targeted temporal refinement. STN validation can expose infeasible abstract behavior [7], while the reachable abstract-state graph can be solved using LAO* or other dynamic-programming methods [6].
++Research Objective and Questions
++The primary objective is to develop, analyze, and evaluate an adaptive admissible PDB heuristic for CoMDP+, in which temporal information is represented only when needed to eliminate impossible optimistic behavior. The study will address four questions:
++Which conditions on the abstraction of facts, rewards, and transition distributions are sufficient for the PDB value to upper-bound the optimal expected reward before the deadline?
++How can a small, useful explanation be extracted from an STN failure and translated into a state split or temporal feature that removes the spurious behavior without excluding any legal concrete behavior?
++How can the PDB be re-solved efficiently after a local refinement, and how should offline refinement be combined with online refinement focused on policies reachable from the current state?
++What trade-off arises among computation time, PDB size, bound tightness, action-selection quality, expected reward, success probability, and temporal feasibility?
++Formal Setting and Proof Objectives
++Let s be a concrete state, D the remaining time, and R≤D the reward accumulated by the deadline. The optimal value is the maximum expected reward over all legal policies. For a pattern Φ and abstraction mapping αΦ, the heuristic HΦ is admissible if, for every state,
+ HΦ(αΦ(s))  ≥  V*D(s) = supπ Eπ[R≤D | s]
+-בשלב הראשון ינותחו פעולות בעלות משך חיובי ודטרמיניסטי ותוצאות הסתברותיות, עם תגמול לא-שלילי וחסום. השגת יעד לפני המועד תשמש מקרה בסיס לבדיקת ההוכחות. תגמולי ביניים ייכללו כל עוד סכומם חסום; אם קיימים מחזורי תגמול חיובי חוזר, הפשטה חסרת זמן עלולה לקבל ערך בלתי חסום, ואז יידרש חסם תגמול או תקציב זמן גס כחלק מהמצב המופשט.
+-יעדי ההוכחה הם: (א) משפט קבילות להפשטה ההתחלתית תחת הנחות מפורשות; (ב) משפט שימור קבילות לכל פעולת זיקוק; (ג) מונוטוניות של החסמים, כך שכל זיקוק תקף אינו מגדיל את HΦ; ו-(ד) תנאי סיום או התכנסות כאשר קבוצת מאפייני הזיקוק סופית. ביצועים אמפיריים ממוצעים לא ישמשו תחליף להוכחת קבילות.
+-החידוש המוצע
+-בניגוד לניסוח SMDP ראשוני ששומר במפורש זמן נותר ורשומות של כל הפעולות הרצות, הכיוון החדש מתחיל מהפשטה חסרת זמן ומוסיף מידע טמפורלי רק בעקבות עדות קונקרטית לכשל. החידוש המחקרי הוא שילוב של PDB הסתברותי אופטימי, בדיקת גרף מדיניות באמצעות STN, וזיקוק מקומי המכוון על ידי קונפליקט טמפורלי. המטרה אינה לטעון שהמודל המופשט שקול למקור, אלא לבנות רלקסציה מבוקרת שערכה הוא חסם עליון שימושי.
+-שיטות לביצוע המחקר
+-1. בניית הדפוס והמודל המופשט
+-הדפוס Φ יאותחל בעובדות יעד או בעובדות הנושאות תגמול, ויורחב בהדרגה לפי תנאים חסרים וקונפליקטים שהתגלו. המצב המופשט יכיל את ההיטל על Φ. מידע על זמן מוחלט, זמני התחלה מדויקים ו-STN יושמט בתחילה. מחיקות, הפרעות ותנאים שאינם מיוצגים יוחלשו באופן אופטימי בלבד. פעולות שכבר רצות יטופלו באמצעות אופרטור השלמה אופטימי: תוצאת הסיום תיוצג בלי המתנה, השפעות מזיקות יושמטו, וכל תלות שנשמטה תיחשב מותרת. הניסוח המדויק של אופרטור זה יהיה חלק מיעד ההוכחה ולא הנחת עבודה סמויה.
+-2. הפשטת מעברים ותגמולים
+-כאשר כמה מצבים קונקרטיים באותו תא הפשטה משרים התפלגויות שונות עבור אותה פעולה, תיבחן הפשטת קבוצת-מעברים B=(P1,...,Pk). בפתרון ה-PDB, פעולת המקסום תבחר גם פעולה וגם התפלגות מותרת מתוך B. בחירה נוספת זו מרחיבה בכוונה את כוח המדיניות ולכן עשויה להניב חסם עליון, בתנאי שכל מעבר קונקרטי ותגמולו מיוצגים ושום תגמול אינו מוקטן. חלופות קומפקטיות, כגון מעטפת קמורה או חלוקת התא, ייבחנו אם שמירת כל ההתפלגויות יקרה מדי.
+-3. פתרון מדויק וחילוץ גרף מדיניות
+-המודל המופשט ייפתר בדיוק על החלק הנגיש ממצב ההתחלה. ‎LAO*‎ הוא מועמד טבעי כאשר מתקבל SSP עם מדיניויות proper; איטרציית ערכים או Modified Policy Iteration ישמשו כאשר ניסוח סופי אחר מתאים יותר. הפלט הוא גרף מדיניות הסתברותי ולא רצף יחיד. לכן בדיקת עקבה אחת תשמש רק לתעדוף anytime, בעוד טענת ישימות מלאה תדרוש טיפול בכל הענפים הנגישים הרלוונטיים.
+-4. בדיקה טמפורלית וזיקוק מונחה-קונפליקט
+-לכל עקבת מדיניות נבחרת ייבנה STN עם נקודות התחלה וסיום, אילוצי משך, סדר, מקביליות ומועד יעד. אי-עקביות תפיק מחזור שלילי או גרעין אילוצים בלתי אפשרי. מן הקונפליקט ייגזר מאפיין קטן, למשל: פעולה מסוימת עדיין רצה, יחס סדר בין שתי פעולות, מחלקת slack, או גבול זמן יחסי. המצב המופשט הרלוונטי יחולק לעותקים על פי המאפיין, או שיתווסף אילוץ שקול למעבר. כל זיקוק יחויב במיפוי מכל מצב קונקרטי לעותק אחד לפחות ובהוכחה שהוא מסיר רק התנהגות שאין לה עד קונקרטי.
+-5. פתרון חוזר ושילוב ב-TP-MCTS
+-לאחר זיקוק, הערכים והמדיניות יעודכנו באופן אינקרמנטלי. החישוב יוכל להתחיל offline ולהמשיך online מן השורש הנוכחי, תוך תעדוף ענפים בעלי ערך או הסתברות גבוהים. עצירה מוקדמת תשאיר חסם קביל אך רופף; זיקוק נוסף אמור להקטין את החסם. HΦ ישולב בהערכת צמתים ובבחירת פעולות ב-TP-MCTS, בלי להגביל את קבוצת הפעולות החוקיות.
+-חלופת הרחבה: דירוג מדיניויות
+-אם זיקוק מצב יתברר יקר, תיבחן גם אנומרציה של מדיניויות לפי ערך ובדיקת STN לכל מועמדת. Dai ו-Goldsmith הראו שהמדיניות ה-k בטיבה נבדלת בפעולה של מצב יחיד ממדיניות קודמת וטובה יותר כלשהי; בפרט, המדיניות השנייה נבדלת כך מאופטימום [8]. תוצאה זו יכולה להנחות heap של מועמדות, אך סינון לפי STN אינו כשלעצמו הוכחת קבילות: נדרשים אנומרציה מספקת, בדיקת מדיניות מלאה וטיפול מפורש בענפים ובמחזורים. לכן כיוון זה יוצג כהרחבה או ablation עד להשלמת הניתוח.
+-תוכנית הערכה
+-ההערכה תשלב בדיקה פורמלית וניסויים. במופעים קטנים יחושב V* בדיוק, ותיבדק ישירות האי-שוויון ‎HΦ ≥ V*‎ בכל מצב נגיש לפני ואחרי כל זיקוק. ייבנו גם דוגמאות נגד מכוונות, ובראשן משפחת m-doors, שבה הפשטה עלולה להתעלם מחזרות ועלויות תלויות-מפתח וליצור פער פולינומי. בדיקות אלה נועדו לחשוף אופטימיות בלתי מבוקרת, תלות סמויה בתוצאות התחלה, והנחות שגויות על מעבר בין מצבים מופשטים.
+-הניסויים ישתמשו בדומיינים כגון NASA Rover, Machine Shop, Hosting ו-Stuck Car, בטווח מועדי יעד ורמות הסתברות. ההשוואה תכלול TP-MCTS/PTRPG, גרסאות PDB ללא זיקוק, עם זיקוק, ועם ייצוג זמן מלא במופעים קטנים. יימדדו: הדוקות החסם, זמן וזיכרון לבניית PDB, מספר הזיקוקים וכשלי STN, זמן החלטה מקוון, תוחלת תגמול, הסתברות הצלחה, שיעור השלמה לפני המועד, וישימות טמפורלית. תוצאות יכללו שונות, רווחי סמך ושיעור כשל, ולא רק ממוצעים.
+-תרומה צפויה
+-המחקר צפוי להניב: (1) הגדרה פורמלית של PDB אופטימי לתכנון טמפורלי הסתברותי במקסום תגמול; (2) תנאים ברורים לקבילות של הפשטת מעברים ותגמולים; (3) אלגוריתם זיקוק טמפורלי סלקטיבי מבוסס STN עם חסם anytime; (4) שילוב ביוריסטי ב-TP-MCTS; ו-(5) הערכה שיטתית של הפער בין קבילות, הדוקות ועלות חישוב. גם אם מנגנון זיקוק מסוים יוחלף, מסגרת המחקר והקריטריון ‎HΦ ≥ V*‎ יישארו יציבים.
+-להכרעה בפגישה לפני הגשה: ‎LAO*‎ מול VI/MPI; ייצוג הזיקוק (עותקי מצב, predicate טמפורלי או אילוץ מעבר); תחום התגמול בשלב הראשון; והאם דירוג מדיניויות הוא הרחבה בלבד או רכיב מרכזי.
+-רשימת מקורות
++The initial analysis will consider actions with positive deterministic durations and probabilistic outcomes, with bounded non-negative rewards. Reaching a goal before the deadline will serve as the base case for testing the proofs. Intermediate rewards will be included as long as their sum is bounded. If repeatable positive-reward cycles are possible, a timeless abstraction may have an unbounded value; in that case, a reward cap or coarse time budget must be included in the abstract state.
++The proof objectives are: (i) an admissibility theorem for the initial abstraction under explicit assumptions; (ii) an admissibility-preservation theorem for each refinement operator; (iii) monotonic upper bounds, such that every sound refinement does not increase HΦ; and (iv) termination or convergence conditions when the set of refinement features is finite. Average empirical performance will not be treated as a substitute for a formal admissibility proof.
++Proposed Novelty
++Unlike an initial SMDP formulation that explicitly records the remaining time and every running action, the proposed direction begins with a timeless abstraction and introduces temporal information only in response to concrete evidence of a failure. The research novelty is the combination of an optimistic probabilistic PDB, STN-based policy-graph validation, and local refinement guided by temporal conflicts. The claim is not that the abstract model is equivalent to the original model, but that it is a controlled relaxation whose value is a useful upper bound.
++Research Methodology
++1. Pattern Construction and the Abstract Model
++The pattern Φ will be initialized with goal facts or reward-bearing facts and expanded gradually in response to missing conditions and detected conflicts. The abstract state will contain only the projection onto Φ; absolute time, exact start times, and the STN will initially be omitted. Delete effects, interference, and unrepresented conditions will be relaxed only in an optimistic direction. Already-running actions will be handled by an optimistic completion operator: the end outcome is represented immediately, harmful effects are ignored, and every omitted dependency is treated as permitted. The precise definition of this operator will be a proof obligation rather than an implicit assumption.
++2. Transition and Reward Abstraction
++When several concrete states in one abstract cell induce different transition distributions for the same action, a transition-set abstraction B=(P1,...,Pk) will be examined. In solving the PDB, maximization will select both an action and an allowed distribution from B. This additional choice deliberately enlarges the abstract policy's power and can therefore yield an upper bound, provided that every concrete transition and its reward are represented and no reward is reduced. More compact alternatives, such as a convex envelope or partitioning the abstract cell, will be studied if retaining all distributions is too costly.
++3. Exact Solution and Policy-Graph Extraction
++The abstract model will be solved exactly over the portion reachable from the initial state. LAO* is a natural candidate when the abstraction forms a stochastic shortest-path problem with proper policies; value iteration or Modified Policy Iteration will be used when another finite formulation is more appropriate. The output is a probabilistic policy graph rather than a single sequence. Checking one trace is therefore useful only for anytime prioritization, whereas a full feasibility claim requires examining all relevant reachable branches.
++4. Temporal Validation and Conflict-Guided Refinement
++For each selected policy trace, an STN will be constructed with action start and end time points, duration, ordering, concurrency, and deadline constraints. Inconsistency will yield a negative cycle or a small infeasible constraint core. A compact feature will then be derived from the conflict, such as whether an action is still running, an ordering relation between two actions, a slack class, or a relative-time bound. The relevant abstract state will be split according to this feature, or an equivalent transition constraint will be added. Every refinement must map each concrete state to at least one refined state and prove that it eliminates only behavior with no concrete witness.
++5. Re-solving and Integration with TP-MCTS
++After refinement, values and the policy will be updated incrementally. Computation may begin offline and continue online from the current root, prioritizing high-value or high-probability branches. Early termination leaves an admissible but loose bound; further refinement should reduce it. HΦ will be integrated into node evaluation and action selection in TP-MCTS without restricting the set of legal actions.
++Optional Extension: Policy Ranking
++If state refinement proves too expensive, policies may also be enumerated in value order and each candidate checked with an STN. Dai and Goldsmith showed that the kth-best policy differs in one state's action from some preceding, better-ranked policy; in particular, the second-best policy differs in this way from an optimum [8]. This result can guide a heap of candidates, but STN filtering alone does not establish admissibility: sufficient enumeration, full-policy validation, and explicit treatment of branches and cycles are still required. Policy ranking will therefore be treated as an extension or ablation until its formal role is established.
++Evaluation Plan
++The evaluation will combine formal verification and experiments. For small instances, V* will be computed exactly and the inequality HΦ ≥ V* will be checked directly in every reachable state before and after each refinement. Purpose-built counterexamples will also be used, especially the m-doors family, in which an abstraction may ignore repeated trips and key-dependent costs and thereby create a polynomial gap. These tests are intended to expose uncontrolled optimism, hidden dependence on start effects, and invalid assumptions about transitions between abstract states.
++Experiments will use domains such as NASA Rover, Machine Shop, Hosting, and Stuck Car across a range of deadlines and probability settings. Comparisons will include TP-MCTS/PTRPG, PDB variants without refinement and with refinement, and full time representation on small instances. Measures will include bound tightness, PDB construction time and memory, the number of refinements and STN failures, online decision time, expected reward, success probability, completion before the deadline, and temporal feasibility. Results will report variance, confidence intervals, and failure rates rather than averages alone.
++Expected Contributions
++The expected contributions are: (1) a formal definition of an optimistic PDB for reward-maximizing probabilistic temporal planning; (2) explicit admissibility conditions for transition and reward abstraction; (3) an STN-based selective temporal-refinement algorithm with an anytime upper bound; (4) integration of the heuristic into TP-MCTS; and (5) a systematic evaluation of the trade-off among admissibility, bound tightness, and computational cost. Even if a particular refinement mechanism is replaced, the research framework and the criterion HΦ ≥ V* will remain stable.
++To be finalized with the supervisor before submission: LAO* versus VI/MPI; the refinement representation (state copies, a temporal predicate, or a transition constraint); the initial reward model; and whether policy ranking is an optional extension or a central component.
++References
+ Berman, T., Brafman, R. I., & Karpas, E. (2025). Online Planning in MDPs with Stochastic Durative Actions. Proceedings of IJCAI-25, 8465-8473. doi:10.24963/ijcai.2025/941.
+ Mausam, & Weld, D. S. (2008). Planning with Durative Actions in Stochastic Domains. Journal of Artificial Intelligence Research, 31, 33-82. doi:10.1613/JAIR.2269.
+ Culberson, J. C., & Schaeffer, J. (1998). Pattern Databases. Computational Intelligence, 14(3), 318-334. doi:10.1111/0824-7935.00065.

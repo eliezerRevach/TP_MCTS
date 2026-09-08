@@ -280,6 +280,99 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "survivor_pdb_lazy",
         "label": "survivor_pdb_lazy",
     },
+    # TIME-LOOP survivor-PDB: survivor_pdb_lazy plus the one-instance-at-a-time
+    # phase. Identical patterns, gates and cache; ONE mechanism changes.
+    #
+    # What it fixes: solve_survivor_pattern re-fires every applicable achiever
+    # at EVERY layer, so an action of duration d draws d independent coins
+    # during the single execution it is actually running. Over a horizon H it
+    # draws H times where at most H/d executions can physically finish, and the
+    # inflation GROWS with the deadline -- the same saturation that makes MCTS
+    # layers look alike.
+    #
+    # The mechanism (v18 section 3): an action starts once its preconditions
+    # hold, occupies d(a), and only then may start again. With c(a) = time since
+    # its last precondition arrived, mod d(a), the attempts that COMPLETE in a
+    # step of width Delta are n(a,Delta) = floor((c(a)+Delta)/d(a)) and each
+    # achiever contributes peff = 1-(1-p)^n. Unit steps => n is an indicator
+    # that is 1 once every d layers, so a duration-5 action draws 5x fewer
+    # coins. The counter lives in the state next to the fact mask, one per
+    # distinct (pattern preconditions, duration) pair, kept modulo d with a lap
+    # bit -- so it stays bounded, and a unit-duration domain pays nothing and
+    # returns exactly the lazy numbers.
+    #
+    # Two anchors: the first completion is at max(tau+d, gate) -- pattern
+    # preconditions held long enough AND the freed preconditions' relaxed gate.
+    # The counter only knows tau modulo d, so both progressions are admitted and
+    # the larger count is taken; the true one is among them, so the bound holds.
+    # Firing density <= 2/d, and exactly 1/d when the anchors agree mod d.
+    #
+    # ADMISSIBLE, and pointwise <= survivor_pdb_lazy: the phase only removes
+    # completions no single-instance execution could have made. The bounded-
+    # state fallback forgets counters, which restores the fire-every-layer
+    # behaviour (still an upper bound, just untightened).
+    #
+    # Env knobs: TP_MCTS_SURVIVOR_LOOP_INTEREST_POINTS=1 restricts the sweep to
+    # the interest points T (v18 section 1) instead of every integer layer --
+    # exact within the pattern's model, cheaper, off by default so loop differs
+    # from lazy in exactly one mechanism. TP_MCTS_SURVIVOR_LOOP_CONCURRENCY=N
+    # allows N overlapping instances of one grounded action (default 1 = this
+    # codebase's semantics). SURVIVOR_PDB_* knobs apply unchanged.
+    "survivor_pdb_loop": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_loop",
+        "label": "survivor_pdb_loop",
+    },
+    # Synonyms.
+    "survivor_pdb_rpg_loop": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_loop",
+        "label": "survivor_pdb_loop",
+    },
+    "survivor_loop": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_loop",
+        "label": "survivor_pdb_loop",
+    },
+    # ---- DIRECT-VALUE variants: NOT the PTRPG ----------------------------
+    # Same propagation as the strategy they wrap (they share its cache), but the
+    # value goes to TP-MCTS as the PATTERN computed it instead of being
+    # re-derived by the PTRPG's goal scorer.
+    #
+    # The PTRPG is one heuristic: a per-fact per-layer DP whose goal score is the
+    # INDEPENDENCE PRODUCT of the goal marginals. Every strategy in
+    # temporal_probabilistic_rpg.py currently inherits that product, including
+    # the pattern/PDB family -- which re-imposes, at the very last step, exactly
+    # the assumption the joint distribution exists to remove. Worse, it is
+    # UNSOUND: a product of upper bounds is not an upper bound on a conjunction
+    # when the goals correlate, while
+    #     min(U(A), U(B)) >= min(P(A), P(B)) >= P(A and B)
+    # always holds. exact_pattern_mdp already scores this way on its own MCTS
+    # path (mcts.py) and documents the same argument; these aliases give the
+    # survivor family the same treatment.
+    #
+    # Effect: min >= product, so the value RISES -- sound but looser. The
+    # tightness given up is recoverable with MULTI-GOAL patterns (seed Phi with
+    # 2+ goals and read the conjunction off the joint), which is the correlation
+    # the one-pattern-per-goal builder never models.
+    #
+    # Aggregation is forced to min for these, ahead of
+    # TP_MCTS_HEURISTIC_AGGREGATION -- the product is not offered.
+    "survivor_pdb_loop_direct": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_loop_direct",
+        "label": "survivor_pdb_loop_direct",
+    },
+    "survivor_pdb_lazy_direct": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_lazy_direct",
+        "label": "survivor_pdb_lazy_direct",
+    },
+    "survivor_pdb_pure_direct": {
+        "heuristic_name": "temporal_probabilistic_rpg",
+        "temporal_heuristic_strategy": "survivor_pdb_pure_direct",
+        "label": "survivor_pdb_pure_direct",
+    },
     # Forward baseline DP whose AND/precondition layer is tightened by a
     # horizon-indexed Pattern Database: R_t(a) = P(pre(a) jointly reachable by
     # layer t) from a per-pattern backward DP (max over projected actions),

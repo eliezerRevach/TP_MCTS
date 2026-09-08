@@ -1,0 +1,120 @@
+{
+  "input": "C:\\Users\\eliezer\\Documents\\hw2_exam\\TP_MCTS\\\u05d4\u05e6\u05e2\u05ea \u05de\u05d7\u05e7\u05e8\\\u05d4\u05e6\u05e2\u05ea_\u05de\u05d7\u05e7\u05e8_PDB_\u05d0\u05dc\u05d9\u05e2\u05d6\u05e8_\u05e8\u05d5\u05d5\u05d7.docx",
+  "fonts_by_char_count": {
+    "Arial": 9466
+  },
+  "direct_run_formatting_runs": 51,
+  "direct_paragraph_formatting_paragraphs": 50,
+  "heading_like_paragraphs_not_heading_style": [
+    {
+      "para_index": 1,
+      "text": "\u05d0\u05d5\u05e0\u05d9\u05d1\u05e8\u05e1\u05d9\u05d8\u05ea \u05d1\u05df-\u05d2\u05d5\u05e8\u05d9\u05d5\u05df \u05d1\u05e0\u05d2\u05d1",
+      "style": "Normal"
+    },
+    {
+      "para_index": 2,
+      "text": "\u05d4\u05e6\u05e2\u05ea \u05de\u05d7\u05e7\u05e8 \u05dc\u05ea\u05d6\u05d4",
+      "style": "Normal"
+    },
+    {
+      "para_index": 3,
+      "text": "\u05d9\u05d5\u05e8\u05d9\u05e1\u05d8\u05d9\u05e7\u05d5\u05ea \u05de\u05e1\u05d3\u05d9-\u05d3\u05e4\u05d5\u05e1\u05d9\u05dd \u05e7\u05d1\u05d9\u05dc\u05d5\u05ea \u05dc\u05ea\u05db\u05e0\u05d5\u05df \u05d8\u05de\u05e4\u05d5\u05e8\u05dc\u05d9 \u05d4\u05e1\u05ea\u05d1\u05e8\u05d5\u05ea\u05d9 \u05ea\u05d7\u05ea \u05de\u05d5\u05e2\u05d3\u05d9 \u05d9\u05e2\u05d3",
+      "style": "Normal"
+    },
+    {
+      "para_index": 23,
+      "text": "H\u03a6(\u03b1\u03a6(s))  \u2265  V*D(s) = sup\u03c0 E\u03c0[R\u2264D | s]",
+      "style": "Normal"
+    },
+    {
+      "para_index": 57,
+      "text": "\u05e1\u05d8\u05d5\u05d3\u05e0\u05d8: \u05d0\u05dc\u05d9\u05e2\u05d6\u05e8 \u05e8\u05d5\u05d5\u05d7",
+      "style": "Normal"
+    },
+    {
+      "para_index": 58,
+      "text": "\u05de\u05e0\u05d7\u05d4: \u05e4\u05e8\u05d5\u05e4' \u05e8\u05d5\u05e0\u05df \u05d1\u05e8\u05e4\u05de\u05df",
+      "style": "Normal"
+    },
+    {
+      "para_index": 59,
+      "text": "\u05de\u05d7\u05dc\u05e7\u05d4/\u05ea\u05d5\u05db\u05e0\u05d9\u05ea: [\u05dc\u05d4\u05e9\u05dc\u05de\u05d4]",
+      "style": "Normal"
+    },
+    {
+      "para_index": 60,
+      "text": "\u05de\u05e1\u05e4\u05e8 \u05ea\"\u05d6: [\u05dc\u05d4\u05e9\u05dc\u05de\u05d4]",
+      "style": "Normal"
+    },
+    {
+      "para_index": 61,
+      "text": "\u05d3\u05d5\u05d0\"\u05dc: [\u05dc\u05d4\u05e9\u05dc\u05de\u05d4]",
+      "style": "Normal"
+    },
+    {
+      "para_index": 62,
+      "text": "\u05ea\u05d0\u05e8\u05d9\u05da: \u05d0\u05d5\u05d2\u05d5\u05e1\u05d8 2026",
+      "style": "Normal"
+    }
+  ],
+  "examples": {
+    "direct_paragraph_formatting": [
+      {
+        "para_index": 1,
+        "text": "\u05d0\u05d5\u05e0\u05d9\u05d1\u05e8\u05e1\u05d9\u05d8\u05ea \u05d1\u05df-\u05d2\u05d5\u05e8\u05d9\u05d5\u05df \u05d1\u05e0\u05d2\u05d1",
+        "style": "Normal"
+      },
+      {
+        "para_index": 2,
+        "text": "\u05d4\u05e6\u05e2\u05ea \u05de\u05d7\u05e7\u05e8 \u05dc\u05ea\u05d6\u05d4",
+        "style": "Normal"
+      },
+      {
+        "para_index": 3,
+        "text": "\u05d9\u05d5\u05e8\u05d9\u05e1\u05d8\u05d9\u05e7\u05d5\u05ea \u05de\u05e1\u05d3\u05d9-\u05d3\u05e4\u05d5\u05e1\u05d9\u05dd \u05e7\u05d1\u05d9\u05dc\u05d5\u05ea \u05dc\u05ea\u05db\u05e0\u05d5\u05df \u05d8\u05de\u05e4\u05d5\u05e8\u05dc\u05d9 \u05d4\u05e1\u05ea\u05d1\u05e8\u05d5\u05ea\u05d9 \u05ea\u05d7\u05ea \u05de\u05d5\u05e2\u05d3\u05d9 \u05d9\u05e2\u05d3",
+        "style": "Normal"
+      },
+      {
+        "para_index": 4,
+        "text": "Admissible Pattern-Database Heuristics for Probabilistic Temporal Planning under Deadlines",
+        "style": "Normal"
+      },
+      {
+        "para_index": 5,
+        "text": "",
+        "style": "Normal"
+      }
+    ],
+    "direct_run_formatting": [
+      {
+        "para_index": 1,
+        "run_text": "\u05d0\u05d5\u05e0\u05d9\u05d1\u05e8\u05e1\u05d9\u05d8\u05ea \u05d1\u05df-\u05d2\u05d5\u05e8\u05d9\u05d5\u05df \u05d1\u05e0\u05d2\u05d1",
+        "style": "Normal"
+      },
+      {
+        "para_index": 2,
+        "run_text": "\u05d4\u05e6\u05e2\u05ea \u05de\u05d7\u05e7\u05e8 \u05dc\u05ea\u05d6\u05d4",
+        "style": "Normal"
+      },
+      {
+        "para_index": 3,
+        "run_text": "\u05d9\u05d5\u05e8\u05d9\u05e1\u05d8\u05d9\u05e7\u05d5\u05ea \u05de\u05e1\u05d3\u05d9-\u05d3\u05e4\u05d5\u05e1\u05d9\u05dd \u05e7\u05d1\u05d9\u05dc\u05d5\u05ea \u05dc\u05ea\u05db\u05e0\u05d5\u05df \u05d8\u05de\u05e4\u05d5\u05e8\u05dc\u05d9 \u05d4\u05e1\u05ea\u05d1\u05e8\u05d5\u05ea\u05d9 \u05ea\u05d7\u05ea \u05de\u05d5\u05e2\u05d3\u05d9 \u05d9\u05e2\u05d3",
+        "style": "Normal"
+      },
+      {
+        "para_index": 4,
+        "run_text": "Admissible Pattern-Database Heuristics for Probabilistic Temporal Planning under",
+        "style": "Normal"
+      },
+      {
+        "para_index": 7,
+        "run_text": "\u05d4\u05de\u05d7\u05e7\u05e8 \u05d4\u05de\u05d5\u05e6\u05e2 \u05d9\u05e4\u05ea\u05d7 \u05d9\u05d5\u05e8\u05d9\u05e1\u05d8\u05d9\u05e7\u05ea \u05de\u05e1\u05d3-\u05d3\u05e4\u05d5\u05e1\u05d9\u05dd (Pattern Database, PDB) \u05e7\u05d1\u05d9\u05dc\u05d4 \u05dc\u05ea\u05db\u05e0\u05d5\u05df \u05d8\u05de\u05e4\u05d5\u05e8",
+        "style": "Normal"
+      }
+    ]
+  },
+  "notes": [
+    "Direct formatting is not always wrong, but it often causes inconsistent output when templates change.",
+    "Heading-like paragraphs not using Heading styles can break TOC and accessibility."
+  ]
+}

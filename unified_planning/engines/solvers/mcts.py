@@ -79,10 +79,18 @@ def _aggregation_for_strategy(temporal_heuristic_strategy: str) -> str:
     """
     import os
 
+    strat = (temporal_heuristic_strategy or "").strip().lower()
+    # NOT the PTRPG: these heuristics compute their own value and aggregate it
+    # with min (a product of upper bounds is not an upper bound on a
+    # conjunction). Checked BEFORE the env override so a notebook-wide
+    # TP_MCTS_HEURISTIC_AGGREGATION cannot silently reintroduce the product --
+    # the engine enforces min for them regardless, so returning anything else
+    # here would only mislead.
+    if strat.endswith("_direct"):
+        return "min"
     env_agg = (os.environ.get("TP_MCTS_HEURISTIC_AGGREGATION") or "").strip().lower()
     if env_agg:
         return env_agg
-    strat = (temporal_heuristic_strategy or "").strip().lower()
     if strat == "baseline_survival_meanvar":
         return "meanvar"
     if strat == "baseline_time_to_goal":
