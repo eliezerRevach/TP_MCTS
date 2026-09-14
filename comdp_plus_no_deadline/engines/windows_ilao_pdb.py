@@ -27,6 +27,9 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_OFFLINE_SECONDS   total offline budget                    (30)
     TP_MCTS_WILAO_OFFLINE_EXTEND    after optimal, solve other branches     (1)
     TP_MCTS_WILAO_PATTERN_GOALS     goal facts per pattern; 0 = all goals   (1)
+    TP_MCTS_WILAO_PATTERN_FACTS     facts per pattern, grown backwards from
+                                    the goals (fact_pattern.py); 0 = no cap:
+                                    every relevant action on full states    (8)
     TP_MCTS_WILAO_MISS              one | lazy                              (lazy)
     TP_MCTS_WILAO_QUERY_SECONDS     lazy budget per pattern per leaf        (0.05)
     TP_MCTS_WILAO_QUERY_EXPANSIONS  lazy expansions per pattern per leaf    (200)
@@ -42,6 +45,7 @@ import time
 from collections import Counter
 from typing import Dict, List, Optional
 
+from comdp_plus_no_deadline.engines.fact_pattern import FactPatternModel, grow_pattern
 from comdp_plus_no_deadline.engines.survivor_sweep import relaxed_actions_from_engine
 from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel, goal_relevance_closure
 from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO
@@ -73,6 +77,7 @@ class WindowsILAOPDBHeuristic:
         self.query_expansions = _env_int("TP_MCTS_WILAO_QUERY_EXPANSIONS", 200)
         self.aggregation = (os.environ.get("TP_MCTS_WILAO_AGGREGATION") or "min").strip().lower()
         self.extend_offline = bool(_env_int("TP_MCTS_WILAO_OFFLINE_EXTEND", 1))
+        self.pattern_facts = _env_int("TP_MCTS_WILAO_PATTERN_FACTS", 8)
         self.patterns: List[dict] = []
         self.counts: Counter = Counter()
         self.query_seconds_total = 0.0
@@ -103,13 +108,23 @@ class WindowsILAOPDBHeuristic:
         # to the slower ones after it.
         for index, group in enumerate(groups):
             per_pattern = max(0.0, offline_end - time.perf_counter()) / (len(groups) - index)
-            ops = frozenset().union(*(goal_relevance_closure(base, g) for g in group))
-            model = EngineModel(self._mdp, allowed_ops=ops, goals=set(group))
+            if self.pattern_facts > 0:
+                # Fact-capped pattern grown backwards from the goals (fact_pattern.py).
+                phi = grow_pattern(base.ops(), group, facts, max(self.pattern_facts, len(group)))
+                model = FactPatternModel(base, phi, group, facts)
+            else:
+                phi = None
+                ops = frozenset().union(*(goal_relevance_closure(base, g) for g in group))
+                model = EngineModel(self._mdp, allowed_ops=ops, goals=set(group))
+            root_facts = model.project(facts) if phi is not None else facts
             solver = WindowsLAO(model, sweep_horizon=deadline,
-                                relaxed_actions=relaxed_actions_from_engine(model, facts))
-            value = solver.solve(facts, deadline, time_budget=per_pattern)
+                                relaxed_actions=relaxed_actions_from_engine(model, root_facts))
+            value = solver.solve(root_facts, deadline, time_budget=per_pattern)
             self.patterns.append({
                 "goals": [str(g) for g in group],
+                "facts": None if phi is None else [str(f) for f in phi],
+                "actions": len(model.ops()),
+                "model": model,
                 "solver": solver,
                 "offline_value": value,
                 "offline_optimal": solver.complete,
@@ -125,6 +140,8 @@ class WindowsILAOPDBHeuristic:
                 active = [p for p in active if p["solver"].extend(slice_seconds)]
         self.offline_report = {
             "patterns": len(self.patterns),
+            "pattern_facts": [len(p["facts"]) if p["facts"] is not None else "all" for p in self.patterns],
+            "pattern_actions": [p["actions"] for p in self.patterns],
             "seconds": round(time.perf_counter() - started, 2),
             "values": [round(p["offline_value"], 6) for p in self.patterns],
             "optimal": [p["offline_optimal"] for p in self.patterns],
@@ -148,12 +165,13 @@ class WindowsILAOPDBHeuristic:
             solver = pattern["solver"]
             running = [(key, None if running_remaining is None else running_remaining.get(key))
                        for key in self._running_keys(facts, solver.ops)]
-            value, kind = solver.lookup(facts, r, running)
+            local = pattern["model"].project(facts) if pattern["facts"] is not None else facts
+            value, kind = solver.lookup(local, r, running)
             if value is None:
                 if self.miss_mode == "one":
                     value, kind = 1.0, "miss_one"
                 else:
-                    value = solver.solve(facts, r, running, lazy=True, time_budget=self.query_seconds,
+                    value = solver.solve(local, r, running, lazy=True, time_budget=self.query_seconds,
                                          max_expansions=self.query_expansions)
                     kind = "lazy_optimal" if solver.complete else "lazy_cut"
             self.counts[kind] += 1

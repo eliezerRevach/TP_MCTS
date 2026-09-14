@@ -510,6 +510,9 @@ class WindowsLAO:
     def _end_legal(self, op, facts) -> bool:
         if isinstance(op.start_action, str):
             return self.model.end_legal(op.key, facts)
+        pattern_check = getattr(self.model, "end_legal_op", None)
+        if pattern_check is not None:                  # fact-capped pattern: outside facts are free
+            return pattern_check(op, facts)
         a = op.end_action
         return a.pos_preconditions.issubset(facts) and a.neg_preconditions.isdisjoint(facts)
 

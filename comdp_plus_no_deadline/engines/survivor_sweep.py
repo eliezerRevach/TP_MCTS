@@ -74,10 +74,13 @@ def relaxed_actions_from_engine(model, probe_facts: Iterable[Fact]) -> List[Rela
     an approximation elsewhere.
     """
     probe = frozenset(probe_facts)
+    # A fact-capped pattern counts preconditions outside the pattern as true.
+    keep = getattr(model, "pattern_facts", None)
     out = []
     for key, op in model.ops().items():
         start = op.start_action
-        pre = frozenset(f for f in start.pos_preconditions if not _is_exec_fact(f))
+        pre = frozenset(f for f in start.pos_preconditions
+                        if not _is_exec_fact(f) and (keep is None or f in keep))
         before = probe | pre
         start_results = model.outcomes(start, before)
         start_adds = frozenset().union(*(frozenset(f) - before for f, _p in start_results))
