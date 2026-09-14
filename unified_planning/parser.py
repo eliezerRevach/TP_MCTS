@@ -207,7 +207,13 @@ parser.add_argument(
         'leaf heuristic: trpg | temporal_probabilistic_rpg | '
         'baseline_pessimistic | baseline_passmistic | baseline_optimistic | baseline_optimstic | '
         'exact_pattern_mdp (exact small-pattern CoMDP+ MDP; delete-AWARE, maximises '
-        'over a real policy set, ignores --temporal_heuristic_strategy)'
+        'over a real policy set, ignores --temporal_heuristic_strategy) | '
+        'temporal_stn_pdb (Part I symbolic-STN temporal PDB; full semantic state, '
+        'no projection, drives the real MDP transition law; ignores '
+        '--temporal_heuristic_strategy) | '
+        'windows_ilao_pdb (ILAO* on the time-left windows MDP, survivor-sweep '
+        'guided, offline table per goal pattern; knobs TP_MCTS_WILAO_*; ignores '
+        '--temporal_heuristic_strategy)'
     ),
     nargs='?',
     default='trpg',

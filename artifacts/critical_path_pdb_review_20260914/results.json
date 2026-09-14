@@ -1,0 +1,290 @@
+[
+  {
+    "horizon": 8,
+    "profiled": false,
+    "build_s": 0.057460400043055415,
+    "solve_s": 1.1689794999547303,
+    "lookup_s": 7.830001413822174e-05,
+    "value": 0.7995259852115899,
+    "states": 168,
+    "expanded": 167,
+    "unexpanded": 0,
+    "edges": 508,
+    "entries": 3297,
+    "max_entries": 45,
+    "updates": 1873,
+    "converged": true,
+    "complete": true,
+    "closed_form": 0.7995259852115901,
+    "fact_sets": 81,
+    "facts_used": [
+      "got(a)",
+      "got(b)",
+      "got(c)",
+      "got(d)",
+      "inExecution(start-eight)",
+      "inExecution(start-four)",
+      "inExecution(start-one)",
+      "inExecution(start-two)"
+    ],
+    "queue_lengths": {
+      "0": 16,
+      "1": 32,
+      "2": 48,
+      "3": 48,
+      "4": 24
+    },
+    "entries_by_queue_length": {
+      "0": 43,
+      "1": 264,
+      "2": 818,
+      "3": 1324,
+      "4": 848
+    },
+    "durative_actions": {
+      "start_eight": "8",
+      "start_four": "4",
+      "start_two": "2",
+      "start_one": "1"
+    },
+    "compiled_action_count": 8,
+    "initial_true_facts": [],
+    "max_facts_true_in_state": 4,
+    "root_entries": 1,
+    "start_gap_branches": 242,
+    "noop_branches": 152
+  },
+  {
+    "horizon": 16,
+    "profiled": false,
+    "build_s": 0.05420449998928234,
+    "solve_s": 19.891669300035574,
+    "lookup_s": 0.0001218999968841672,
+    "value": 0.9840789900228684,
+    "states": 168,
+    "expanded": 167,
+    "unexpanded": 0,
+    "edges": 508,
+    "entries": 10293,
+    "max_entries": 191,
+    "updates": 3693,
+    "converged": true,
+    "complete": true,
+    "closed_form": 0.9840789900228686,
+    "fact_sets": 81,
+    "facts_used": [
+      "got(a)",
+      "got(b)",
+      "got(c)",
+      "got(d)",
+      "inExecution(start-eight)",
+      "inExecution(start-four)",
+      "inExecution(start-one)",
+      "inExecution(start-two)"
+    ],
+    "queue_lengths": {
+      "0": 16,
+      "1": 32,
+      "2": 48,
+      "3": 48,
+      "4": 24
+    },
+    "entries_by_queue_length": {
+      "0": 127,
+      "1": 860,
+      "2": 2592,
+      "3": 4058,
+      "4": 2656
+    },
+    "durative_actions": {
+      "start_eight": "8",
+      "start_four": "4",
+      "start_two": "2",
+      "start_one": "1"
+    },
+    "compiled_action_count": 8,
+    "initial_true_facts": [],
+    "max_facts_true_in_state": 4,
+    "root_entries": 9,
+    "start_gap_branches": 242,
+    "noop_branches": 152
+  },
+  {
+    "horizon": 25,
+    "profiled": false,
+    "build_s": 0.03670120000606403,
+    "solve_s": 196.80317829997512,
+    "lookup_s": 0.00015259999781847,
+    "value": 0.9988276286444728,
+    "states": 168,
+    "expanded": 167,
+    "unexpanded": 0,
+    "edges": 508,
+    "entries": 22671,
+    "max_entries": 553,
+    "updates": 5438,
+    "converged": true,
+    "complete": true,
+    "closed_form": 0.9988276287705017,
+    "fact_sets": 81,
+    "facts_used": [
+      "got(a)",
+      "got(b)",
+      "got(c)",
+      "got(d)",
+      "inExecution(start-eight)",
+      "inExecution(start-four)",
+      "inExecution(start-one)",
+      "inExecution(start-two)"
+    ],
+    "queue_lengths": {
+      "0": 16,
+      "1": 32,
+      "2": 48,
+      "3": 48,
+      "4": 24
+    },
+    "entries_by_queue_length": {
+      "0": 219,
+      "1": 1764,
+      "2": 5646,
+      "3": 9030,
+      "4": 6012
+    },
+    "durative_actions": {
+      "start_eight": "8",
+      "start_four": "4",
+      "start_two": "2",
+      "start_one": "1"
+    },
+    "compiled_action_count": 8,
+    "initial_true_facts": [],
+    "max_facts_true_in_state": 4,
+    "root_entries": 18,
+    "start_gap_branches": 242,
+    "noop_branches": 152
+  },
+  {
+    "single_goal": "got(a)",
+    "elapsed_s": 0.00043019995791837573,
+    "value": 1.0,
+    "actions": [
+      "start_eight"
+    ],
+    "states": 3,
+    "expanded": 2,
+    "unexpanded": 0,
+    "edges": 2,
+    "entries": 3,
+    "max_entries": 1,
+    "updates": 2,
+    "converged": true,
+    "complete": true
+  },
+  {
+    "single_goal": "got(b)",
+    "elapsed_s": 0.0009401999996043742,
+    "value": 0.9992709999999999,
+    "actions": [
+      "start_four"
+    ],
+    "states": 3,
+    "expanded": 2,
+    "unexpanded": 0,
+    "edges": 3,
+    "entries": 14,
+    "max_entries": 7,
+    "updates": 13,
+    "converged": true,
+    "complete": true
+  },
+  {
+    "single_goal": "got(c)",
+    "elapsed_s": 0.002316800004336983,
+    "value": 0.9996903706556244,
+    "actions": [
+      "start_two"
+    ],
+    "states": 3,
+    "expanded": 2,
+    "unexpanded": 0,
+    "edges": 3,
+    "entries": 26,
+    "max_entries": 13,
+    "updates": 25,
+    "converged": true,
+    "complete": true
+  },
+  {
+    "single_goal": "got(d)",
+    "elapsed_s": 0.00910010002553463,
+    "value": 0.9998658931380333,
+    "actions": [
+      "start_one"
+    ],
+    "states": 3,
+    "expanded": 2,
+    "unexpanded": 0,
+    "edges": 3,
+    "entries": 52,
+    "max_entries": 26,
+    "updates": 51,
+    "converged": true,
+    "complete": true
+  },
+  {
+    "horizon": 16,
+    "profiled": true,
+    "build_s": 0.0805881000123918,
+    "solve_s": 51.56516890000785,
+    "lookup_s": 0.00015999999595806003,
+    "value": 0.9840789900228684,
+    "states": 168,
+    "expanded": 167,
+    "unexpanded": 0,
+    "edges": 508,
+    "entries": 10293,
+    "max_entries": 191,
+    "updates": 3693,
+    "converged": true,
+    "complete": true,
+    "closed_form": 0.9840789900228686,
+    "fact_sets": 81,
+    "facts_used": [
+      "got(a)",
+      "got(b)",
+      "got(c)",
+      "got(d)",
+      "inExecution(start-eight)",
+      "inExecution(start-four)",
+      "inExecution(start-one)",
+      "inExecution(start-two)"
+    ],
+    "queue_lengths": {
+      "0": 16,
+      "1": 32,
+      "2": 48,
+      "3": 48,
+      "4": 24
+    },
+    "entries_by_queue_length": {
+      "0": 127,
+      "1": 860,
+      "2": 2592,
+      "3": 4058,
+      "4": 2656
+    },
+    "durative_actions": {
+      "start_eight": "8",
+      "start_four": "4",
+      "start_two": "2",
+      "start_one": "1"
+    },
+    "compiled_action_count": 8,
+    "initial_true_facts": [],
+    "max_facts_true_in_state": 4,
+    "root_entries": 9,
+    "start_gap_branches": 242,
+    "noop_branches": 152
+  }
+]

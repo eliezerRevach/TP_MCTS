@@ -1,0 +1,55 @@
+{
+  "horizon": 16,
+  "instrumented": true,
+  "value": 0.9840789900228684,
+  "elapsed_s": 28.485326099966187,
+  "prune_calls": 15837,
+  "candidate_entries_passed_to_prune": 4425472,
+  "largest_single_prune_input": 10282,
+  "backups": 3780,
+  "branch_backups": 9320,
+  "branch_backups_with_unchanged_children": 95,
+  "all_branch_sum_s": 24.193638001335785,
+  "unchanged_branch_sum_s": 0.34112619986990467,
+  "garbage_structure_checks": [
+    {
+      "garbage_actions": 0,
+      "total_durative_actions": 4,
+      "build_only_s": 0.06863789999624714,
+      "states": 168,
+      "facts_used": 8,
+      "actions_after_explicit_goal_closure": [
+        "start_eight",
+        "start_four",
+        "start_one",
+        "start_two"
+      ]
+    },
+    {
+      "garbage_actions": 1,
+      "total_durative_actions": 5,
+      "build_only_s": 0.3208347000181675,
+      "states": 872,
+      "facts_used": 10,
+      "actions_after_explicit_goal_closure": [
+        "start_eight",
+        "start_four",
+        "start_one",
+        "start_two"
+      ]
+    },
+    {
+      "garbage_actions": 2,
+      "total_durative_actions": 6,
+      "build_only_s": 1.3188184999744408,
+      "states": 4960,
+      "facts_used": 11,
+      "actions_after_explicit_goal_closure": [
+        "start_eight",
+        "start_four",
+        "start_one",
+        "start_two"
+      ]
+    }
+  ]
+}

@@ -183,8 +183,6 @@
   "181": "sweep_paths_table_gap.py",
   "182": ".create_Snode_root_interval",
   "183": "._ensure_admissible_lp_bound",
-  "184": ".calculate_shortest_path",
-  "185": ".check_stn",
   "186": "Action",
   "187": ".copy_stn",
   "188": "Fact"

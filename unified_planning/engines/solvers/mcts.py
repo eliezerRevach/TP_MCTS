@@ -39,6 +39,52 @@ _CORR_OPTIMISTIC = frozenset({"baseline_optimistic", "baseline_optimstic"})
 # NOT a PTRPG strategy: it is delete-AWARE and maximises over a real policy set,
 # so it is dispatched before the PTRPG heuristic is ever constructed.
 _EXACT_PDB = frozenset({"exact_pattern_mdp"})
+# Part I symbolic-STN temporal PDB (comdp_plus_no_deadline.engines.temporal_stn_pdb).
+# Also NOT a PTRPG strategy, and unlike every other leaf it does not re-derive the
+# domain at all: it expands through this MDP's own legal_actions /
+# transition_function, so conditions, deletes, mutex and state-dependent outcome
+# probabilities are the model's rather than a reconstruction of it.
+_STN_PDB = frozenset({"temporal_stn_pdb"})
+# ILAO* over the time-left windows MDP, guided by the survivor sweep
+# (comdp_plus_no_deadline.engines.windows_ilao_pdb). Same dispatch shape as
+# temporal_stn_pdb: drives the real MDP, needs the running actions' remaining times.
+_WINDOWS_ILAO = frozenset({"windows_ilao_pdb"})
+
+
+def _stn_running_remaining(stn, current_time):
+    """Remaining execution time per in-flight action type, read off the search's STN.
+
+    Section 8 of the STN-PDB draft needs ``E_r = start(r) + d(r)`` for every
+    running instance. In ``domain_type='regular'`` the MDP state is an untimed
+    fact set, so those times exist only in the STN TP-MCTS keeps beside the
+    tree; ``get_lower_bound_potential_end_action`` is exactly the pending-end
+    table, read at the same earliest-time schedule the search reads everywhere
+    else. Returns None when unavailable, which leaves every ``E_r`` symbolic --
+    sound, but a relaxation, and reported as such by the heuristic.
+    """
+    if stn is None:
+        return None
+    try:
+        bounds = stn.get_lower_bound_potential_end_action()
+    except Exception:
+        return None
+    out = {}
+    for end_action, earliest in (bounds or {}).items():
+        start_action = getattr(end_action, "start_action", None)
+        if start_action is None:
+            continue
+        out[start_action.name] = max(0.0, float(earliest) - float(current_time))
+    return out or None
+
+
+def _stn_of(node):
+    """The STN attached to a search node, if this run keeps one."""
+    if node is None:
+        return None
+    stn = getattr(node, "stn", None)
+    if stn is not None:
+        return stn
+    return getattr(getattr(node, "parent", None), "stn", None)
 
 
 def _resolution_heuristic_kwargs_from_cli() -> dict:
@@ -109,6 +155,8 @@ def _uses_tprpg_family(heuristic_name: str) -> bool:
         or heuristic_name in _CORR_PESSIMISTIC
         or heuristic_name in _CORR_OPTIMISTIC
         or heuristic_name in _EXACT_PDB
+        or heuristic_name in _STN_PDB
+        or heuristic_name in _WINDOWS_ILAO
     )
 
 
@@ -152,6 +200,7 @@ def _tprpg_heuristic_value(
     cached_table=None,
     leaf_heuristic_name: str = "temporal_probabilistic_rpg",
     aligned_h_override=None,
+    stn=None,
 ):
     """
     Evaluate the temporal_probabilistic_rpg heuristic, threading the baseline_cached
@@ -168,7 +217,7 @@ def _tprpg_heuristic_value(
             heuristic_mdp, state, current_time,
             temporal_heuristic_depth, temporal_heuristic_strategy,
             cached_table=cached_table, return_cache_table=True,
-            leaf_heuristic_name=leaf_heuristic_name,
+            leaf_heuristic_name=leaf_heuristic_name, stn=stn,
         )
         if isinstance(raw, tuple):
             score, cache_out = raw
@@ -180,6 +229,7 @@ def _tprpg_heuristic_value(
             temporal_heuristic_depth, temporal_heuristic_strategy,
             leaf_heuristic_name=leaf_heuristic_name,
             aligned_h_override=aligned_h_override,
+            stn=stn,
         )
         cache_out = None
     return score - 0.001 * current_time, cache_out
@@ -480,6 +530,7 @@ def _temporal_heuristic(
     return_cache_table: bool = False,
     leaf_heuristic_name: str = "temporal_probabilistic_rpg",
     aligned_h_override=None,
+    stn=None,
 ):
     from unified_planning.engines.heuristic_timing import WorkerTimer, is_active
 
@@ -500,6 +551,47 @@ def _temporal_heuristic(
                 temporal_heuristic_depth, current_time, heuristic_mdp.deadline()
             ),
             start_time=current_time,
+        )
+
+    # Part I symbolic-STN temporal PDB. Dispatched here for the same reason as
+    # the exact pattern MDP: it shares no machinery with the PTRPG family and
+    # must not cause that heuristic to be built.
+    if leaf_heuristic_name in _STN_PDB:
+        from comdp_plus_no_deadline.engines.temporal_stn_pdb import (
+            TemporalSTNPDBHeuristic,
+        )
+
+        stn_pdb = getattr(heuristic_mdp, "_temporal_stn_pdb_heuristic", None)
+        if stn_pdb is None:
+            stn_pdb = TemporalSTNPDBHeuristic(heuristic_mdp)
+            setattr(heuristic_mdp, "_temporal_stn_pdb_heuristic", stn_pdb)
+        return stn_pdb.heuristic_score(
+            state,
+            heuristic_mdp.problem.goals,
+            fixed_depth=_effective_temporal_depth(
+                temporal_heuristic_depth, current_time, heuristic_mdp.deadline()
+            ),
+            start_time=current_time,
+            running_remaining=_stn_running_remaining(stn, current_time),
+        )
+
+    if leaf_heuristic_name in _WINDOWS_ILAO:
+        from comdp_plus_no_deadline.engines.windows_ilao_pdb import (
+            WindowsILAOPDBHeuristic,
+        )
+
+        wilao = getattr(heuristic_mdp, "_windows_ilao_pdb_heuristic", None)
+        if wilao is None:
+            wilao = WindowsILAOPDBHeuristic(heuristic_mdp)
+            setattr(heuristic_mdp, "_windows_ilao_pdb_heuristic", wilao)
+        return wilao.heuristic_score(
+            state,
+            heuristic_mdp.problem.goals,
+            fixed_depth=_effective_temporal_depth(
+                temporal_heuristic_depth, current_time, heuristic_mdp.deadline()
+            ),
+            start_time=current_time,
+            running_remaining=_stn_running_remaining(stn, current_time),
         )
 
     from comdp_plus_no_deadline.engines.temporal_probabilistic_rpg import (

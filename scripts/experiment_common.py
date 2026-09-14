@@ -559,6 +559,103 @@ HEURISTIC_ALIASES: dict[str, dict[str, str]] = {
         "temporal_heuristic_strategy": "baseline",  # unused for exact_pattern_mdp
         "label": "exact_pattern_mdp",
     },
+    # Part I of the symbolic-STN temporal PDB
+    # (comdp_plus_no_deadline/engines/temporal_stn_pdb.py, spec in
+    # artifacts/Temporal_STN_PDB_Exact_Draft.docx sections 1-9).
+    #
+    # It is not a member of ANY existing family and, uniquely here, re-derives
+    # nothing: expansion runs through this MDP's own legal_actions and
+    # transition_function, so start effects, end effects, adds, deletes,
+    # start/end conditions, the inExecution mutex and STATE-DEPENDENT outcome
+    # probabilities are the model's, not a reconstruction. That closes by
+    # construction the extraction class of bug that once cost machine_shop its
+    # only free(machine) re-achiever.
+    #
+    # State is the spec's annotated STN: X = annotated Z, with (s, R, C)
+    # recovered by REPLAY. Time stays SYMBOLIC -- the graph branches on event
+    # ORDER, never on a numeric clock -- so one node covers a whole interval of
+    # times that a discretising solver would enumerate separately.
+    #
+    # phi is the IDENTITY. Section 7 requires a proved Markov abstraction
+    # ("same legal controls and same abstract transition law", "Do not free
+    # omitted preconditions by default") and no pattern builder in this repo
+    # supplies that proof -- build_pattern frees exactly what section 7 forbids
+    # freeing. So the naive variant abstracts nothing and the value is exact
+    # w.r.t. the compiled problem whenever the graph closes.
+    #
+    # NOT admissible-by-fiat and NOT a scalar: the solver computes an INTERVAL
+    # [lo, hi]. A budget-cut leaf is (0, 1) -- section 5's "UNKNOWN is not value
+    # zero" -- and lo == hi only when the graph closed. heuristic_score returns
+    # hi (an upper bound). Read `last_result.exact` to find out whether that
+    # number was the value or merely a bound.
+    #
+    # Section 6 is where "exact" needs care, so the solver BRACKETS instead of
+    # asserting. A symbolic node covers a SET of ground states (one per feasible
+    # time assignment) and one scalar max over that set lets two outcome
+    # branches each rely on a different value of a time committed BEFORE the
+    # branch -- which no real execution can do. Two runs pin that down:
+    #   TP_MCTS_STN_PDB_PIN_STARTS=1  -> S_a = C, every time a point, backup IS
+    #                                    the MDP backup => EXACT for that policy
+    #                                    class => a LOWER bound on the optimum.
+    #   TP_MCTS_STN_PDB_PIN_STARTS=0  -> section 4 as written => an UPPER bound.
+    # V_pinned <= V* <= V_symbolic, and when the two AGREE the value is certified
+    # exact. Measured on prob_match_cellar(1): they agree at every deadline 2..12
+    # (0.70, 0.70, 0.91, 0.91, 0.91, 0.91).
+    #
+    # KNOWN LIMIT, measured: the graph is a TREE (section 5, "One prefix has one
+    # parent before merging"; merging is Part II), and without merging it does
+    # not answer AT ALL on a real domain. prob_conc(1) at deadline 2:
+    #   tree  = 200k nodes / 262s, still CUT at [0.000, 1.000]
+    #   merge = 128k nodes / 286s, EXACT at 0.000
+    # machine_shop(2) and nasa_rover(2) at deadline 6 do not close either way.
+    # The tree re-solves every interleaving of independent starts, so the blow-up
+    # is driven by the number of concurrently startable actions, NOT by the
+    # horizon. Use it as ground truth on small instances, not as a benchmark
+    # leaf, until Part II history compression lands.
+    #
+    # Knobs: TP_MCTS_STN_PDB_PIN_STARTS (bracket side, default 0 = upper),
+    # TP_MCTS_STN_PDB_NODE_BUDGET (default 20000),
+    # TP_MCTS_STN_PDB_MAX_PREFIX_EVENTS (default 64),
+    # TP_MCTS_STN_PDB_MERGE (Part II merging, UNPROVED, default off),
+    # TP_MCTS_STN_PDB_TIE_STARTS (allow a start tied with a pending end).
+    "temporal_stn_pdb": {
+        "heuristic_name": "temporal_stn_pdb",
+        "temporal_heuristic_strategy": "baseline",  # unused for temporal_stn_pdb
+        "label": "temporal_stn_pdb",
+    },
+    "stn_pdb": {
+        "heuristic_name": "temporal_stn_pdb",
+        "temporal_heuristic_strategy": "baseline",
+        "label": "temporal_stn_pdb",
+    },
+    # ILAO* on the time-left windows MDP (comdp_plus_no_deadline/engines/
+    # windows_ilao_pdb.py, spec in artifacts/Windows_ILAO_PDB.docx).
+    #
+    # State (F, Q, (lo, hi, e) per running action, r): facts, end order, the
+    # real-time window of each running action's time left, the time left still
+    # guaranteed against the charged deadline, and time in hand. No clock.
+    # Guided by the survivor sweep (delete-relaxed occupancy with the phase loop
+    # of rpg_exact_states_v18). Offline: ILAO* per goal pattern from the initial
+    # state for TP_MCTS_WILAO_OFFLINE_SECONDS; online: budgeted ILAO* from each
+    # leaf, reusing the table. Aggregation over patterns: min (sound).
+    #
+    # Measured (standalone, prob_conc all 4 goals as one pattern): exact 0.7995
+    # at D = 8 in 0.44 s / 140 expansions, 0.9426 at D = 12 in 0.70 s; without
+    # the sweep the same solve takes 32 s / 231 s.
+    #
+    # Knobs: TP_MCTS_WILAO_OFFLINE_SECONDS (30), TP_MCTS_WILAO_PATTERN_GOALS
+    # (1; 0 = all goals in one pattern), TP_MCTS_WILAO_QUERY_SECONDS (0.05),
+    # TP_MCTS_WILAO_QUERY_EXPANSIONS (500), TP_MCTS_WILAO_AGGREGATION (min).
+    "windows_ilao_pdb": {
+        "heuristic_name": "windows_ilao_pdb",
+        "temporal_heuristic_strategy": "baseline",  # unused for windows_ilao_pdb
+        "label": "windows_ilao_pdb",
+    },
+    "windows_ilao": {
+        "heuristic_name": "windows_ilao_pdb",
+        "temporal_heuristic_strategy": "baseline",
+        "label": "windows_ilao_pdb",
+    },
     # MCTS leaf: real stochastic rollout to terminal 0/1; PTRPG only guides action choice.
     "ptrpg_guided_rollout_baseline_survival_resolution": {
         "heuristic_name": "temporal_probabilistic_rpg",
@@ -873,6 +970,7 @@ def summarize_run_domain_output(output: str, *, max_lines: int = 24) -> None:
         "Traceback",
         "Error",
         "ModuleNotFoundError",
+        "[windows_ilao_pdb]",
     )
     hits = [ln for ln in output.splitlines() if any(k in ln for k in keys)]
     if hits:

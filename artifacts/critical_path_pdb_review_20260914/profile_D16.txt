@@ -1,0 +1,35 @@
+         54371258 function calls (53243705 primitive calls) in 50.360 seconds
+
+   Ordered by: cumulative time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.147    0.147   51.564   51.564 critical_path_pdb.py:304(solve)
+     3780    1.271    0.000   48.072    0.013 critical_path_pdb.py:335(_backup)
+     9320   12.047    0.001   41.649    0.004 critical_path_pdb.py:360(_outcome_sum)
+    15837   14.535    0.001   28.532    0.002 critical_path_pdb.py:86(prune)
+19613847/18486294    4.169    0.000    7.238    0.000 {built-in method builtins.all}
+    15837    2.644    0.000    6.547    0.000 {built-in method builtins.sorted}
+  4550817    4.153    0.000    4.153    0.000 <string>:2(__init__)
+  4205748    3.076    0.000    3.904    0.000 critical_path_pdb.py:93(<lambda>)
+   104371    0.160    0.000    3.314    0.000 critical_path_pdb.py:325(<genexpr>)
+   100591    0.489    0.000    3.111    0.000 {built-in method builtins.any}
+  4425472    1.696    0.000    2.577    0.000 <string>:2(__hash__)
+  3486868    1.218    0.000    1.461    0.000 critical_path_pdb.py:81(dominates)
+  3941890    1.078    0.000    1.078    0.000 {built-in method builtins.max}
+   375481    0.545    0.000    1.026    0.000 critical_path_pdb.py:352(_regress_start)
+  4223116    0.993    0.000    0.993    0.000 {method 'append' of 'list' objects}
+  4425472    0.881    0.000    0.881    0.000 {built-in method builtins.hash}
+  4205748    0.828    0.000    0.828    0.000 {built-in method builtins.sum}
+   409793    0.327    0.000    0.719    0.000 critical_path_pdb.py:366(<genexpr>)
+   219724    0.074    0.000    0.074    0.000 <string>:2(__eq__)
+     9320    0.017    0.000    0.017    0.000 {method 'extend' of 'list' objects}
+    13268    0.004    0.000    0.004    0.000 {built-in method builtins.len}
+     3780    0.004    0.000    0.004    0.000 {method 'discard' of 'set' objects}
+     3780    0.002    0.000    0.002    0.000 {method 'popleft' of 'collections.deque' objects}
+     3613    0.002    0.000    0.002    0.000 {method 'append' of 'collections.deque' objects}
+     3613    0.001    0.000    0.001    0.000 {method 'add' of 'set' objects}
+        1    0.000    0.000    0.000    0.000 {method 'disable' of '_lsprof.Profiler' objects}
+      168    0.000    0.000    0.000    0.000 critical_path_pdb.py:313(<genexpr>)
+        2    0.000    0.000    0.000    0.000 {method 'items' of 'dict' objects}
+
+
