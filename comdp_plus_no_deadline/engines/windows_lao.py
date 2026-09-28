@@ -28,6 +28,7 @@ Pruned, never generated or never expanded:
     * an end with r - e_x < 0                                   -- past the deadline
     * a state with h = 0                                        -- goal unreachable in r
     * an inert start (only occupies its slot) with lo_x > r     -- dominated by not starting
+    * an instant action whose every outcome is its own state    -- never leaves (``fold_zero_time_loop``)
 
 Values start at ``h`` (the survivor sweep, meant as an upper bound) and are only
 ever backed up from children, so ``V(root)`` is an upper bound at any moment,
@@ -113,6 +114,21 @@ def end_windows(windows: Sequence[Window], durations: Sequence[Fraction]
     return normalise(rest), e_x
 
 
+def fold_zero_time_loop(branches, s):
+    """An instant action whose outcome is its own state lands at the same state at
+    the same r, so the best policy repeats it until it leaves. ``branches`` are
+    ``(p, child)``; the part q that comes back to ``s`` is folded away:
+        q = 1      -> None, the option never leaves (it would hold any value, V = V)
+        0 < q < 1  -> the other outcomes, p / (1 - q)
+    Only for zero time: a durative retry lands at r - c, a different value."""
+    q = sum(p for p, child in branches if child == s)
+    if q <= 0:
+        return branches
+    if q >= 1 - _EPS:
+        return None
+    return tuple((p / (1 - q), child) for p, child in branches if child != s)
+
+
 # ---------------------------------------------------------------------------
 # Solver
 # ---------------------------------------------------------------------------
@@ -157,7 +173,7 @@ class WindowsLAO:
         self.horizon = Fraction(sweep_horizon) if sweep_horizon is not None else Fraction(0)
         self.stats = {"expansions": 0, "backups": 0, "passes": 0, "h_builds": 0,
                       "pruned_h0": 0, "pruned_gap": 0, "pruned_deadline": 0, "pruned_inert": 0,
-                      "cover_used": 0}
+                      "pruned_noop": 0, "cover_used": 0}
         self.complete = True
         # States whose value is final: every state of a converged best policy.
         # Indexed by (F, Q) for the covering lookup.
@@ -167,6 +183,7 @@ class WindowsLAO:
         # Branches the solved policies did not take: (depth, -branch value, n, state).
         self._candidates: List[Tuple[int, float, int, State]] = []
         self._candidate_count = 0
+        self._policy_changed = False
 
     # -- query ---------------------------------------------------------------
     def _roots(self, facts: FrozenSet, r: Fraction, running) -> List[State]:
@@ -349,13 +366,16 @@ class WindowsLAO:
                 return self.V[root], False
             expanded, residual = self._pass(root)
             self.stats["passes"] += 1
-            if expanded == 0 and residual < self.epsilon:
+            # A best choice that switched during the pass (e.g. between tied options)
+            # points into a part this pass did not visit, whose values may be stale.
+            if expanded == 0 and residual < self.epsilon and not self._policy_changed:
                 return self.V[root], True
 
     def _pass(self, root: State) -> Tuple[int, float]:
         """One depth-first pass over the best partial policy: expand its tips,
         back up every visited state in post-order."""
         expanded, residual = 0, 0.0
+        self._policy_changed = False
         visited = set()
         stack = [(root, False)]
         while stack:
@@ -391,6 +411,8 @@ class WindowsLAO:
             if q > best_value + _EPS:
                 best_value, best_index = q, k
         self.V[s] = best_value
+        if self.best.get(s, best_index) != best_index:
+            self._policy_changed = True
         self.best[s] = best_index
         self.stats["backups"] += 1
         return abs(old - best_value)
@@ -417,41 +439,59 @@ class WindowsLAO:
             self.stats["pruned_h0"] += 1
 
     # -- expansion -----------------------------------------------------------
-    def _expand(self, s: State) -> None:
-        facts, queue, windows, r = s
-        options = []
+    def _rest_options(self, facts, queue, windows):
+        """The options of (F, Q, W), without r:
+        ``(label, charge, inert_e, queue after, windows after, outcomes)``.
+
+        charge  : what the deadline is charged -- 0 for a start or an instant
+                  action, e_x for the first end.
+        inert_e : e of an inert start (not taken when it exceeds r), else None.
+        Shared by ILAO* (``_expand``) and the full table (``WindowsTable``).
+        """
         for name in self.model.legal_action_names(facts):
             op = self.ops.get(name)
             if op is None:
                 continue
             outs = self._outcomes(op, "S", facts)
             if op.end_action is None:
-                options.append((("do", name), self._children(outs, queue, windows, r)))
+                yield ("do", name), Fraction(0), None, queue, windows, outs
                 continue
             d = self.durations[name]
+            inert = self.prune_inert and self._inert(name)
             for gap in range(len(queue) + 1):
                 new = start_windows(windows, d, gap)
                 if new is None:
                     self.stats["pruned_gap"] += 1
                     continue
-                if self.prune_inert and new[gap][2] > r and self._inert(name):
-                    self.stats["pruned_inert"] += 1
-                    continue
-                q2 = queue[:gap] + (name,) + queue[gap:]
-                options.append((("start", name, gap), self._children(outs, q2, new, r)))
+                yield (("start", name, gap), Fraction(0), new[gap][2] if inert else None,
+                       queue[:gap] + (name,) + queue[gap:], new, outs)
         if queue:
             x = queue[0]
             op = self.ops[x]
-            charge = windows[0][2]
-            if r - charge < 0:
-                self.stats["pruned_deadline"] += 1
-            elif self._end_legal(op, facts):
-                rest, _ = end_windows(windows, [self.durations[k] for k in queue[1:]])
+            if self._end_legal(op, facts):
+                rest, charge = end_windows(windows, [self.durations[k] for k in queue[1:]])
                 if rest is None:
                     self.stats["pruned_gap"] += 1
                 else:
-                    outs = self._outcomes(op, "E", facts)
-                    options.append((("end", x), self._children(outs, queue[1:], rest, r - charge)))
+                    yield ("end", x), charge, None, queue[1:], rest, self._outcomes(op, "E", facts)
+
+    def _expand(self, s: State) -> None:
+        facts, queue, windows, r = s
+        options = []
+        for label, charge, inert_e, q2, w2, outs in self._rest_options(facts, queue, windows):
+            if r - charge < 0:
+                self.stats["pruned_deadline"] += 1
+                continue
+            if inert_e is not None and inert_e > r:
+                self.stats["pruned_inert"] += 1
+                continue
+            branches = self._children(outs, q2, w2, r - charge)
+            if label[0] == "do":
+                branches = fold_zero_time_loop(branches, s)
+                if branches is None:
+                    self.stats["pruned_noop"] += 1
+                    continue
+            options.append((label, branches))
         self.options[s] = options
         self.stats["expansions"] += 1
         self._backup(s)
@@ -519,3 +559,328 @@ class WindowsLAO:
     def _inert(self, name: str) -> bool:
         getter = getattr(self.model, "start_is_inert", None)
         return bool(getter(name)) if getter is not None else False
+
+
+# ---------------------------------------------------------------------------
+# The whole pattern, every r
+# ---------------------------------------------------------------------------
+
+def _frac_gcd(a: Fraction, b: Fraction) -> Fraction:
+    den = a.denominator * b.denominator // math.gcd(a.denominator, b.denominator)
+    return Fraction(math.gcd(int(a * den), int(b * den)), den)
+
+
+class WindowsTable:
+    """Every state of the pattern at every r: a forward graph over (F, Q, W) and
+    backward curves V(s, r). No heuristic, no ILAO*.
+
+    forward : every state reachable from the root before the deadline, expanded once
+              with ``WindowsLAO._rest_options`` -- the same rules as ILAO*, without r
+              in the state. States are taken in order of tmin, the least time charged
+              on any path to them; one with tmin > horizon is never expanded (it can
+              only be reached after the deadline). tmin is kept beside the state, not
+              in it. Each option keeps its charge (0 for a start or an instant action,
+              e_x for an end) and, for an inert start, the e it needs. An instant
+              action that comes back to its own state is folded
+              (``fold_zero_time_loop``).
+    backward: V(s, .) is a step function of r, kept on the grid g = gcd of every
+              charge, inert threshold and the horizon. Goals are 1, everything else
+              starts at 0, so a value is only ever built from real paths to the goal
+              and a loop that never reaches it stays 0:
+                  V(s, r) = max over options  sum p * V(s', r - c)
+              (an option with r < c, or an inert start with r < e, is not taken).
+              An end charges c > 0 and reads an earlier layer, so the layers
+              r = 0, g, 2g, ... are solved in order. Inside a layer only charge-0
+              edges are left: starts (Q grows) and ends with e = 0 (Q shrinks) cannot
+              loop and instant self-loops are folded, so a layer is one sink-first
+              pass (vectorised per level). If a zero-time cycle over several states is
+              left (two instant actions undoing each other), a worklist from the goals
+              is used instead; it terminates, but a cycle that leaks is summed as a
+              series and stops within 1e-14 below the value.
+              A state is only ever at r <= horizon - tmin; cells beyond that are set
+              to 1 (never read by a reachable cell, and a sound answer if a lookup
+              lands there).
+    lookup  : the leaf's state itself, else the table states with the same F and Q that
+              fit it some time d >= 0 after their event: a table state holds the windows
+              at an event, a leaf sits d after it, so it needs
+                  lo - d <= rem <= hi - d   and   e - d <= rem     for every running end
+              and r + d <= horizon - tmin(s) (the event cannot come before tmin).
+              EVERY fitting state is an upper bound on its own, so the smallest value
+              over them is returned. Why V(s, r + d) >= V(leaf, r):
+                1. the leaf dated back by d, windows rem + d at r + d, is worth at
+                   least the leaf: after an end the two are the same state; after a
+                   start the dated one is looser; every prune passes for it whenever
+                   it passes for the leaf;
+                2. the windows MDP is monotone in the order "same F and Q, lo <=,
+                   hi >=, r >=, r - e >=": every start, end and instant maps a looser
+                   state to a looser successor, and every prune is monotone. The
+                   fitting condition says exactly s >= the dated leaf.
+              The smallest fitting d gives the tightest value. None fits: a miss.
+    """
+
+    def __init__(self, lao: WindowsLAO, horizon):
+        self.lao = lao
+        self.horizon = Fraction(horizon)
+        self.states: List[Tuple[FrozenSet, Tuple[str, ...], Tuple[Window, ...]]] = []
+        self.index: Dict[tuple, int] = {}
+        self.options: List[Optional[list]] = []
+        self.V = None                                     # V[k, i] = V(state i, r = k * grid)
+        self.grid: Optional[Fraction] = None
+        self.complete = False
+        self._by_fq: Dict[tuple, List[Tuple[tuple, int]]] = {}
+        self.stats: Dict[str, object] = {}
+
+    # -- forward -------------------------------------------------------------
+    def build(self, root_facts, time_budget: Optional[float] = None) -> bool:
+        """Forward graph, then backward curves. False if ``time_budget`` (seconds)
+        ran out during the forward graph; the table is then not used."""
+        started = time.perf_counter()
+        stop_at = None if time_budget is None else started + float(time_budget)
+        lao, goals = self.lao, self.lao.model.goals
+        root = (frozenset(root_facts), (), ())
+        pending = object()                                # created, not expanded (yet)
+        index, states, options, tmin = {root: 0}, [root], [pending], [Fraction(0)]
+        heap = [(Fraction(0), 0)]
+        noops = folded = 0
+
+        def node(facts, queue, windows):
+            key = (frozenset(facts), queue, windows)
+            j = index.get(key)
+            if j is None:
+                j = index[key] = len(states)
+                states.append(key)
+                options.append(pending)
+                tmin.append(None)
+            return j
+
+        popped = 0
+        while heap:
+            if stop_at is not None and not popped & 255 and time.perf_counter() > stop_at:
+                self.stats.update(states_when_cut=len(states),
+                                  forward_seconds=round(time.perf_counter() - started, 2))
+                return False
+            t, i = heapq.heappop(heap)
+            if options[i] is not pending or t > tmin[i]:
+                continue
+            popped += 1
+            facts, queue, windows = states[i]
+            if goals <= facts:
+                options[i] = None
+                continue
+            row = []
+            for label, charge, inert_e, q2, w2, outs in lao._rest_options(facts, queue, windows):
+                branches = tuple((float(p), node(f, q2, w2)) for f, p in outs if p > _EPS)
+                if label[0] == "do":
+                    before = branches
+                    branches = fold_zero_time_loop(branches, i)
+                    if branches is None:
+                        noops += 1
+                        continue
+                    folded += branches is not before
+                row.append((charge, inert_e, branches))
+                arrive = t + charge
+                for _p, j in branches:
+                    if (tmin[j] is None or arrive < tmin[j]) and options[j] is pending:
+                        tmin[j] = arrive
+                        if arrive <= self.horizon:
+                            heapq.heappush(heap, (arrive, j))
+            options[i] = row
+        cut = 0
+        for i, row in enumerate(options):
+            if row is pending:                            # first reached after the deadline
+                options[i] = []
+                cut += 1
+        self.states, self.index, self.options = states, index, options
+        self.tmin = [self.horizon + 1 if x is None else x for x in tmin]
+        forward_seconds = time.perf_counter() - started
+        method = self._backward()
+        for k, (facts, queue, windows) in enumerate(states):
+            self._by_fq.setdefault((facts, queue), []).append((windows, k))
+        self.complete = True
+        self.stats.update(
+            states=len(states), cut_after_deadline=cut,
+            edges=sum(len(b) for row in options if row for _c, _e, b in row),
+            instant_noops_dropped=noops, instant_loops_folded=folded, backward=method, grid=str(self.grid),
+            forward_seconds=round(forward_seconds, 2),
+            backward_seconds=round(time.perf_counter() - started - forward_seconds, 2),
+            seconds=round(time.perf_counter() - started, 2))
+        return True
+
+    # -- backward ------------------------------------------------------------
+    def _backward(self) -> str:
+        import numpy as np
+        from scipy.sparse import csr_matrix
+
+        n = len(self.states)
+        g = self.horizon
+        for row in self.options:
+            for charge, inert_e, _b in row or ():
+                if charge:
+                    g = _frac_gcd(g, Fraction(charge))
+                if inert_e:
+                    g = _frac_gcd(g, Fraction(inert_e))
+        self.grid = g
+        R = int(self.horizon / g) + 1
+        owner, shift, need, rows, cols, probs = [], [], [], [], [], []
+        for i, row in enumerate(self.options):
+            for charge, inert_e, branches in row or ():
+                k = len(owner)
+                owner.append(i)
+                shift.append(int(Fraction(charge) / g))
+                need.append(0 if inert_e is None else math.ceil(Fraction(inert_e) / g))
+                for p, j in branches:
+                    rows.append(k)
+                    cols.append(j)
+                    probs.append(p)
+        owner = np.array(owner, dtype=int)
+        shift = np.array(shift, dtype=int)
+        need = np.array(need, dtype=int)
+        m = len(owner)
+        P = csr_matrix((probs, (rows, cols)), shape=(m, n))
+        V = np.zeros((R, n))
+        V[:, [i for i, row in enumerate(self.options) if row is None]] = 1.0
+
+        # levels over the charge-0 edges, sinks first
+        zero = shift == 0
+        rows_a, cols_a = np.array(rows, dtype=int), np.array(cols, dtype=int)
+        edge_zero = zero[rows_a] if len(rows_a) else np.zeros(0, dtype=bool)
+        pairs = set(zip(owner[rows_a[edge_zero]].tolist(), cols_a[edge_zero].tolist()))
+        pending = np.zeros(n, dtype=int)
+        preds: List[List[int]] = [[] for _ in range(n)]
+        for a, b in pairs:
+            pending[a] += 1
+            preds[b].append(a)
+        level = np.zeros(n, dtype=int)
+        frontier = [i for i in range(n) if pending[i] == 0]
+        seen = 0
+        while frontier:
+            b = frontier.pop()
+            seen += 1
+            for a in preds[b]:
+                level[a] = max(level[a], level[b] + 1)
+                pending[a] -= 1
+                if pending[a] == 0:
+                    frontier.append(a)
+        if seen < n:                                      # a zero-time cycle over several states
+            self.V = self._worklist(V, P, owner, shift, need)
+            self._mark_unreachable_cells()
+            return "worklist"
+
+        groups = {int(c): np.nonzero(shift == c)[0] for c in np.unique(shift) if c > 0}
+        P_pos = {c: P[idx] for c, idx in groups.items()}
+        opt_level = level[owner] if m else np.zeros(0, dtype=int)
+        levels = []
+        for L in range(int(level.max()) + 1 if n else 0):
+            mine = np.nonzero(opt_level == L)[0]
+            z = mine[zero[mine]]
+            levels.append((z, P[z], mine))
+        for k in range(R):
+            q = np.zeros(m)
+            for c, idx in groups.items():
+                if c <= k:
+                    q[idx] = P_pos[c] @ V[k - c]
+            Vk = V[k]
+            for z, Pz, mine in levels:
+                if len(z):
+                    q[z] = Pz @ Vk
+                if len(mine):
+                    vals = np.where(need[mine] > k, 0.0, q[mine])
+                    np.maximum.at(Vk, owner[mine], vals)
+        self.V = V
+        self._mark_unreachable_cells()
+        return "layers"
+
+    def _mark_unreachable_cells(self) -> None:
+        """A state is only ever at r <= horizon - tmin: later cells may read children
+        that were never expanded, so they are set to 1 (sound, and never read by a
+        reachable cell: a child's tmin is at most its parent's plus the charge)."""
+        for i, t in enumerate(self.tmin):
+            first = 0 if t > self.horizon else int((self.horizon - t) / self.grid) + 1
+            self.V[first:, i] = 1.0
+
+    def _worklist(self, V, P, owner, shift, need):
+        """Fallback for zero-time cycles over several states: from the goals,
+        recompute each predecessor's whole curve, requeue it when it went up."""
+        import numpy as np
+        from collections import deque
+
+        R, n = V.shape
+        by_state: List[List[int]] = [[] for _ in range(n)]
+        for k, i in enumerate(owner.tolist()):
+            by_state[i].append(k)
+        preds: List[set] = [set() for _ in range(n)]
+        coo = P.tocoo()
+        for k, j in zip(coo.row.tolist(), coo.col.tolist()):
+            preds[j].add(int(owner[k]))
+        Vt = V.T.copy()                                   # Vt[i] = curve of state i
+        goal = [row is None for row in self.options]
+        work = deque(i for i in range(n) if goal[i])
+        queued = np.array(goal, dtype=bool)
+        grid = np.arange(R)
+        while work:
+            s = work.popleft()
+            queued[s] = False
+            for t in preds[s]:
+                if goal[t]:
+                    continue
+                best = np.zeros(R)
+                for k in by_state[t]:
+                    lo, hi = P.indptr[k], P.indptr[k + 1]
+                    acc = P.data[lo:hi] @ Vt[P.indices[lo:hi]]
+                    q = np.zeros(R)
+                    c = int(shift[k])
+                    q[c:] = acc[:R - c]
+                    q[grid < need[k]] = 0.0
+                    np.maximum(best, q, out=best)
+                if np.any(best > Vt[t] + 1e-14):
+                    np.maximum(Vt[t], best, out=Vt[t])
+                    if not queued[t]:
+                        queued[t] = True
+                        work.append(t)
+        return Vt.T.copy()
+
+    # -- lookup --------------------------------------------------------------
+    def lookup(self, facts, r, running: Sequence[Tuple[str, object]] = ()) -> Tuple[Optional[float], str]:
+        """``(value, "exact" | "cover")`` or ``(None, "miss")``; several tie orders
+        of the running ends take the max, as in ``WindowsLAO``."""
+        facts = frozenset(facts)
+        if self.lao.model.goals <= facts:
+            return 1.0, "exact"
+        r = _as_fraction(r)
+        if not self.complete or r < 0 or r > self.horizon:
+            return None, "miss"
+        best, kind = None, "exact"
+        for f, q, w, _r in self.lao._roots(facts, r, running):
+            i = self.index.get((f, q, w))
+            if i is not None:
+                value = self.value(i, r)
+            else:
+                value = self._shifted_cover(f, q, w, r)
+                if value is None:
+                    return None, "miss"
+                kind = "cover"
+            best = value if best is None else max(best, value)
+        return (0.0 if best is None else best), kind
+
+    def value(self, i: int, r) -> float:
+        return float(self.V[int(min(Fraction(r), self.horizon) / self.grid), i])
+
+    def fitting_values(self, facts, queue, windows, r) -> List[float]:
+        """V(s, r + d) for every table state s with this F and Q that fits the leaf
+        some d >= 0 after its event, d the smallest that fits (see the class doc)."""
+        out = []
+        for w2, j in self._by_fq.get((facts, queue), ()):
+            d_lo, d_hi = Fraction(0), self.horizon - self.tmin[j] - r
+            for (lo2, hi2, e2), (lo, hi, e) in zip(w2, windows):
+                d_lo = max(d_lo, lo2 - lo, e2 - e)
+                d_hi = min(d_hi, hi2 - hi)
+                if d_lo > d_hi:
+                    break
+            else:
+                if d_lo <= d_hi:
+                    out.append(self.value(j, r + d_lo))
+        return out
+
+    def _shifted_cover(self, facts, queue, windows, r) -> Optional[float]:
+        values = self.fitting_values(facts, queue, windows, r)
+        return min(values) if values else None

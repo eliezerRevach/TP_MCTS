@@ -2603,6 +2603,7 @@ class C_MCTS(Base_MCTS):
                 cached_table=self._root_baseline_cache,
                 leaf_heuristic_name=self.heuristic_name,
                 aligned_h_override=aligned_override,
+                stn=snode.parent.stn if snode.parent else None,
             )
             return score
         h = up.engines.heuristics.TRPG(self.mdp, snode.state, current_time)
@@ -2626,6 +2627,7 @@ class C_MCTS(Base_MCTS):
                 cached_table=self._root_baseline_cache,
                 leaf_heuristic_name=self.heuristic_name,
                 aligned_h_override=aligned_override,
+                stn=stn,
             )
             return score
         h = up.engines.heuristics.TRPG(self.mdp, state, current_time)

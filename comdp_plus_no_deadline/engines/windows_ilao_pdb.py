@@ -1,22 +1,31 @@
-"""``windows_ilao_pdb``: MCTS leaf heuristic = a table from ILAO* on the time-left
-windows MDP, guided by the survivor sweep (the RPG PDB of rpg_exact_states_v18).
+"""``windows_ilao_pdb``: MCTS leaf heuristic = a table of the time-left windows MDP
+per goal pattern: the whole pattern at every r where it fits, ILAO* (guided by the
+survivor sweep, the RPG PDB of rpg_exact_states_v18) where it does not.
 
 Spec: ``artifacts/Windows_ILAO_PDB.docx``.
 
-    offline : one pattern per goal group; ILAO* from the initial state with
-              r = deadline until the best policy is solved (optimal). Its states
-              are marked solved. Then, until TP_MCTS_WILAO_OFFLINE_SECONDS is used
-              up, the branches that policy did not take are solved one by one,
-              closest to the root first (higher value first), each by ILAO* that
-              stops at solved states -- so MCTS finds more of its leaves solved.
+    offline : one pattern per goal group, TP_MCTS_WILAO_OFFLINE_SECONDS in total.
+              1. The full table (``WindowsTable``) of every pattern: every state
+                 reachable from the initial state, built forward once without r, then
+                 V(s, r) for every r <= deadline backward from the goals, starting at 0
+                 (no heuristic, so no loop can hold a made-up value). Value iteration,
+                 no ILAO*. Each pattern gets an equal share of 90% of the budget.
+              2. Only for a pattern whose table did not finish: ILAO* from the initial
+                 state until its best policy is solved, then (time left) the branches
+                 that policy did not take.
+              Budget <= 0: no limit -- every table is built to the end (8 facts can
+              take far longer than minutes).
+              TP_MCTS_WILAO_FULL_TABLE = 0 skips step 1 (ILAO* only, for comparison).
     online  : per MCTS leaf, per pattern, a LOOKUP:
-                exact  the leaf's state is solved
-                cover  a solved state with the same facts and end order, looser
-                       windows and at least as much time: its value is an upper bound
-                miss   TP_MCTS_WILAO_MISS = one  -> 1.0 (optimistic: MCTS explores it)
-                                           lazy -> ILAO* from the leaf that stops at
-                                                   solved states and uses their value,
-                                                   within the query budget
+                table_exact  the leaf's state is in the full table
+                table_cover  a table state with the same facts and end order that covers
+                             the leaf some time d after its event (see WindowsTable):
+                             V(s, r + d_max), an upper bound
+                exact/cover  the same in an ILAO* table (patterns without a full table)
+                miss         TP_MCTS_WILAO_MISS = one  -> 1.0 (optimistic)
+                                                  lazy -> ILAO* from the leaf that stops
+                                                          at solved states, within the
+                                                          query budget
     value   : min over patterns (sound); product only for comparison
 
 A pattern is a group of goal facts plus every action that can achieve or threaten
@@ -24,8 +33,9 @@ them (``goal_relevance_closure``). The relaxed action table of the sweep is buil
 once per pattern, at the initial state.
 
 Knobs (environment, set from experiments.ipynb):
-    TP_MCTS_WILAO_OFFLINE_SECONDS   total offline budget                    (30)
-    TP_MCTS_WILAO_OFFLINE_EXTEND    after optimal, solve other branches     (1)
+    TP_MCTS_WILAO_OFFLINE_SECONDS   total offline budget; <= 0 = no limit   (30)
+    TP_MCTS_WILAO_FULL_TABLE        full table per pattern; 0 = ILAO* only  (1)
+    TP_MCTS_WILAO_OFFLINE_EXTEND    ILAO* extend for patterns w/o a table   (1)
     TP_MCTS_WILAO_PATTERN_GOALS     goal facts per pattern; 0 = all goals   (1)
     TP_MCTS_WILAO_PATTERN_FACTS     facts per pattern, grown backwards from
                                     the goals (fact_pattern.py); 0 = no cap:
@@ -48,7 +58,7 @@ from typing import Dict, List, Optional
 from comdp_plus_no_deadline.engines.fact_pattern import FactPatternModel, grow_pattern
 from comdp_plus_no_deadline.engines.survivor_sweep import relaxed_actions_from_engine
 from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel, goal_relevance_closure
-from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO
+from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO, WindowsTable
 
 
 def _env_float(name: str, default: float) -> float:
@@ -77,6 +87,7 @@ class WindowsILAOPDBHeuristic:
         self.query_expansions = _env_int("TP_MCTS_WILAO_QUERY_EXPANSIONS", 200)
         self.aggregation = (os.environ.get("TP_MCTS_WILAO_AGGREGATION") or "min").strip().lower()
         self.extend_offline = bool(_env_int("TP_MCTS_WILAO_OFFLINE_EXTEND", 1))
+        self.full_table = bool(_env_int("TP_MCTS_WILAO_FULL_TABLE", 1))
         self.pattern_facts = _env_int("TP_MCTS_WILAO_PATTERN_FACTS", 8)
         self.patterns: List[dict] = []
         self.counts: Counter = Counter()
@@ -102,12 +113,20 @@ class WindowsILAOPDBHeuristic:
         groups = [goals[i:i + size] for i in range(0, len(goals), size)] or [goals]
         deadline = int(float(self._mdp.deadline()))
         facts = frozenset(self._mdp.initial_state().predicates)
-        offline_end = started + self.offline_seconds
-        # Phase 1: the optimal policy of every pattern. Each pattern gets an equal
-        # share of the time still left, so a quick pattern leaves its unused time
-        # to the slower ones after it.
-        for index, group in enumerate(groups):
-            per_pattern = max(0.0, offline_end - time.perf_counter()) / (len(groups) - index)
+        unlimited = self.offline_seconds <= 0
+        offline_end = None if unlimited else started + self.offline_seconds
+        # The tables share 90% of the budget; the rest (and whatever they leave) is
+        # kept for ILAO* on the patterns whose table did not finish.
+        table_end = None if unlimited else started + 0.9 * self.offline_seconds
+
+        def share(patterns_left: int, end) -> Optional[float]:
+            """An equal share of the time still left: a quick pattern leaves its
+            unused time to the slower ones after it."""
+            if unlimited:
+                return None
+            return max(0.0, end - time.perf_counter()) / patterns_left
+
+        for group in groups:
             if self.pattern_facts > 0:
                 # Fact-capped pattern grown backwards from the goals (fact_pattern.py).
                 phi = grow_pattern(base.ops(), group, facts, max(self.pattern_facts, len(group)))
@@ -119,34 +138,58 @@ class WindowsILAOPDBHeuristic:
             root_facts = model.project(facts) if phi is not None else facts
             solver = WindowsLAO(model, sweep_horizon=deadline,
                                 relaxed_actions=relaxed_actions_from_engine(model, root_facts))
-            value = solver.solve(root_facts, deadline, time_budget=per_pattern)
             self.patterns.append({
                 "goals": [str(g) for g in group],
                 "facts": None if phi is None else [str(f) for f in phi],
                 "actions": len(model.ops()),
                 "model": model,
+                "root_facts": root_facts,
                 "solver": solver,
-                "offline_value": value,
-                "offline_optimal": solver.complete,
-                "offline_seconds": solver.stats["seconds"],
-                "solved_at_optimal": len(solver.solved),
+                "table": None,
+                "table_stats": None,
+                "offline_value": None,
+                "offline_optimal": None,
+                "offline_seconds": None,
+                "solved_at_optimal": 0,
             })
-        # Phase 2: spend what is left solving the branches the optimal policies did
-        # not take, closest to the root first, round-robin over the patterns.
-        if self.extend_offline:
-            active = [p for p in self.patterns if p["solver"]._candidates]
+        # Phase 1: the full table of every pattern that fits: every state, every r.
+        if self.full_table:
+            for index, pattern in enumerate(self.patterns):
+                table = WindowsTable(pattern["solver"], deadline)
+                if table.build(pattern["root_facts"], time_budget=share(len(self.patterns) - index, table_end)):
+                    pattern["table"] = table
+                    pattern["offline_value"] = table.lookup(pattern["root_facts"], deadline)[0]
+                    pattern["offline_optimal"] = True
+                pattern["table_stats"] = dict(table.stats, built=table.complete)
+        # Phase 2: ILAO* only where there is no table: the optimal policy, then (time
+        # left) the branches it did not take, round-robin.
+        fallback = [p for p in self.patterns if p["table"] is None]
+        for index, pattern in enumerate(fallback):
+            solver = pattern["solver"]
+            pattern["offline_value"] = solver.solve(pattern["root_facts"], deadline,
+                                                    time_budget=share(len(fallback) - index, offline_end))
+            pattern["offline_optimal"] = solver.complete
+            pattern["offline_seconds"] = solver.stats["seconds"]
+            pattern["solved_at_optimal"] = len(solver.solved)
+        if self.extend_offline and not unlimited:
+            active = [p for p in fallback if p["solver"]._candidates]
             while active and time.perf_counter() < offline_end:
                 slice_seconds = (offline_end - time.perf_counter()) / len(active)
                 active = [p for p in active if p["solver"].extend(slice_seconds)]
+        tables = [p["table_stats"] or {} for p in self.patterns]
         self.offline_report = {
             "patterns": len(self.patterns),
             "pattern_facts": [len(p["facts"]) if p["facts"] is not None else "all" for p in self.patterns],
             "pattern_actions": [p["actions"] for p in self.patterns],
             "seconds": round(time.perf_counter() - started, 2),
-            "values": [round(p["offline_value"], 6) for p in self.patterns],
+            "budget": "none" if unlimited else self.offline_seconds,
+            "values": [None if p["offline_value"] is None else round(p["offline_value"], 6)
+                       for p in self.patterns],
             "optimal": [p["offline_optimal"] for p in self.patterns],
-            "seconds_to_optimal": [p["offline_seconds"] for p in self.patterns],
-            "solved_at_optimal": [p["solved_at_optimal"] for p in self.patterns],
+            "ilao_seconds_to_optimal": [p["offline_seconds"] for p in self.patterns],
+            "table_built": [t.get("built", False) for t in tables],
+            "table_states": [t.get("states", t.get("states_when_cut")) for t in tables],
+            "table_seconds": [t.get("seconds", t.get("forward_seconds")) for t in tables],
             "solved_after_extend": [len(p["solver"].solved) for p in self.patterns],
             "branches_left": [len(p["solver"]._candidates) for p in self.patterns],
         }
@@ -166,7 +209,15 @@ class WindowsILAOPDBHeuristic:
             running = [(key, None if running_remaining is None else running_remaining.get(key))
                        for key in self._running_keys(facts, solver.ops)]
             local = pattern["model"].project(facts) if pattern["facts"] is not None else facts
-            value, kind = solver.lookup(local, r, running)
+            value = None
+            if pattern["table"] is not None:
+                value, kind = pattern["table"].lookup(local, r, running)
+                if value is not None:
+                    kind = "table_" + kind
+                else:
+                    self.counts["table_miss"] += 1
+            if value is None:
+                value, kind = solver.lookup(local, r, running)
             if value is None:
                 if self.miss_mode == "one":
                     value, kind = 1.0, "miss_one"
@@ -187,11 +238,16 @@ class WindowsILAOPDBHeuristic:
         return min(values)
 
     def report(self) -> Dict[str, object]:
-        lookups = sum(self.counts[k] for k in ("exact", "cover", "miss_one", "lazy_optimal", "lazy_cut"))
+        lookups = sum(self.counts[k] for k in ("table_exact", "table_cover", "exact", "cover",
+                                                "miss_one", "lazy_optimal", "lazy_cut"))
         return {
             "offline": self.offline_report,
+            "offline_seconds": self.offline_report.get("seconds"),
             "queries": self.counts["queries"],
             "pattern_lookups": lookups,
+            "table_exact": self.counts["table_exact"],
+            "table_cover": self.counts["table_cover"],
+            "table_miss": self.counts["table_miss"],
             "exact": self.counts["exact"],
             "cover": self.counts["cover"],
             "miss_one": self.counts["miss_one"],

@@ -83,7 +83,10 @@ def relaxed_actions_from_engine(model, probe_facts: Iterable[Fact]) -> List[Rela
                         if not _is_exec_fact(f) and (keep is None or f in keep))
         before = probe | pre
         start_results = model.outcomes(start, before)
-        start_adds = frozenset().union(*(frozenset(f) - before for f, _p in start_results))
+        start_adds = frozenset(
+            f for f in frozenset().union(*(frozenset(n) - before for n, _p in start_results))
+            if not _is_exec_fact(f)                    # running flags: nothing in the sweep reads them
+        )
         if op.end_action is None:
             outcomes = _fold((frozenset(f) - before, float(p)) for f, p in start_results)
             out.append(RelaxedAction(key, pre, Fraction(0), frozenset(), outcomes))
