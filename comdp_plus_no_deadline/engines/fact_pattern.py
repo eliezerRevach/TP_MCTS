@@ -71,6 +71,63 @@ def op_slots(op) -> Set[Fact]:
     return out
 
 
+def op_reads(op) -> Set[Fact]:
+    """Every precondition, positive AND negative (a negative one is still a fact
+    the action depends on: sample needs "not full(store)")."""
+    out: Set[Fact] = set()
+    for event in _events(op):
+        out |= {f for f in event.pos_preconditions if not _is_exec(f)}
+        out |= {f for f in getattr(event, "neg_preconditions", set()) or set() if not _is_exec(f)}
+    return out
+
+
+def independent_goal_groups(ops: Dict[str, object], goals: Sequence[Fact]) -> List[List[Fact]]:
+    """Split the goals into groups that cannot influence each other.
+
+    relevant(g): actions that change a fact g needs, grown backward to a fixpoint
+                 (needed = g, then every precondition -- positive or negative -- of
+                 a relevant action).
+    footprint(g): every fact a relevant action reads or changes.
+    Two goals are joined when they share a relevant action, or a relevant action of
+    one changes a fact in the other's footprint. Different groups then share no
+    action and no changed fact, so what happens for one group is independent of
+    the other: P(all goals) <= product over groups of P(the group's goals)."""
+    reads = {k: op_reads(op) for k, op in ops.items()}
+    writes = {k: op_touches(op) for k, op in ops.items()}
+    relevant: Dict[Fact, Set[str]] = {}
+    footprint: Dict[Fact, Set[Fact]] = {}
+    for g in goals:
+        needed, rel = {g}, set()
+        changed = True
+        while changed:
+            changed = False
+            for k in ops:
+                if k not in rel and writes[k] & needed:
+                    rel.add(k)
+                    needed |= reads[k]
+                    changed = True
+        relevant[g] = rel
+        footprint[g] = set(needed).union(*(writes[k] for k in rel)) if rel else set(needed)
+    parent = {g: g for g in goals}
+
+    def find(g):
+        while parent[g] != g:
+            parent[g] = parent[parent[g]]
+            g = parent[g]
+        return g
+
+    for i, a in enumerate(goals):
+        for b in goals[i + 1:]:
+            wa = set().union(*(writes[k] for k in relevant[a])) if relevant[a] else set()
+            wb = set().union(*(writes[k] for k in relevant[b])) if relevant[b] else set()
+            if relevant[a] & relevant[b] or wa & footprint[b] or wb & footprint[a]:
+                parent[find(a)] = find(b)
+    groups: Dict[Fact, List[Fact]] = defaultdict(list)
+    for g in goals:
+        groups[find(g)].append(g)
+    return list(groups.values())
+
+
 def grow_pattern(ops: Dict[str, object], goals: Sequence[Fact], initial_facts: Iterable[Fact],
                  max_facts: int) -> List[Fact]:
     initial = set(initial_facts)

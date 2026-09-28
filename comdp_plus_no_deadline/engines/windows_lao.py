@@ -677,7 +677,7 @@ class WindowsTable:
                         noops += 1
                         continue
                     folded += branches is not before
-                row.append((charge, inert_e, branches))
+                row.append((charge, inert_e, branches, label))
                 arrive = t + charge
                 for _p, j in branches:
                     if (tmin[j] is None or arrive < tmin[j]) and options[j] is pending:
@@ -699,7 +699,7 @@ class WindowsTable:
         self.complete = True
         self.stats.update(
             states=len(states), cut_after_deadline=cut,
-            edges=sum(len(b) for row in options if row for _c, _e, b in row),
+            edges=sum(len(b) for row in options if row for _c, _e, b, _l in row),
             instant_noops_dropped=noops, instant_loops_folded=folded, backward=method, grid=str(self.grid),
             forward_seconds=round(forward_seconds, 2),
             backward_seconds=round(time.perf_counter() - started - forward_seconds, 2),
@@ -714,7 +714,7 @@ class WindowsTable:
         n = len(self.states)
         g = self.horizon
         for row in self.options:
-            for charge, inert_e, _b in row or ():
+            for charge, inert_e, _b, _l in row or ():
                 if charge:
                     g = _frac_gcd(g, Fraction(charge))
                 if inert_e:
@@ -723,7 +723,7 @@ class WindowsTable:
         R = int(self.horizon / g) + 1
         owner, shift, need, rows, cols, probs = [], [], [], [], [], []
         for i, row in enumerate(self.options):
-            for charge, inert_e, branches in row or ():
+            for charge, inert_e, branches, _l in row or ():
                 k = len(owner)
                 owner.append(i)
                 shift.append(int(Fraction(charge) / g))
@@ -864,6 +864,22 @@ class WindowsTable:
 
     def value(self, i: int, r) -> float:
         return float(self.V[int(min(Fraction(r), self.horizon) / self.grid), i])
+
+    def policy(self, i: int, r):
+        """The best option of state i at r, ``(charge, inert_e, branches, label)``,
+        or None when nothing reaches the goal from there (value 0) or i is a goal."""
+        row = self.options[i]
+        if not row or r < 0 or r > self.horizon - self.tmin[i]:
+            return None
+        best, best_q = None, _EPS
+        for option in row:
+            charge, inert_e, branches, _label = option
+            if charge > r or (inert_e is not None and inert_e > r):
+                continue
+            q = sum(p * self.value(j, r - charge) for p, j in branches)
+            if q > best_q + 1e-12:
+                best, best_q = option, q
+        return best
 
     def fitting_values(self, facts, queue, windows, r) -> List[float]:
         """V(s, r + d) for every table state s with this F and Q that fits the leaf
