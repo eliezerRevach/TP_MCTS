@@ -31,23 +31,20 @@ Spec: ``artifacts/Windows_ILAO_PDB.docx``.
                                                   lazy -> ILAO* from the leaf that stops
                                                           at solved states, within the
                                                           query budget
-    value   : the goals are split into groups that share no action and no changed fact
-              in the real model (fact_pattern.independent_goal_groups); each pattern
-              belongs to its goal's group. Two settings:
-                TP_MCTS_WILAO_AGG_DEPENDENT    patterns inside one group (goals that share
-                                               resources):
-                    min      sound, tightest
-                    avg      sound (each value >= P(its goal) >= P(the group's goals)),
-                             looser, more gradient
-                    product  NOT an upper bound here -- only for comparison
-                TP_MCTS_WILAO_AGG_INDEPENDENT  the groups with each other:
-                    product  sound because the groups cannot influence each other:
-                             P(all) <= product of P(each group)
-                    min | avg  sound as well, looser
-              min + min is the plain min over all patterns.
-              Legacy TP_MCTS_WILAO_AGGREGATION (used only when both are unset):
-                min -> min/min, avg -> avg/avg, product -> product/product,
-                groups -> avg inside / product across.
+    value   : two settings
+                TP_MCTS_WILAO_AGG       how patterns are combined: min | avg
+                                        (both sound: each value >= P(its goal) >= P(all));
+                                        min is tightest, avg has more gradient
+                TP_MCTS_WILAO_GROUPING  0: AGG over all patterns
+                                        1: the goals are split into groups that share no
+                                           action and no changed fact in the real model
+                                           (fact_pattern.independent_goal_groups); AGG
+                                           inside each group, PRODUCT across groups --
+                                           sound because the groups cannot influence each
+                                           other: P(all) <= product of P(each group)
+              So: min | avg | product of group mins | product of group avgs.
+              Legacy TP_MCTS_WILAO_AGGREGATION (only when both are unset): min, avg, and
+              groups (= avg + grouping).
 
 A pattern is a group of goal facts plus every action that can achieve or threaten
 them (``goal_relevance_closure``). The relaxed action table of the sweep is built
@@ -65,8 +62,8 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_MISS              one | lazy                              (lazy)
     TP_MCTS_WILAO_QUERY_SECONDS     lazy budget per pattern per leaf        (0.05)
     TP_MCTS_WILAO_QUERY_EXPANSIONS  lazy expansions per pattern per leaf    (200)
-    TP_MCTS_WILAO_AGG_DEPENDENT     min | avg | product  (inside a group)   (min)
-    TP_MCTS_WILAO_AGG_INDEPENDENT   product | min | avg  (across groups)    (min)
+    TP_MCTS_WILAO_AGG               min | avg                               (min)
+    TP_MCTS_WILAO_GROUPING          1 = product across independent groups   (0)
     TP_MCTS_WILAO_REPORT            print a summary at exit: 1 | 0          (1)
 """
 
@@ -85,17 +82,11 @@ from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel, goal_re
 from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO, WindowsTable
 
 
-# Legacy single setting -> (inside a group, across groups).
-_LEGACY_AGGREGATION = {"min": ("min", "min"), "avg": ("avg", "avg"),
-                       "product": ("product", "product"), "groups": ("avg", "product")}
+# Legacy single setting -> (AGG, GROUPING).
+_LEGACY_AGGREGATION = {"min": ("min", False), "avg": ("avg", False), "groups": ("avg", True)}
 
 
 def _combine(values, how: str) -> float:
-    if how == "product":
-        out = 1.0
-        for v in values:
-            out *= v
-        return out
     if how == "avg":
         return sum(values) / len(values)
     return min(values)
@@ -125,18 +116,21 @@ class WindowsILAOPDBHeuristic:
         self.miss_mode = (os.environ.get("TP_MCTS_WILAO_MISS") or "lazy").strip().lower()
         self.query_seconds = _env_float("TP_MCTS_WILAO_QUERY_SECONDS", 0.05)
         self.query_expansions = _env_int("TP_MCTS_WILAO_QUERY_EXPANSIONS", 200)
-        dependent = (os.environ.get("TP_MCTS_WILAO_AGG_DEPENDENT") or "").strip().lower()
-        independent = (os.environ.get("TP_MCTS_WILAO_AGG_INDEPENDENT") or "").strip().lower()
-        if not dependent and not independent:
+        agg = (os.environ.get("TP_MCTS_WILAO_AGG") or "").strip().lower()
+        grouping = os.environ.get("TP_MCTS_WILAO_GROUPING")
+        if not agg and grouping is None:
             legacy = (os.environ.get("TP_MCTS_WILAO_AGGREGATION") or "min").strip().lower()
             if legacy not in _LEGACY_AGGREGATION:
-                raise ValueError(f"TP_MCTS_WILAO_AGGREGATION={legacy!r}: use min | avg | product | groups")
-            dependent, independent = _LEGACY_AGGREGATION[legacy]
-        self.agg_dependent = dependent or "min"
-        self.agg_independent = independent or "min"
-        for name, value in (("DEPENDENT", self.agg_dependent), ("INDEPENDENT", self.agg_independent)):
-            if value not in ("min", "avg", "product"):
-                raise ValueError(f"TP_MCTS_WILAO_AGG_{name}={value!r}: use min | avg | product")
+                raise ValueError(f"TP_MCTS_WILAO_AGGREGATION={legacy!r}: use TP_MCTS_WILAO_AGG (min | avg) "
+                                 f"and TP_MCTS_WILAO_GROUPING (0 | 1)")
+            agg, grouping = _LEGACY_AGGREGATION[legacy]
+        self.agg = agg or "min"
+        if self.agg not in ("min", "avg"):
+            raise ValueError(f"TP_MCTS_WILAO_AGG={self.agg!r}: use min | avg")
+        text = str(grouping if grouping is not None else "0").strip().lower()
+        if text not in ("0", "1", "true", "false"):
+            raise ValueError(f"TP_MCTS_WILAO_GROUPING={grouping!r}: use 0 | 1")
+        self.grouping = text in ("1", "true")
         self.extend_offline = bool(_env_int("TP_MCTS_WILAO_OFFLINE_EXTEND", 1))
         self.full_table = bool(_env_int("TP_MCTS_WILAO_FULL_TABLE", 1))
         self.growth = (os.environ.get("TP_MCTS_WILAO_PATTERN_GROWTH") or "cegar").strip().lower()
@@ -245,7 +239,7 @@ class WindowsILAOPDBHeuristic:
             while active and time.perf_counter() < offline_end:
                 slice_seconds = (offline_end - time.perf_counter()) / len(active)
                 active = [p for p in active if p["solver"].extend(slice_seconds)]
-        # Patterns of goals that cannot influence each other (see AGG_INDEPENDENT).
+        # Groups of goals that cannot influence each other (used when GROUPING is on).
         group_of = {}
         for gi, members in enumerate(independent_goal_groups(base.ops(), goals)):
             for g in members:
@@ -266,8 +260,8 @@ class WindowsILAOPDBHeuristic:
             "pattern_actions": [p["actions"] for p in self.patterns],
             "seconds": round(time.perf_counter() - started, 2),
             "budget": "none" if unlimited else self.offline_seconds,
-            "agg_dependent": self.agg_dependent,
-            "agg_independent": self.agg_independent,
+            "agg": self.agg,
+            "grouping": self.grouping,
             "groups": [[self.patterns[i]["goals"][0] for i in members] for members in self.groups],
             "values": [None if p["offline_value"] is None else round(p["offline_value"], 6)
                        for p in self.patterns],
@@ -316,8 +310,12 @@ class WindowsILAOPDBHeuristic:
         self.query_seconds_total += time.perf_counter() - started
         if not values:
             return 1.0
-        per_group = [_combine([values[i] for i in members], self.agg_dependent) for members in self.groups]
-        return _combine(per_group, self.agg_independent)
+        if not self.grouping:
+            return _combine(values, self.agg)
+        out = 1.0
+        for members in self.groups:
+            out *= _combine([values[i] for i in members], self.agg)
+        return out
 
     def report(self) -> Dict[str, object]:
         lookups = sum(self.counts[k] for k in ("table_exact", "table_cover", "exact", "cover",
