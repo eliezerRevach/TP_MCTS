@@ -31,6 +31,12 @@ Spec: ``artifacts/Windows_ILAO_PDB.docx``.
                                                   lazy -> ILAO* from the leaf that stops
                                                           at solved states, within the
                                                           query budget
+              running actions take their remaining time from the search's STN. With
+              TP_MCTS_WILAO_NO_STN_PASS = 1 it is ignored: every running action gets the
+              window [0, d] with a free end (e = 0) and every end order -- a looser upper
+              bound, but starting a pattern action raises the value at once (with exact
+              times it cannot: the value already counts starting it now). The table has
+              no state that loose, so these lookups go to the miss path.
     value   : two settings
                 TP_MCTS_WILAO_AGG       how patterns are combined: min | avg
                                         (both sound: each value >= P(its goal) >= P(all));
@@ -64,6 +70,7 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_QUERY_EXPANSIONS  lazy expansions per pattern per leaf    (200)
     TP_MCTS_WILAO_AGG               min | avg                               (min)
     TP_MCTS_WILAO_GROUPING          1 = product across independent groups   (0)
+    TP_MCTS_WILAO_NO_STN_PASS       1 = ignore the STN's remaining times    (0)
     TP_MCTS_WILAO_REPORT            print a summary at exit: 1 | 0          (1)
 """
 
@@ -135,6 +142,7 @@ class WindowsILAOPDBHeuristic:
         self.full_table = bool(_env_int("TP_MCTS_WILAO_FULL_TABLE", 1))
         self.growth = (os.environ.get("TP_MCTS_WILAO_PATTERN_GROWTH") or "cegar").strip().lower()
         self.pattern_facts = _env_int("TP_MCTS_WILAO_PATTERN_FACTS", 8)
+        self.no_stn_pass = bool(_env_int("TP_MCTS_WILAO_NO_STN_PASS", 0))
         self.patterns: List[dict] = []
         self.groups: List[List[int]] = []
         self.counts: Counter = Counter()
@@ -262,6 +270,7 @@ class WindowsILAOPDBHeuristic:
             "budget": "none" if unlimited else self.offline_seconds,
             "agg": self.agg,
             "grouping": self.grouping,
+            "no_stn_pass": self.no_stn_pass,
             "groups": [[self.patterns[i]["goals"][0] for i in members] for members in self.groups],
             "values": [None if p["offline_value"] is None else round(p["offline_value"], 6)
                        for p in self.patterns],
@@ -280,6 +289,8 @@ class WindowsILAOPDBHeuristic:
         self.build()
         started = time.perf_counter()
         self.counts["queries"] += 1
+        if self.no_stn_pass:
+            running_remaining = None
         preds = getattr(state, "predicates", None)
         facts = frozenset(preds) if preds is not None else frozenset(state)
         r = max(0, int(fixed_depth))

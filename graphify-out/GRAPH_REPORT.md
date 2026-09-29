@@ -1,16 +1,16 @@
 # Graph Report - TP_MCTS  (2026-09-28)
 
 ## Corpus Check
-- 241 files · ~803,339 words
+- 241 files · ~803,315 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4862 nodes · 10461 edges · 214 communities (165 shown, 49 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 894 edges (avg confidence: 0.57)
+- 4862 nodes · 10446 edges · 231 communities (174 shown, 57 thin omitted)
+- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 891 edges (avg confidence: 0.57)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `392fe86c`
+- Built from commit: `182d8ea9`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -223,6 +223,22 @@
 - .reset_search_budget
 - Fact
 - Fraction
+- NamesExtractor
+- .__init__
+- ._compute_node_result
+- FreeVarsExtractor
+- TestMDP
+- .is_int_constant
+- print_engines_info
+- RealType
+- Bool
+- Dot
+- FALSE
+- Int
+- IntType
+- ParameterExp
+- VariableExp
+- TimingExp
 
 ## God Nodes (most connected - your core abstractions)
 1. `FNode` - 326 edges
@@ -237,29 +253,29 @@
 10. `UPProblemDefinitionError` - 53 edges
 
 ## Surprising Connections (you probably didn't know these)
+- `Base_MCTS` --uses--> `WindowsILAOPDBHeuristic`  [INFERRED]
+  unified_planning/engines/solvers/mcts.py → comdp_plus_no_deadline/engines/windows_ilao_pdb.py
 - `C_MCTS` --uses--> `WindowsILAOPDBHeuristic`  [INFERRED]
+  unified_planning/engines/solvers/mcts.py → comdp_plus_no_deadline/engines/windows_ilao_pdb.py
+- `MCTS` --uses--> `WindowsILAOPDBHeuristic`  [INFERRED]
   unified_planning/engines/solvers/mcts.py → comdp_plus_no_deadline/engines/windows_ilao_pdb.py
 - `returned_action_name()` --references--> `C_MCTS`  [EXTRACTED]
   scripts/inspect_mcts_tree.py → unified_planning/engines/solvers/mcts.py
 - `ProgressPDB` --uses--> `CriticalPathPDB`  [INFERRED]
   artifacts/critical_path_pdb_review_20260914/benchmark_nasa.py → comdp_plus_no_deadline/engines/critical_path_pdb.py
-- `FixedTailConfig` --uses--> `TemporalProbabilisticRPGHeuristic`  [INFERRED]
-  unified_planning/engines/solvers/fixed_tail_ptrpg_rollout.py → comdp_plus_no_deadline/engines/temporal_probabilistic_rpg.py
-- `FixedTailSearchContext` --uses--> `TemporalProbabilisticRPGHeuristic`  [INFERRED]
-  unified_planning/engines/solvers/fixed_tail_ptrpg_rollout.py → comdp_plus_no_deadline/engines/temporal_probabilistic_rpg.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (214 total, 49 thin omitted)
+## Communities (231 total, 57 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.09
 Nodes (32): build(), Tests for the backward plan PDB (``backward_plan_pdb``).  No temporal constrai, The whole point of going backward: clutter costs nothing.      ``junk*`` achie, Claiming an action runs without its inExecution fact must score 0.      Regres, Regression reaches all 2^k running combinations on its own.      Regressing an, Executed a1, a2, a3; a2 finished first. Query is (facts={f2}, running={a1,a3})., Budgets truncate PLANS, not the state set.      ``max_plans_per_state`` caps e, An action running that no plan needs is harmless: ``state.running`` is a     SU (+24 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.02
-Nodes (23): FNode, object, Returns the `id` of this expression., Returns the `Type` of this expression., Returns all the names contained in this expression., Returns the simplified version of this expression.          The simplification, Returns the version of this expression where every expression that is a key of t, The `FNode` class represents an `expression tree` in the `unified_planning` libr (+15 more)
+Cohesion: 0.03
+Nodes (20): FNodeContent, FNode, object, Returns the `id` of this expression., Returns the `OperatorKind` that defines the semantic of this expression., Returns the `Environment` in which this expression exists., Returns the `Type` of this expression., Returns all the names contained in this expression. (+12 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.10
@@ -298,12 +314,12 @@ Cohesion: 0.08
 Nodes (18): DP-relevant add facts of an action, keyed by action name.          Returns the f, Cache telemetry for ``survivor_pdb_loop`` (hits, misses, sweeps)., Cache telemetry for ``survivor_pdb_lazy`` (hits, misses, sweeps)., Return (and optionally print) the headline mutex-survival metric.          Accum, Duration-aware optimistic relaxed heuristic with fixed temporal depth.      Comp, Return (and optionally reset) the path-mutex survival / AND-feasibility, Product of component gammas for an action's preconditions (≥ 0)., Memoized front-end for :meth:`_compute_kmutex_actions_are_mutex`.          The s (+10 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.12
-Nodes (9): Max over k sampled actions; each child gets fixed-tail leaf eval (K rollouts ins, Frontier-aligned value of a node, used ONLY for selection — never         backp, Create a new Snode for the state `state` with parent `parent`, Create a new Snode for the state `state` with parent `parent`          In this, Traverse the tree until reaching a leaf node., Traverse the tree until reaching a leaf node.         Selection with max logic, Traverse the tree until reaching a leaf node.         Selection with root inter, Traverse the tree until reaching a leaf node. (+1 more)
+Cohesion: 0.13
+Nodes (8): Max over k sampled actions; each child gets fixed-tail leaf eval (K rollouts ins, Create a new Snode for the state `state` with parent `parent`, Create a new Snode for the state `state` with parent `parent`          In this, Traverse the tree until reaching a leaf node., Traverse the tree until reaching a leaf node.         Selection with max logic, Traverse the tree until reaching a leaf node.         Selection with root inter, Traverse the tree until reaching a leaf node., Traverse the tree until reaching a leaf node.         Selection with max logic
 
 ### Community 12 - "Community 12"
-Cohesion: 0.06
-Nodes (15): One ILAO* table per pattern, solved offline, read (and lazily extended) online., WindowsILAOPDBHeuristic, Base_MCTS, combination_plan(), MCTS, plan(), Simulate until a terminal state, Choose a random action. Heustics can be used here to improve simulations. (+7 more)
+Cohesion: 0.07
+Nodes (9): Base_MCTS, MCTS, Simulate until a terminal state, Choose a random action. Heustics can be used here to improve simulations., :param root_node: the root node of the MCTS tree         :return: returns the b, Return the most-visited child (robust child / argmax-N)., Original MCTS solver implementation., Create a new Snode for the state `state` with parent `parent` (+1 more)
 
 ### Community 13 - "Community 13"
 Cohesion: 0.06
@@ -315,19 +331,19 @@ Nodes (49): alts_and(), alts_or(), _cap_groups(), _clamp01(), _coalesce_union(),
 
 ### Community 15 - "Community 15"
 Cohesion: 0.04
-Nodes (41): Takes in input an `Action` and returns the iterator over all the possible parame, get_all_fluent_exp(), get_ith_fluent_exp(), Returns the ith ground fluent expression., _BoolType, domain_item(), domain_size(), _IntType (+33 more)
+Nodes (51): TypeError, Takes in input an `Action` and returns the iterator over all the possible parame, UPTypeError, get_all_fluent_exp(), get_ith_fluent_exp(), Returns the ith ground fluent expression., Returns `True` if the `type` with the given `name` is defined in the         `p, Returns a `Dict` where every `key` represents an `Optional Type` and the `value` (+43 more)
 
 ### Community 16 - "Community 16"
 Cohesion: 0.13
 Nodes (26): achievers_of_facts(), best_joint_add_distribution(), build_pattern(), _clamp01(), _collapse_ages(), compute_gate(), conditional_hazards(), first_positive_layer() (+18 more)
 
 ### Community 17 - "Community 17"
-Cohesion: 0.06
-Nodes (28): # TODO: changed to be not probabilistic effect, Bool(), Compiler(), Dot(), FALSE(), Int(), IntType(), ParameterExp() (+20 more)
+Cohesion: 0.19
+Nodes (5): # TODO: changed to be not probabilistic effect, Compiler(), Return the boolean constant `True`., Returns a Compiler or a pipeline of Compilers.      To get a Compiler there ar, TRUE()
 
 ### Community 18 - "Community 18"
-Cohesion: 0.05
-Nodes (34): DurativeAction, InstantaneousAction, _apply_function_to_effect(), check_and_simplify_conditions(), check_and_simplify_preconditions(), create_action_with_given_subs(), create_effect_with_given_subs(), create_precondition_with_given_subs() (+26 more)
+Cohesion: 0.12
+Nodes (7): _apply_function_to_effect(), Effect, This class represent an effect. It has a :class:`~unified_planning.model.Fluent`, Returns the `Fluent` that is modified by this `Effect`., Returns the `value` given to the `Fluent` by this `Effect`., Sets the `value` given to the `Fluent` by this `Effect`.          :param new_v, Returns this `Effect's Environment`.
 
 ### Community 19 - "Community 19"
 Cohesion: 0.20
@@ -335,7 +351,7 @@ Nodes (12): _log_rollout_step(), pick_greedy_rollout_action(), ptrpg_guided_term
 
 ### Community 20 - "Community 20"
 Cohesion: 0.03
-Nodes (44): Fraction, Return the given subexpression at the given position.          :param idx: The, Returns `True` if the expression is a constant, `False` otherwise., Returns the constant value stored in this expression., Return constant `boolean` value stored in this expression., Return constant `integer` value stored in this expression., Return constant `real` value stored in this expression., Return the `Fluent` stored in this expression. (+36 more)
+Nodes (33): Return the given subexpression at the given position.          :param idx: The, Return the `Fluent` stored in this expression., Return the `Parameter` stored in this expression., Return the variable of the VariableExp., Return the `Variables` of the `Exists` or `Forall`., Return the `Object` stored in this expression., Return the `Timing` stored in this expression., Return the `Agent` stored in this expression. (+25 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.12
@@ -346,8 +362,8 @@ Cohesion: 0.09
 Nodes (28): BaseCombinationMDP, BaseMDP, evaluation_loop(), combination_greedy_plan(), _effective_temporal_depth(), _get_probabilistic_rpg_heuristic(), _get_temporal_probabilistic_rpg_heuristic(), PlanResult (+20 more)
 
 ### Community 23 - "Community 23"
-Cohesion: 0.11
-Nodes (18): _aggregation_for_strategy(), _effective_temporal_depth(), _get_rollout_aligned_evaluator(), _normalize_max_approximation_selection(), Pick the goal-aggregation for heuristic_score based on the strategy.      `bas, value_mode that drives BOTH MCTS expansion ordering and leaf rollout with     t, ``selection_type='max_approximation'`` is the single switch (matching the     g, Build a RolloutAlignedConfig from unified_planning.parser CLI args. (+10 more)
+Cohesion: 0.09
+Nodes (24): _aggregation_for_strategy(), combination_plan(), _dynamic_aligned_horizon(), _effective_temporal_depth(), _get_rollout_aligned_evaluator(), plan(), Pick the goal-aggregation for heuristic_score based on the strategy.      `bas, Leaf heuristics evaluated through ``_temporal_heuristic`` (vs. plain trpg). (+16 more)
 
 ### Community 24 - "Community 24"
 Cohesion: 0.05
@@ -358,20 +374,16 @@ Cohesion: 0.09
 Nodes (14): Convert_problem, convert instantaneous actions from `model` actions to be `engines` actions, Finding mutex actions and adding a precondition that they can't be executed in p, Check if two actions are mutex          :param action: The checked action, Check if two actions are soft mutex          :param action: The checked action, returns all the negative end assignments of durative `action` to fluents in, returns all the negative start assignments of `action` to fluents in         if, returns all the positive start assignments of `action` to fluents         if du (+6 more)
 
 ### Community 26 - "Community 26"
-Cohesion: 0.05
-Nodes (30): TypeError, DurativeAction, implAction, InstantaneousAction, InstantaneousEndAction, InstantaneousStartAction, NoOpAction, Returns the `list` of the `Action` negative `preconditions`. (+22 more)
-
-### Community 27 - "Community 27"
-Cohesion: 0.07
-Nodes (7): Action, CombinationAction, This is the `Action` interface., Returns the `Action` `name`., Sets the `Action` `name`., Returns the `list` of the `Action parameters`., Returns the `parameter` of the `Action` with the given `name`.          Exampl
+Cohesion: 0.03
+Nodes (68): Exception, SyntaxError, Action, InstantaneousAction, InstantaneousEndAction, InstantaneousStartAction, NoOpAction, This is the `Action` interface. (+60 more)
 
 ### Community 28 - "Community 28"
-Cohesion: 0.09
-Nodes (18): Grounder, GrounderHelper, Action, Returns an `Iterator` over all the possible grounded `Actions` of the `Problem`, Grounder class: the `Grounder` takes a :class:`~unified_planning.model.Problem`, Takes an instance of a :class:`~unified_planning.model.Problem` and the `GROUNDI, This class gives the capability of grounding a :class:`~unified_planning.model.P, Grounds the given `action` with the given `parameters`.         An `Action` is (+10 more)
+Cohesion: 0.08
+Nodes (23): Grounder, GrounderHelper, Action, Returns an `Iterator` over all the possible grounded `Actions` of the `Problem`, Grounder class: the `Grounder` takes a :class:`~unified_planning.model.Problem`, Takes an instance of a :class:`~unified_planning.model.Problem` and the `GROUNDI, This class gives the capability of grounding a :class:`~unified_planning.model.P, Creates an instance of the GrounderHelper.          :param problem: The `Probl (+15 more)
 
 ### Community 29 - "Community 29"
-Cohesion: 0.05
-Nodes (19): Problem, Returns `True` if the given `name` is already in the `Problem`, `False` otherwis, Normalizes the given `Plan`, that is potentially the result of another, Removes all the `actions` from the `Problem`., Returns the set of the `static fluents`.          `Static fluents` are those w, Adds a deadline to the `Problem`.          :param interval: The interval of ti, A deadline to the time when all goals of the problem must be True         :retu, Adds the `timed goal` to the `Problem`. A `timed goal` is a `goal` that must be (+11 more)
+Cohesion: 0.04
+Nodes (35): DurativeAction, InstantaneousAction, check_and_simplify_conditions(), check_and_simplify_preconditions(), create_action_with_given_subs(), create_effect_with_given_subs(), create_precondition_with_given_subs(), create_probabilistic_effect_with_given_subs() (+27 more)
 
 ### Community 30 - "Community 30"
 Cohesion: 0.10
@@ -394,8 +406,8 @@ Cohesion: 0.07
 Nodes (5): Parameter, Represents an :func:`action parameter <unified_planning.model.Action.parameters>, Returns the `Parameter` `name`., Returns the `Parameter` `type`., Return the `Parameter` `Environment`
 
 ### Community 35 - "Community 35"
-Cohesion: 0.07
-Nodes (5): Represents a variable; a `Variable` has a name and a type., Returns the `Variable` name., Returns the `Variable` `Type`., Return the `Variable` `Environment`., Variable
+Cohesion: 0.06
+Nodes (7): FreeVarsOracle, Returns the set of Symbols appearing free in the expression., Represents a variable; a `Variable` has a name and a type., Returns the `Variable` name., Returns the `Variable` `Type`., Return the `Variable` `Environment`., Variable
 
 ### Community 36 - "Community 36"
 Cohesion: 0.09
@@ -418,8 +430,8 @@ Cohesion: 0.11
 Nodes (15): T, DeltaNeighbors, DeltaSimpleTemporalNetwork, Any, Adds the constraint `x - y <= b`. This gives an upper bound to the time, Checks the consistency of this STN., Returns the assignment to the given event in the minimal-makespan consistent sol, Check if there is a harder constraint from x to y (+7 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.10
-Nodes (36): _clamp01(), _extract_state_facts(), Optimal probability of achieving the pattern goal within ``remaining``.      Pas, Admissible upper bound on P(goal before deadline) from ``state``.          Goals, solve_pattern(), _exhaustive_deterministic(), _pattern(), Tests for the exact pattern-MDP heuristic (``exact_pattern_mdp``).  The anchors (+28 more)
+Cohesion: 0.11
+Nodes (34): Pattern, Optimal probability of achieving the pattern goal within ``remaining``.      Pas, solve_pattern(), _exhaustive_deterministic(), _pattern(), Tests for the exact pattern-MDP heuristic (``exact_pattern_mdp``).  The anchors, Redundant starts disappear and useful groups jump to their boundary., An identity start whose end misses the deadline is never dispatched. (+26 more)
 
 ### Community 42 - "Community 42"
 Cohesion: 0.09
@@ -447,11 +459,15 @@ Nodes (4): Machine_Shop, Immersionpaint Action, OverallPreconditionTiming(), Ret
 
 ### Community 48 - "Community 48"
 Cohesion: 0.10
-Nodes (20): replace_action(), CompilerResult, LogLevel, LogMessage, PlanGenerationResult, PlanGenerationResultStatus, Enum, This class is composed by a message and the Enum LogLevel indicating     this m (+12 more)
+Nodes (16): LogLevel, LogMessage, PlanGenerationResult, PlanGenerationResultStatus, Enum, This class is composed by a message and the Enum LogLevel indicating     this m, This class represents the base class for results given by the engines to the use, This predicate should state if the Result is definitive or if it can be improved (+8 more)
 
 ### Community 49 - "Community 49"
 Cohesion: 0.19
 Nodes (21): _and_n_facts(), _and_pairwise(), build_action_specs(), _clamp01(), compute_correlation_preplanning(), CorrActionSpec, _extract_effect_delay_steps(), joint_add_distribution_from_action() (+13 more)
+
+### Community 50 - "Community 50"
+Cohesion: 0.09
+Nodes (5): Domain, Hosting, Simple, Returns the user type defined in the global environment with the given `name` an, UserType()
 
 ### Community 51 - "Community 51"
 Cohesion: 0.19
@@ -486,8 +502,8 @@ Cohesion: 0.11
 Nodes (28): _exec_facts(), _fold(), _is_exec_fact(), lookup(), Fraction, Survivor sweep: delete-relaxed occupancy over (facts, phases) -- ``rpg_exact_sta, ``P(goal <= t)`` for every timestamp ``t <= horizon`` from one query.      ``run, Section 1: T closed under u + d(a), a reachable by u. Seeded with the         ru (+20 more)
 
 ### Community 59 - "Community 59"
-Cohesion: 0.03
-Nodes (62): ClosedDurationInterval(), ClosedTimeInterval(), Duration, DurationInterval, EndPreconditionTiming(), EndTiming(), FixedDuration(), GlobalEndTiming() (+54 more)
+Cohesion: 0.05
+Nodes (23): GlobalStartTiming(), PreconditionTimepoint, Fraction, Returns the `kind` of this `Timepoint`; the `kind` defines the semantic of the `, Class used to define the point in the time from which a :class:`~unified_plannin, Creates a new `Timepoint`.          It is typically used to refer to:, Returns the `kind` of this `Timepoint`; the `kind` defines the semantic of the `, Returns the `container` in which this `Timepoint` is defined or `None` if it ref (+15 more)
 
 ### Community 60 - "Community 60"
 Cohesion: 0.19
@@ -498,16 +514,16 @@ Cohesion: 0.09
 Nodes (14): Engine, EngineMeta, OperationMode, Enum, type, Sets the flag deciding if a fail on the problem's :func:`kind <unified_planning., Manages entering a Context (i.e., with statement), Manages exiting from Context (i.e., with statement) (+6 more)
 
 ### Community 62 - "Community 62"
-Cohesion: 0.06
-Nodes (14): Returns the `objects` compatible with the given `Type`: this includes the given, This class is a mixin that contains a `set` of `user types` with some related me, This method adds a Type, together with all it's ancestors, to the user_types_hie, Returns the `list` of all the `user types` in the `problem`., Returns the `user type` in the `problem` with the given `name`.          :para, Returns `True` if the `type` with the given `name` is defined in the         `p, Returns a `Dict` where every `key` represents an `Optional Type` and the `value`, UserTypesSetMixin (+6 more)
+Cohesion: 0.07
+Nodes (10): DurativeAction, implAction, Returns the `list` of the `Action` negative `preconditions`., Returns the `list` of the `Action` positive `preconditions`., Returns the `list` of the `Action effects`., Returns the `list` of the `Action effects`., Adds the given expression to `action's preconditions`.          :param precond, Represents a durative action with fix duration.     This durative action has no (+2 more)
 
 ### Community 63 - "Community 63"
-Cohesion: 0.14
-Nodes (6): ExpressionQuantifiersRemover, This walker is used to remove all the quantifiers from an expression by substitu, This method takes in input an expression that might contain quantifiers and a `p, FluentsSubstituter, Performs fluents substitution into a expression, maintaining the same args, Returns the expression where every FluentExp that has as fluent one of
+Cohesion: 0.09
+Nodes (10): ExpressionQuantifiersRemover, This walker is used to remove all the quantifiers from an expression by substitu, This method takes in input an expression that might contain quantifiers and a `p, FluentsSubstituter, Performs fluents substitution into a expression, maintaining the same args, Returns the expression where every FluentExp that has as fluent one of, Expression, Performs substitution into an expression (+2 more)
 
 ### Community 64 - "Community 64"
-Cohesion: 0.07
-Nodes (10): OrderedDict, InstantaneousAction, Represents an instantaneous action., Returns the `list` of the `Action` `preconditions`., Removes all the `Action preconditions`, Returns the `list` of the `Action effects`., Returns the `list` of the `Action effects`., Removes all the `Action's effects`. (+2 more)
+Cohesion: 0.10
+Nodes (5): This method takes the args given as parameters to a walker method (walk_and, This walker takes the mapping from the usertype fluents to be removed from, Removes UserType Fluents from the given expression and returns the generated, Removes the UsertypeFluents from an Expression and returns the equivalent condit, UsertypeFluentsWalker
 
 ### Community 65 - "Community 65"
 Cohesion: 0.22
@@ -530,16 +546,16 @@ Cohesion: 0.08
 Nodes (24): DurativeOp, Instance, Node, Apply one processing order, expanding the outcome cross-product., Section 4's condition check, at the event that is actually firing., One startable action type, with its two snap actions and duration.      ``key`, One running or completed action instance.      ``serial`` keeps repeated insta, The spec's ``X``: an annotated STN plus its replayed semantic state. (+16 more)
 
 ### Community 70 - "Community 70"
-Cohesion: 0.12
+Cohesion: 0.11
 Nodes (12): MachineShopNoDeadline, NasaRoverNoDeadline, Stuck Car (1 object) variant with no deadline., Machine Shop variant with same goals and no deadline., Nasa Rover variant with identical goals and no deadline constraint., StuckCar1oNoDeadline, Place a rock under the car Action, Search a rock Action             the robot can find a one of the rocks (+4 more)
 
 ### Community 72 - "Community 72"
-Cohesion: 0.16
-Nodes (9): ``model`` is an ``EngineModel`` or ``ToyModel`` from ``temporal_stn_pdb``., ILAO* from the query, until the best policy is solved (optimal).          The ta, Mark the converged best policy below ``root`` as solved, and queue the         b, Offline, after the optimal policy: solve the branches it did not take., ``(V(root), converged)``., One depth-first pass over the best partial policy: expand its tips,         back, The options of (F, Q, W), without r:         ``(label, charge, inert_e, queue af, WindowsLAO (+1 more)
+Cohesion: 0.18
+Nodes (10): ``model`` is an ``EngineModel`` or ``ToyModel`` from ``temporal_stn_pdb``., Q ordered by remaining time, windows [rem, rem, rem].          ``running`` is ``, ILAO* from the query, until the best policy is solved (optimal).          The ta, ``(value, "exact" | "cover")`` from solved states, or ``(None, "miss")``., Mark the converged best policy below ``root`` as solved, and queue the         b, Offline, after the optimal policy: solve the branches it did not take., ``(V(root), converged)``., One depth-first pass over the best partial policy: expand its tips,         back (+2 more)
 
 ### Community 73 - "Community 73"
 Cohesion: 0.15
-Nodes (22): _add_mask(), best_joint_outcomes(), build_pattern(), _conflict_table(), _execution_conflict_table(), joint_outcomes(), _mask_of(), _op_from_action() (+14 more)
+Nodes (22): _add_mask(), best_joint_outcomes(), build_pattern(), _clamp01(), _conflict_table(), _execution_conflict_table(), joint_outcomes(), _mask_of() (+14 more)
 
 ### Community 74 - "Community 74"
 Cohesion: 0.12
@@ -558,12 +574,12 @@ Cohesion: 0.14
 Nodes (10): PatternSolver, Memoised backward induction over boundary states of one pattern.      ``memo`` I, Projected behaviour used to identify exchangeable ground actions., Find projected action identities that can be safely permuted.          Members m, Canonicalise remaining-time multisets inside symmetry classes., Return true when starting ``op`` can only occupy its running slot., Next deadline-aligned duration-GCD boundary in remaining time., Optimise one same-time dispatch group without adding PDB rows. (+2 more)
 
 ### Community 78 - "Community 78"
-Cohesion: 0.04
-Nodes (24): Action, DurativeAction, Fraction, This is the `Action` interface., Adds the given `assignment` to the `action's probabilistic_effects`., Represents a durative action., Returns the `list` of the `Action` `preconditions`., Removes all the `Action preconditions` (+16 more)
+Cohesion: 0.03
+Nodes (34): OrderedDict, Action, DurativeAction, InstantaneousAction, Fraction, Represents an instantaneous action., This is the `Action` interface., Returns the `list` of the `Action` `preconditions`. (+26 more)
 
 ### Community 79 - "Community 79"
-Cohesion: 0.17
-Nodes (10): _frac_gcd(), Every state of the pattern at every r: a forward graph over (F, Q, W) and     ba, Forward graph, then backward curves. False if ``time_budget`` (seconds), A state is only ever at r <= horizon - tmin: later cells may read children, Fallback for zero-time cycles over several states: from the goals,         recom, The best option of state i at r, ``(charge, inert_e, branches, label)``,, V(s, r + d) for every table state s with this F and Q that fits the leaf, WindowsTable (+2 more)
+Cohesion: 0.14
+Nodes (13): _as_fraction(), _frac_gcd(), Every state of the pattern at every r: a forward graph over (F, Q, W) and     ba, Remaining times from the search STN are floats; keep keys small., Forward graph, then backward curves. False if ``time_budget`` (seconds), A state is only ever at r <= horizon - tmin: later cells may read children, Fallback for zero-time cycles over several states: from the goals,         recom, ``(value, "exact" | "cover")`` or ``(None, "miss")``; several tie orders (+5 more)
 
 ### Community 80 - "Community 80"
 Cohesion: 0.13
@@ -597,9 +613,9 @@ Nodes (37): Tests for ILAO* over the time-left windows MDP (``windows_lao``)., a
 Cohesion: 0.12
 Nodes (23): ActionScoreEntry, is_active(), _action_name_key(), greedy_matched_value_target(), _heuristic_value(), _null_ctx, pick_best_action(), rank_actions_by_score() (+15 more)
 
-### Community 89 - "Community 89"
-Cohesion: 0.20
-Nodes (3): Best_No_Parallel, Returns the user type defined in the global environment with the given `name` an, UserType()
+### Community 90 - "Community 90"
+Cohesion: 0.07
+Nodes (27): Always(), And(), AtMostOnce(), Exists(), Forall(), Iff(), Implies(), Not() (+19 more)
 
 ### Community 91 - "Community 91"
 Cohesion: 0.12
@@ -626,8 +642,8 @@ Cohesion: 0.22
 Nodes (3): Init all actions into the new actions list         ensures the end actions can, Calculates the heuristic based on the current state and time, TRPG
 
 ### Community 98 - "Community 98"
-Cohesion: 0.05
-Nodes (37): Returns the `OperatorKind` that defines the semantic of this expression., OperatorKind, Enum, This module defines all the operators used by the unified_planning library., Enum representing the type of an :class:`~unified_planning.model.FNode`. The :fu, AnyChecker, This expression walker checks if any subexpression matches a given predicate., Checks if any of the subexpression matches the predicate.          :param expr (+29 more)
+Cohesion: 0.07
+Nodes (28): OperatorKind, Enum, This module defines all the operators used by the unified_planning library., Enum representing the type of an :class:`~unified_planning.model.FNode`. The :fu, AnyChecker, This expression walker checks if any subexpression matches a given predicate., DagWalker, DagWalker treats the expression as a DAG and performs memoization of the     in (+20 more)
 
 ### Community 101 - "Community 101"
 Cohesion: 0.22
@@ -654,7 +670,7 @@ Cohesion: 0.29
 Nodes (10): advance_to_elapsed(), build_mdp(), goal_product_by_layer(), main(), Standalone probe: inspect the PTRPG (baseline_survival) layer-by-layer propagati, G_t = prod_g P_t(g) for every layer t., Step (random legal) until current_time advances to >= target_elapsed     (commit, t* = first layer where G_t crosses theta*g_inf (horizon-invariant signal). (+2 more)
 
 ### Community 109 - "Community 109"
-Cohesion: 0.09
+Cohesion: 0.08
 Nodes (11): C_MCTS, TP MCTS solver implementation.     Contains STNs in each node, Per-action goal-backtrack marginal lift from this node's state, cached, Global open/expandable leaf nodes across the tree (spanning depths)., Standard backprop of a freshly expanded value up to the root., Expand ONE child of the selected ORIGINAL node, standard backprop.         The, One Option A iteration: pick the globally best open-leaf node by         fronti, Global frontier Option A: argmax aligned_value, expand selected node only. (+3 more)
 
 ### Community 110 - "Community 110"
@@ -674,16 +690,16 @@ Cohesion: 0.12
 Nodes (15): Cost (trial $300), Files, Machine types, One-time: create the VM, Option A — Cursor / VS Code Remote SSH (recommended), Option B — Jupyter in browser via SSH tunnel, Option C — Headless (no notebook), Prerequisites (+7 more)
 
 ### Community 114 - "Community 114"
-Cohesion: 0.04
-Nodes (25): DagWalker, Returns True, independently from the children's value., Returns False, independently from the children's value., Returns None, independently from the children's value., Returns expression, independently from the childrens's value., Returns True if any of the children returned True., Returns True if all the children returned True., DagWalker treats the expression as a DAG and performs memoization of the     in (+17 more)
+Cohesion: 0.11
+Nodes (8): QuantifierSimplifier, Same to the :class:`~unified_planning.model.walkers.Simplifier`, but does not ex, Simplifies the expression and the quantifiers in it.         The quantifiers ar, Apply function to the node and memoize the result.         Note: This function, Same to the :class:`~unified_planning.model.walkers.QuantifierSimplifier`, but t, Evaluates the given expression in the given `State`.         :param expression:, This method needs to be updated from the QuantifierRemover in order to use the S, StateEvaluator
 
 ### Community 115 - "Community 115"
-Cohesion: 0.25
-Nodes (5): _as_fraction(), Q ordered by remaining time, windows [rem, rem, rem].          ``running`` is ``, ``(value, "exact" | "cover")`` from solved states, or ``(None, "miss")``., Remaining times from the search STN are floats; keep keys small., ``(value, "exact" | "cover")`` or ``(None, "miss")``; several tie orders
+Cohesion: 0.08
+Nodes (3): Walker used to retrieve the `Type` of an expression., Returns the `Type` of the expression.          :param expression: The expressi, TypeChecker
 
 ### Community 116 - "Community 116"
-Cohesion: 0.24
-Nodes (5): _env_int(), ExactPatternMDPHeuristic, Admissible upper bound from exact small-pattern CoMDP+ MDPs.      Usage mirrors, Pair snap actions back into durative operations.          ``convert_problem`` sp, test_from_problem_keeps_only_true_initial_facts()
+Cohesion: 0.19
+Nodes (7): _env_int(), ExactPatternMDPHeuristic, _extract_state_facts(), Admissible upper bound from exact small-pattern CoMDP+ MDPs.      Usage mirrors, Pair snap actions back into durative operations.          ``convert_problem`` sp, Admissible upper bound on P(goal before deadline) from ``state``.          Goals, test_from_problem_keeps_only_true_initial_facts()
 
 ### Community 119 - "Action"
 Cohesion: 0.20
@@ -710,12 +726,12 @@ Cohesion: 0.13
 Nodes (12): flatten_dict_structure(), Fraction, This method takes a dict containing a List of tuples of 3 elements, and     ret, Constructs the `STNPlan` with 2 different possible representations:         one, This class represents a node of the `STNPlan`.      :param kind: The `Timepoin, Adds the end action as a chosen action          - The end action must be before, add constraint so the time of the action is fixed and can't be changed, add a deadline to the STN: end plan - start plan <= deadline         :param dea (+4 more)
 
 ### Community 129 - "shortcuts.py"
-Cohesion: 0.02
-Nodes (73): FNodeContent, Returns this `Action` `Environment`., Environment, get_environment(), IO, Returns the environment's `TypeChecker`., Returns the environment's `Factory`., Returns the environment's `Simplifier`. (+65 more)
+Cohesion: 0.03
+Nodes (62): Returns this `Action` `Environment`., Environment, get_environment(), IO, Returns the environment's `TypeChecker`., Returns the environment's `Factory`., Returns the environment's `Simplifier`., Returns the environment's `Substituter`. (+54 more)
 
 ### Community 130 - "Community 130"
 Cohesion: 0.03
-Nodes (54): Exception, SyntaxError, ANMLSyntaxError, Base class for all custom exceptions of the unified_planning (UP) library., UPException, UPNoRequestedEngineAvailableException, UPNoSuitableEngineAvailableException, UPPreconditionDonHoldException (+46 more)
+Nodes (38): AbstractProblem, This is an abstract class that represents a generic `planning problem`.      T, Returns the `Problem` `Environment`., Returns the `Problem` `name`., Sets the `Problem` `name`., Returns `True` the given `name` is already used inside this `Problem`,, Normalizes the given `Plan`, that is potentially the result of another, FluentsSetMixin (+30 more)
 
 ### Community 131 - "Community 131"
 Cohesion: 0.22
@@ -727,7 +743,7 @@ Nodes (11): 1. Heuristics added this session (strategy aliases), 2. Key files, 3
 
 ### Community 133 - "Community 133"
 Cohesion: 0.08
-Nodes (5): Creates an instance of the GrounderHelper.          :param problem: The `Probl, Fraction, Performs basic simplifications of the input expression.      Important NOTE:, Performs basic simplification of the given expression.          If a :class:`~, Simplifier
+Nodes (5): Add children to the stack., Fraction, Performs basic simplifications of the input expression.      Important NOTE:, Performs basic simplification of the given expression.          If a :class:`~, Simplifier
 
 ### Community 135 - "Community 135"
 Cohesion: 0.27
@@ -810,8 +826,8 @@ Cohesion: 0.32
 Nodes (13): _clamp_probability(), _compute_clause_support(), _compute_precondition_support_result(), _format_clause(), _format_precondition_structure(), _is_atomic_fact(), _is_clause_container(), _is_dnf_structure() (+5 more)
 
 ### Community 172 - ".create_Snode"
-Cohesion: 0.14
-Nodes (7): AbstractProblem, This is an abstract class that represents a generic `planning problem`.      T, Returns the `Problem` `Environment`., Returns the `Problem` `name`., Sets the `Problem` `name`., Returns `True` the given `name` is already used inside this `Problem`,, Normalizes the given `Plan`, that is potentially the result of another
+Cohesion: 0.10
+Nodes (21): Div(), Equals(), FluentExp(), GE(), GT(), LE(), LT(), Minus() (+13 more)
 
 ### Community 173 - ".And"
 Cohesion: 0.19
@@ -838,8 +854,8 @@ Cohesion: 0.33
 Nodes (4): frontier_score(), Blended frontier-selection score (Option A / frontier_aligned_*).          front, Option A frontier-aligned selection score (frontier_aligned_*)., TestFrontierScore
 
 ### Community 180 - ".is_int_constant"
-Cohesion: 0.13
-Nodes (7): FactPatternModel, ``EngineModel`` interface over a fact-capped pattern (see module doc)., _combine(), _env_float(), _env_int(), ``windows_ilao_pdb``: MCTS leaf heuristic = a table of the time-left windows MDP, Running actions from the compiled model's inExecution(start-<a>) facts.
+Cohesion: 0.16
+Nodes (3): FactPatternModel, ``EngineModel`` interface over a fact-capped pattern (see module doc)., The options of (F, Q, W), without r:         ``(label, charge, inert_e, queue af
 
 ### Community 181 - "sweep_paths_table_gap.py"
 Cohesion: 0.23
@@ -850,8 +866,8 @@ Cohesion: 0.25
 Nodes (7): Critical path PDB runtime investigation, Irrelevant actions and patterns, Reproduction files, Size of the tested problem, Unprofiled timings, Validation and scope, Where the time goes
 
 ### Community 185 - "._frontier_aligned_value"
-Cohesion: 0.18
-Nodes (9): _dynamic_aligned_horizon(), Leaf heuristics evaluated through ``_temporal_heuristic`` (vs. plain trpg)., Parent-local comparison horizon H_p = min over the parent's children of     the, aligned_value(n): prefix-roll delta then PTRPG at the GLOBAL H_frontier, Evaluate the temporal_probabilistic_rpg heuristic, threading the baseline_cached, The STN attached to a search node, if this run keeps one., _stn_of(), _tprpg_heuristic_value() (+1 more)
+Cohesion: 0.12
+Nodes (9): Fraction, Returns `True` if the expression is a constant, `False` otherwise., Returns the constant value stored in this expression., Return constant `boolean` value stored in this expression., Return constant `real` value stored in this expression., Test whether the expression is a `boolean` constant., Test whether the expression is a `real` constant., Test whether the expression is the `True` Boolean constant. (+1 more)
 
 ### Community 187 - ".copy_stn"
 Cohesion: 0.23
@@ -877,40 +893,72 @@ Nodes (3): combinationMDP, :return: the initial state of the problem, If the pos
 Cohesion: 0.29
 Nodes (3): Tightest implied bound on ``x - y`` (both must be declared)., ``(lower, upper)`` on ``x`` relative to the origin, as raw bounds.          ``lo, ``(lo, lo_strict, hi, hi_strict)`` for ``x`` in origin-relative time.
 
+### Community 202 - "FreeVarsExtractor"
+Cohesion: 0.19
+Nodes (7): _combine(), _env_float(), _env_int(), ``windows_ilao_pdb``: MCTS leaf heuristic = a table of the time-left windows MDP, One ILAO* table per pattern, solved offline, read (and lazily extended) online., Running actions from the compiled model's inExecution(start-<a>) facts., WindowsILAOPDBHeuristic
+
 ### Community 204 - "time_admissible_resolution.py"
 Cohesion: 0.47
 Nodes (5): build_mdp(), main(), MDP, One-off: time a SINGLE heuristic call (no MCTS) for baseline_admissible (dense), time_once()
 
 ### Community 205 - "TestMDP"
-Cohesion: 0.33
-Nodes (5): check_conflicting_durative_precondition(), check_conflicting_precondition(), This module defines the `Precondition` class. A basic `Precondition` has a `flu, This method checks if the precondition that would be added is in conflict with t, This method checks if the precondition that would be added is in conflict with t
+Cohesion: 0.15
+Nodes (5): ProbabilisticEffect, Returns this `Effect's Environment`., Returns the `Fluents` that is modified by this `Effect`., Return the function that contains the information on how the `fluent` of this `P, This class represents a `probabilistic effect` over a list of :class:`~unified_p
 
 ### Community 206 - "time_paths_table_call.py"
 Cohesion: 0.60
 Nodes (4): build_mdp(), main(), Per-call runtime: baseline_admissible vs baseline_admissible_paths_table (v3)., time_strategy()
 
+### Community 209 - ".set_initial_value"
+Cohesion: 0.17
+Nodes (6): Dnf, Nnf, Class used to transform a logic expression into the equivalent     Disjunctive, Function used to transform a logic expression into the equivalent         Disju, Class used to transform a logic expression into the equivalent     Negation Nor, Function used to transform a logic expression into the equivalent         Negat
+
+### Community 214 - "NamesExtractor"
+Cohesion: 0.24
+Nodes (3): NamesExtractor, This walker returns all the names contained in an expression., Returns the set of names contained in this expression.          :param express
+
+### Community 215 - ".__init__"
+Cohesion: 0.22
+Nodes (8): _normalize_max_approximation_selection(), value_mode that drives BOTH MCTS expansion ordering and leaf rollout with     t, ``selection_type='max_approximation'`` is the single switch (matching the     g, _uses_fixed_tail_deprecated_ptrpg_rollout(), _uses_max_approximation_value_mode(), _uses_ptrpg_guided_rollout_value_mode(), validate_fixed_tail_ptrpg_rollout_config(), validate_ptrpg_guided_rollout_config()
+
+### Community 216 - "._compute_node_result"
+Cohesion: 0.24
+Nodes (4): Add children to the stack., Apply function to the node and memoize the result.         Note: This function, Empties the stack by processing every node in it.         Processing is perform, Performs an iterative walk of the DAG
+
+### Community 218 - "FreeVarsExtractor"
+Cohesion: 0.33
+Nodes (3): FreeVarsExtractor, This expression walker returns all the `fluent` expression in the given expressi, Returns all the `fluent expressions` in the given expression.          :param
+
+### Community 221 - "print_engines_info"
+Cohesion: 0.67
+Nodes (3): print_engines_info(), IO, set_credits_stream()
+
+### Community 222 - "RealType"
+Cohesion: 0.67
+Nodes (3): Fraction, Returns the `real` type defined in the global environment with the given `bounds, RealType()
+
 ## Knowledge Gaps
 - **93 isolated node(s):** `NASA rover with nine goal-specific PDBs`, `NASA rover critical path PDB timings`, `Size of the tested problem`, `Unprofiled timings`, `Where the time goes` (+88 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **49 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **57 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Work-memory lessons
 
 **Preferred sources** — corroborated by past sessions; start here.
-- `TemporalProbabilisticRPGHeuristic` (6× useful, score=3.138501533)
-- `DeltaSimpleTemporalNetwork` (5× useful, score=2.432007425)
-- `CombinationState` (4× useful, score=1.772547199)
-- `ActionQueue` (3× useful, score=1.329422978)
+- `TemporalProbabilisticRPGHeuristic` (6× useful, score=3.122125671)
+- `DeltaSimpleTemporalNetwork` (5× useful, score=2.41931786)
+- `CombinationState` (4× useful, score=1.763298522)
+- `ActionQueue` (3× useful, score=1.322486404)
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `TemporalProbabilisticRPGHeuristic` connect `Community 10` to `Community 2`, `Community 131`, `Community 4`, `Community 3`, `Community 7`, `Community 13`, `Community 14`, `Community 21`, `Community 22`, `Community 33`, `.is_int_constant`, `FreeVarsExtractor`, `Community 36`, `Community 37`, `.kind`, `Community 39`, `Community 42`, `.copy_stn`, `.And`, `compare_paths_table_vs_admissible.py`, `Community 51`, `Community 53`, `._ensure_admissible_lp_bound`, `.copy_stn`, `cumulative_merge_truncate`, `TestTableStrategyEngine`, `TestChainedFootprints`, `Community 67`, `Community 68`, `SyntheticAction`, `time_admissible_resolution.py`, `Community 75`, `time_paths_table_call.py`, `._ensure_survival_delete_table`, `Community 80`, `Community 83`, `Community 92`, `Community 93`, `Community 94`, `Community 95`, `Community 101`, `Community 104`, `Community 106`, `Community 107`, `Community 111`, `Community 127`?**
   _High betweenness centrality (0.214) - this node is a cross-community bridge._
-- **Why does `FNode` connect `Community 1` to `Community 128`, `shortcuts.py`, `Community 98`, `Community 35`, `Community 133`, `Community 91`, `Community 44`, `Community 15`, `Community 17`, `Community 18`, `Community 114`, `Community 20`, `Community 59`, `Community 28`, `Community 63`, `Community 31`?**
+- **Why does `FNode` connect `Community 1` to `Community 128`, `shortcuts.py`, `Community 133`, `Community 15`, `Community 17`, `Community 18`, `Community 20`, `Community 28`, `Community 29`, `Community 31`, `Community 35`, `.create_Snode`, `Community 44`, `._frontier_aligned_value`, `Community 59`, `Community 63`, `Community 64`, `.set_initial_value`, `NamesExtractor`, `._compute_node_result`, `.And`, `FreeVarsExtractor`, `Community 91`, `.is_int_constant`, `Community 90`, `Bool`, `Dot`, `FALSE`, `Community 98`, `Int`, `ParameterExp`, `VariableExp`, `Community 114`, `Community 115`?**
   _High betweenness centrality (0.142) - this node is a cross-community bridge._
-- **Why does `C_MCTS` connect `Community 109` to `.heuristic_expected_time`, `Community 101`, `Community 103`, `Community 11`, `Community 12`, `Pattern`, `Community 19`, `Community 23`, `._frontier_aligned_value`, `Community 26`, `.copy_stn`, `test_greedy_parallel.py`, `Community 31`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+- **Why does `C_MCTS` connect `Community 109` to `.heuristic_expected_time`, `Community 101`, `Community 103`, `FreeVarsExtractor`, `Community 11`, `Community 12`, `Pattern`, `Community 19`, `Community 23`, `.__init__`, `.copy_stn`, `Community 28`, `test_greedy_parallel.py`, `Community 31`?**
+  _High betweenness centrality (0.065) - this node is a cross-community bridge._
 - **Are the 33 inferred relationships involving `FNode` (e.g. with `create_action_with_given_subs()` and `Environment`) actually correct?**
   _`FNode` has 33 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 81 inferred relationships involving `TemporalProbabilisticRPGHeuristic` (e.g. with `PlanResult` and `SyntheticAction`) actually correct?**
