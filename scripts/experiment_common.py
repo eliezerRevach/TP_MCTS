@@ -808,11 +808,16 @@ def run_domain_subprocess(
     frontier_option_a_debug: bool = False,
     extra_args: list[str] | None = None,
     verbose: bool = False,
+    workers: int = 1,
 ) -> tuple[str, int]:
     """
     Launch run_domain.py as a subprocess and return (stdout_text, returncode).
 
     Uses the current Python interpreter so Colab/venv paths are respected.
+
+    workers > 1 splits the runs over that many run_domain.py processes running at
+    the same time (see ``_run_parallel``); the returned output is merged so that
+    ``parse_run_metrics`` reads the same numbers one process would print.
     """
     cmd = [
         sys.executable,
@@ -931,6 +936,12 @@ def run_domain_subprocess(
     prev_pp = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = repo + os.pathsep + prev_pp if prev_pp else repo
 
+    if workers > 1 and runs > 1:
+        return _run_parallel(cmd, env, runs=runs, seed=seed, workers=workers, verbose=verbose)
+    return _run_cmd(cmd, env)
+
+
+def _run_cmd(cmd: list[str], env: dict[str, str]) -> tuple[str, int]:
     proc = subprocess.run(
         cmd,
         capture_output=True,
@@ -940,6 +951,132 @@ def run_domain_subprocess(
     )
     output = proc.stdout + proc.stderr
     return output, proc.returncode
+
+
+# ---------------------------------------------------------------------------
+# Parallel runs: one run_domain.py per worker, merged afterwards
+# ---------------------------------------------------------------------------
+
+# Worker i runs with seed + i * PARALLEL_SEED_STRIDE. Worker 0 keeps the base seed,
+# so its episodes are exactly the first episodes of the one-process run; the others
+# get their own random streams (the same seed everywhere would repeat the episodes).
+PARALLEL_SEED_STRIDE = 1000
+
+
+def physical_cores() -> int:
+    """Physical cores (MCTS spends wall-clock time per decision, so two workers on
+    one core's hyperthreads get fewer iterations each). psutil if installed, else
+    the (physical id, core id) pairs of /proc/cpuinfo, else half the logical CPUs."""
+    try:
+        import psutil  # type: ignore
+
+        n = psutil.cpu_count(logical=False)
+        if n:
+            return int(n)
+    except Exception:
+        pass
+    try:
+        pairs, phys = set(), None
+        with open("/proc/cpuinfo", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("physical id"):
+                    phys = line.split(":", 1)[1].strip()
+                elif line.startswith("core id"):
+                    pairs.add((phys, line.split(":", 1)[1].strip()))
+        if pairs:
+            return len(pairs)
+    except OSError:
+        pass
+    return max(1, (os.cpu_count() or 2) // 2)
+
+
+def split_runs(runs: int, workers: int) -> list[int]:
+    """Runs per worker, as even as possible; never more workers than runs."""
+    n = max(1, min(int(workers), int(runs)))
+    base, extra = divmod(int(runs), n)
+    return [base + (1 if i < extra else 0) for i in range(n)]
+
+
+def _set_arg(cmd: list[str], flag: str, value: Any) -> list[str]:
+    out = list(cmd)
+    out[out.index(flag) + 1] = str(value)
+    return out
+
+
+def _run_parallel(cmd: list[str], env: dict[str, str], *, runs: int, seed: int, workers: int,
+                  verbose: bool) -> tuple[str, int]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    sizes = split_runs(runs, workers)
+    seeds = [int(seed) + i * PARALLEL_SEED_STRIDE for i in range(len(sizes))]
+    cmds = []
+    for i, (size, worker_seed) in enumerate(zip(sizes, seeds)):
+        c = _set_arg(_set_arg(cmd, "--runs", size), "--seed", worker_seed)
+        if "--max-approx-seed" in c:
+            base = int(c[c.index("--max-approx-seed") + 1])
+            c = _set_arg(c, "--max-approx-seed", base + i * PARALLEL_SEED_STRIDE)
+        cmds.append(c)
+    if verbose:
+        print(f"  parallel: {len(sizes)} workers, runs per worker {sizes}, seeds {seeds[0]}.."
+              f"{seeds[-1]} (step {PARALLEL_SEED_STRIDE})", flush=True)
+    # Threads only wait on the child processes; the work runs in the processes.
+    with ThreadPoolExecutor(max_workers=len(cmds)) as pool:
+        results = list(pool.map(lambda c: _run_cmd(c, env), cmds))
+    returncode = next((rc for _out, rc in results if rc != 0), 0)
+    return merge_run_domain_outputs([out for out, _rc in results], seeds=seeds), returncode
+
+
+_SUMMARY_LINE = re.compile(r"^(Completed|Amount of success|Average success time|STD success time)\s*=\s*(\S+)\s*$")
+
+
+def merge_run_domain_outputs(outputs: list[str], seeds: list[int] | None = None) -> str:
+    """One run_domain.py output per worker -> one output whose four summary lines are
+    what ``evaluate.evaluation_loop`` prints for all the episodes together:
+
+        Completed = runs;  Amount of success = S;  Average success time = mean of the
+        S success times (-inf if S = 0);  STD success time = stdev(times) / sqrt(S)
+        (-1 if S <= 1).
+
+    From worker i (s_i successes, mean m_i, printed std q_i): sample sd_i = q_i sqrt(s_i),
+    M = sum s_i m_i / S, SS = sum (s_i - 1) sd_i^2 + s_i (m_i - M)^2, stdev = sqrt(SS/(S-1)).
+    Each worker's own summary lines are renamed ("[worker i] ...") so that
+    ``parse_run_metrics`` only finds the merged ones, which come last.
+    """
+    import math
+
+    parts, done = [], []
+    for i, text in enumerate(outputs):
+        found: dict[str, float] = {}
+        lines = []
+        for line in text.splitlines():
+            m = _SUMMARY_LINE.match(line.strip())
+            if m:
+                found[m.group(1)] = float(m.group(2))
+                lines.append(f"[worker {i}] {m.group(1).lower()}: {m.group(2)}")
+            else:
+                lines.append(line)
+        seed_note = f" seed={seeds[i]}" if seeds else ""
+        parts.append(f"===== worker {i}{seed_note} =====\n" + "\n".join(lines))
+        if "Completed" in found and "Amount of success" in found:
+            done.append((int(found["Completed"]), int(found["Amount of success"]),
+                         found.get("Average success time", -math.inf), found.get("STD success time", -1.0)))
+        else:
+            parts.append(f"[parallel] worker {i} printed no summary (crashed?); its runs are not counted")
+
+    total = sum(n for n, _s, _m, _q in done)
+    succ = sum(s for _n, s, _m, _q in done)
+    mean = sum(s * m for _n, s, m, _q in done if s > 0) / succ if succ > 0 else -math.inf
+    std: float = -1
+    if succ > 1:
+        ss = sum((s - 1) * (q * math.sqrt(s)) ** 2 + s * (m - mean) ** 2
+                 for _n, s, m, q in done if s > 0 and (s == 1 or q >= 0))
+        std = math.sqrt(ss / (succ - 1)) / math.sqrt(succ)
+    parts.append(f"===== merged over {len(outputs)} workers =====\n"
+                 f"Completed = {total}\n"
+                 f"Amount of success = {succ}\n"
+                 f"Average success time = {mean}\n"
+                 f"STD success time = {std}")
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------

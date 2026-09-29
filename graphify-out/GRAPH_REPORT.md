@@ -1,7 +1,7 @@
-# Graph Report - TP_MCTS  (2026-09-28)
+# Graph Report - TP_MCTS  (2026-09-29)
 
 ## Corpus Check
-- 241 files · ~803,315 words
+- 241 files · ~803,413 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `182d8ea9`
+- Built from commit: `e5f399f2`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -945,10 +945,10 @@ Nodes (3): Fraction, Returns the `real` type defined in the global environment w
 ## Work-memory lessons
 
 **Preferred sources** — corroborated by past sessions; start here.
-- `TemporalProbabilisticRPGHeuristic` (6× useful, score=3.122125671)
-- `DeltaSimpleTemporalNetwork` (5× useful, score=2.41931786)
-- `CombinationState` (4× useful, score=1.763298522)
-- `ActionQueue` (3× useful, score=1.322486404)
+- `TemporalProbabilisticRPGHeuristic` (6× useful, score=3.121439031)
+- `DeltaSimpleTemporalNetwork` (5× useful, score=2.418785786)
+- `CombinationState` (4× useful, score=1.762910725)
+- `ActionQueue` (3× useful, score=1.322195553)
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
