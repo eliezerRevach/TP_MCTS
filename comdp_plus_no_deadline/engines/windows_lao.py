@@ -741,7 +741,12 @@ class WindowsTable:
 
     # -- backward ------------------------------------------------------------
     def _backward(self) -> str:
+        """Backward curves on compact arrays (array / numpy, 4-8 bytes per entry; the same
+        computation as keeping every edge in Python lists, at a fraction of the memory).
+        Zero-charge levels: Kahn in rounds over the distinct (state, successor) pairs --
+        round = longest charge-0 path to a sink."""
         import numpy as np
+        from array import array
         from scipy.sparse import csr_matrix
 
         n = len(self.states)
@@ -754,46 +759,64 @@ class WindowsTable:
                     g = _frac_gcd(g, Fraction(inert_e))
         self.grid = g
         R = int(self.horizon / g) + 1
-        owner, shift, need, rows, cols, probs = [], [], [], [], [], []
+        owner, shift, need = array("i"), array("i"), array("i")
+        rows, cols, probs = array("i"), array("i"), array("d")
+        shift_of, need_of = {}, {}
+        k = 0
         for i, row in enumerate(self.options):
             for charge, inert_e, branches, _l in row or ():
-                k = len(owner)
                 owner.append(i)
-                shift.append(int(Fraction(charge) / g))
-                need.append(0 if inert_e is None else math.ceil(Fraction(inert_e) / g))
+                c = shift_of.get(charge)
+                if c is None:
+                    c = shift_of[charge] = int(Fraction(charge) / g)
+                shift.append(c)
+                e = need_of.get(inert_e)
+                if e is None:
+                    e = need_of[inert_e] = 0 if inert_e is None else math.ceil(Fraction(inert_e) / g)
+                need.append(e)
                 for p, j in branches:
                     rows.append(k)
                     cols.append(j)
                     probs.append(p)
-        owner = np.array(owner, dtype=int)
-        shift = np.array(shift, dtype=int)
-        need = np.array(need, dtype=int)
+                k += 1
+        owner = np.frombuffer(owner, dtype=np.int32).astype(int)
+        shift = np.frombuffer(shift, dtype=np.int32).astype(int)
+        need = np.frombuffer(need, dtype=np.int32).astype(int)
+        rows_a = np.frombuffer(rows, dtype=np.int32)
+        cols_a = np.frombuffer(cols, dtype=np.int32)
         m = len(owner)
-        P = csr_matrix((probs, (rows, cols)), shape=(m, n))
+        P = csr_matrix((np.frombuffer(probs, dtype=np.float64), (rows_a, cols_a)), shape=(m, n))
         V = np.zeros((R, n))
         V[:, [i for i, row in enumerate(self.options) if row is None]] = 1.0
 
         # levels over the charge-0 edges, sinks first
         zero = shift == 0
-        rows_a, cols_a = np.array(rows, dtype=int), np.array(cols, dtype=int)
         edge_zero = zero[rows_a] if len(rows_a) else np.zeros(0, dtype=bool)
-        pairs = set(zip(owner[rows_a[edge_zero]].tolist(), cols_a[edge_zero].tolist()))
-        pending = np.zeros(n, dtype=int)
-        preds: List[List[int]] = [[] for _ in range(n)]
-        for a, b in pairs:
-            pending[a] += 1
-            preds[b].append(a)
+        key = np.unique(owner[rows_a[edge_zero]].astype(np.int64) * n + cols_a[edge_zero].astype(np.int64))
+        pa, pb = key // n, key % n
+        del key, edge_zero
+        pending = np.bincount(pa, minlength=n).astype(np.int64)
+        pred_of = pa[np.argsort(pb, kind="stable")]
+        indptr = np.zeros(n + 1, dtype=np.int64)
+        np.cumsum(np.bincount(pb, minlength=n), out=indptr[1:])
+        del pa, pb
         level = np.zeros(n, dtype=int)
-        frontier = [i for i in range(n) if pending[i] == 0]
-        seen = 0
-        while frontier:
-            b = frontier.pop()
-            seen += 1
-            for a in preds[b]:
-                level[a] = max(level[a], level[b] + 1)
-                pending[a] -= 1
-                if pending[a] == 0:
-                    frontier.append(a)
+        frontier = np.nonzero(pending == 0)[0]
+        seen, rnd = 0, 0
+        while len(frontier):
+            seen += len(frontier)
+            level[frontier] = rnd
+            starts, counts = indptr[frontier], indptr[frontier + 1] - indptr[frontier]
+            total = int(counts.sum())
+            if total == 0:
+                break
+            idx = np.repeat(starts - np.cumsum(np.concatenate(([0], counts[:-1]))), counts) + np.arange(total)
+            preds = pred_of[idx]
+            np.subtract.at(pending, preds, 1)
+            cand = np.unique(preds)
+            frontier = cand[pending[cand] == 0]
+            rnd += 1
+        del pred_of, indptr
         if seen < n:                                      # a zero-time cycle over several states
             self.V = self._worklist(V, P, owner, shift, need)
             self._mark_unreachable_cells()

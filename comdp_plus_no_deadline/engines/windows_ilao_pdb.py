@@ -68,7 +68,12 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_PATTERN_FACTS     at most this many facts per pattern; 0 = no
                                     cap: every relevant action on full states (8)
     TP_MCTS_WILAO_PATTERN_GROWTH    cegar (counterexamples, cegar_pattern.py) |
-                                    static (backward ranking, fact_pattern.py) (cegar)
+                                    static (backward ranking, fact_pattern.py) |
+                                    logic (untimed counterexamples from the initial
+                                    state + rollout states, logic_cegar.py)  (cegar)
+    TP_MCTS_WILAO_LOGIC_SOURCES     logic only: rollouts random | greedy     (random)
+    TP_MCTS_WILAO_LOGIC_ROLLOUTS    logic only: rollouts per round           (20)
+    TP_MCTS_WILAO_LOGIC_DEPTH       logic only: steps per rollout            (60)
     TP_MCTS_WILAO_MISS              one | lazy                              (lazy)
     TP_MCTS_WILAO_QUERY_SECONDS     lazy budget per pattern per leaf        (0.05)
     TP_MCTS_WILAO_QUERY_EXPANSIONS  lazy expansions per pattern per leaf    (200)
@@ -93,6 +98,7 @@ from collections import Counter
 from typing import Dict, List, Optional
 
 from comdp_plus_no_deadline.engines.cegar_pattern import cegar_pattern
+from comdp_plus_no_deadline.engines.logic_cegar import logic_cegar_patterns
 from comdp_plus_no_deadline.engines.fact_pattern import (FactPatternModel, exact_statics_default, grow_pattern,
                                                          independent_goal_groups)
 from comdp_plus_no_deadline.engines.survivor_sweep import relaxed_actions_from_engine
@@ -152,6 +158,13 @@ class WindowsILAOPDBHeuristic:
         self.extend_offline = bool(_env_int("TP_MCTS_WILAO_OFFLINE_EXTEND", 1))
         self.full_table = bool(_env_int("TP_MCTS_WILAO_FULL_TABLE", 1))
         self.growth = (os.environ.get("TP_MCTS_WILAO_PATTERN_GROWTH") or "cegar").strip().lower()
+        if self.growth not in ("cegar", "static", "logic"):
+            raise ValueError(f"TP_MCTS_WILAO_PATTERN_GROWTH={self.growth!r}: use cegar | static | logic")
+        self.logic_sources = (os.environ.get("TP_MCTS_WILAO_LOGIC_SOURCES") or "random").strip().lower()
+        if self.logic_sources not in ("random", "greedy"):
+            raise ValueError(f"TP_MCTS_WILAO_LOGIC_SOURCES={self.logic_sources!r}: use random | greedy")
+        self.logic_rollouts = _env_int("TP_MCTS_WILAO_LOGIC_ROLLOUTS", 20)
+        self.logic_depth = _env_int("TP_MCTS_WILAO_LOGIC_DEPTH", 60)
         self.pattern_facts = _env_int("TP_MCTS_WILAO_PATTERN_FACTS", 8)
         self.no_stn_pass = bool(_env_int("TP_MCTS_WILAO_NO_STN_PASS", 0))
         self.patterns: List[dict] = []
@@ -197,6 +210,14 @@ class WindowsILAOPDBHeuristic:
             return max(0.0, end - time.perf_counter()) / patterns_left
 
         cegar = self.growth == "cegar" and self.pattern_facts > 0 and self.full_table
+        logic = None
+        if self.growth == "logic" and self.pattern_facts > 0:
+            # Facts by untimed counterexamples (logic_cegar.py), all groups together; tables come in phase 1.
+            t0 = time.perf_counter()
+            logic = logic_cegar_patterns(self._mdp, base, groups, facts, max(self.pattern_facts, max(map(len, groups))),
+                                         sources=self.logic_sources, rollouts=self.logic_rollouts,
+                                         depth=self.logic_depth)
+            self.logic_seconds = round(time.perf_counter() - t0, 2)
         for index, group in enumerate(groups):
             grown = None
             if cegar:
@@ -205,6 +226,9 @@ class WindowsILAOPDBHeuristic:
                                       time_budget=share(len(groups) - index, table_end))
                 phi = grown["facts"]
                 model = grown["model"] or FactPatternModel(base, phi, group, facts)
+            elif logic is not None:
+                phi = logic[index]["facts"]
+                model = FactPatternModel(base, phi, group, facts)
             elif self.pattern_facts > 0:
                 # Fact-capped pattern grown backwards from the goals (fact_pattern.py).
                 phi = grow_pattern(base.ops(), group, facts, max(self.pattern_facts, len(group)))
@@ -230,6 +254,7 @@ class WindowsILAOPDBHeuristic:
                 "offline_seconds": None,
                 "solved_at_optimal": 0,
                 "cegar_log": None if grown is None else grown["log"],
+                "logic_stop": None if logic is None else logic[index]["stop"],
                 "cegar_seconds": None if grown is None else grown["seconds"],
             })
             if grown is not None and grown["table"] is not None:
@@ -276,7 +301,10 @@ class WindowsILAOPDBHeuristic:
         self.offline_report = {
             "patterns": len(self.patterns),
             "pattern_facts": [len(p["facts"]) if p["facts"] is not None else "all" for p in self.patterns],
-            "growth": self.growth if cegar else "static",
+            "growth": "cegar" if cegar else ("logic" if logic is not None else "static"),
+            "logic": None if logic is None else {"sources": self.logic_sources, "rollouts": self.logic_rollouts,
+                                                 "depth": self.logic_depth, "seconds": self.logic_seconds,
+                                                 "stop": [p["logic_stop"] for p in self.patterns]},
             "cegar_stop": [p["cegar_log"][-1].get("stop") if p["cegar_log"] else None for p in self.patterns],
             "cegar_seconds": [p["cegar_seconds"] for p in self.patterns],
             "pattern_fact_names": [p["facts"] for p in self.patterns],
