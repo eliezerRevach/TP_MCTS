@@ -71,6 +71,12 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_AGG               min | avg                               (min)
     TP_MCTS_WILAO_GROUPING          1 = product across independent groups   (0)
     TP_MCTS_WILAO_NO_STN_PASS       1 = ignore the STN's remaining times    (0)
+    TP_MCTS_WILAO_EXACT_STATICS     static facts (changed by no action) keep their
+                                    initial value in every pattern; 0 = old
+                                    relaxation (h1 counted as a good hand)   (1)
+    TP_MCTS_WILAO_BLUR              window grid eps: lo down / hi up to eps, e exact
+                                    (fewer states, still an upper bound;
+                                    windows_lao.py "Blur"); 0 = off          (0)
     TP_MCTS_WILAO_REPORT            print a summary at exit: 1 | 0          (1)
 """
 
@@ -83,10 +89,11 @@ from collections import Counter
 from typing import Dict, List, Optional
 
 from comdp_plus_no_deadline.engines.cegar_pattern import cegar_pattern
-from comdp_plus_no_deadline.engines.fact_pattern import FactPatternModel, grow_pattern, independent_goal_groups
+from comdp_plus_no_deadline.engines.fact_pattern import (FactPatternModel, exact_statics_default, grow_pattern,
+                                                         independent_goal_groups)
 from comdp_plus_no_deadline.engines.survivor_sweep import relaxed_actions_from_engine
 from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel, goal_relevance_closure
-from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO, WindowsTable
+from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO, WindowsTable, blur_default
 
 
 # Legacy single setting -> (AGG, GROUPING).
@@ -271,6 +278,8 @@ class WindowsILAOPDBHeuristic:
             "agg": self.agg,
             "grouping": self.grouping,
             "no_stn_pass": self.no_stn_pass,
+            "exact_statics": exact_statics_default(),
+            "blur": str(blur_default()),
             "groups": [[self.patterns[i]["goals"][0] for i in members] for members in self.groups],
             "values": [None if p["offline_value"] is None else round(p["offline_value"], 6)
                        for p in self.patterns],

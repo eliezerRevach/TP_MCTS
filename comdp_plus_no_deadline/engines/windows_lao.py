@@ -23,6 +23,15 @@ lo by its hi while r is charged only its lo. e shrinks by exactly what was
 charged, so charged + e_b >= d_b holds for every running b: overlapping actions
 inside a charge max(d_b, d_c), sequential ones d_b + d_c.
 
+Blur (optional, ``blur`` / TP_MCTS_WILAO_BLUR = eps, 0 = off): every window a
+start or an end produces is snapped OUTWARD to the grid eps,
+    lo -> floor(lo / eps) * eps,   hi -> ceil(hi / eps) * eps,   e unchanged,
+so states that differ only in nearby windows become one. Sound: the MDP is
+monotone in "lo <=, hi >=, r >=, r - e >=", so a looser window is worth at
+least as much -- the value stays an upper bound. e is NOT rounded: rounding it
+down charges less than the real time (eps = 3 gave V = 1.0 everywhere on nasa).
+Only the window variants shrink (facts and end orders are untouched).
+
 Pruned, never generated or never expanded:
     * a gap whose windows are inconsistent (lo > hi)           -- STN reject
     * an end with r - e_x < 0                                   -- past the deadline
@@ -42,6 +51,7 @@ from __future__ import annotations
 import heapq
 import itertools
 import math
+import os
 import time
 from fractions import Fraction
 from typing import Dict, FrozenSet, Hashable, List, Optional, Sequence, Tuple
@@ -114,6 +124,26 @@ def end_windows(windows: Sequence[Window], durations: Sequence[Fraction]
     return normalise(rest), e_x
 
 
+def blur_default() -> Fraction:
+    """TP_MCTS_WILAO_BLUR: the window grid eps; 0 (default) = no blur."""
+    text = (os.environ.get("TP_MCTS_WILAO_BLUR") or "0").strip()
+    try:
+        eps = Fraction(text)
+    except (ValueError, ZeroDivisionError):
+        raise ValueError(f"TP_MCTS_WILAO_BLUR={text!r}: use a number >= 0 (0 = off)")
+    if eps < 0:
+        raise ValueError(f"TP_MCTS_WILAO_BLUR={text!r}: use a number >= 0 (0 = off)")
+    return eps
+
+
+def blur_windows(windows: Optional[Tuple[Window, ...]], eps: Fraction) -> Optional[Tuple[Window, ...]]:
+    """lo down and hi up to the grid eps, e exact (module doc)."""
+    if windows is None or not eps:
+        return windows
+    return normalise(tuple((Fraction(math.floor(lo / eps)) * eps, Fraction(math.ceil(hi / eps)) * eps, e)
+                           for lo, hi, e in windows))
+
+
 def fold_zero_time_loop(branches, s):
     """An instant action whose outcome is its own state lands at the same state at
     the same r, so the best policy repeats it until it leaves. ``branches`` are
@@ -143,8 +173,10 @@ class WindowsLAO:
     def __init__(self, model, *, heuristic: str = "sweep", epsilon: float = 1e-6,
                  max_expansions: int = 2_000_000, prune_inert: bool = True,
                  time_budget: Optional[float] = None, sweep_horizon=None,
-                 relaxed_actions: Optional[list] = None):
+                 relaxed_actions: Optional[list] = None, blur=None):
         self.model = model
+        # Window grid eps (module doc, "Blur"); None = TP_MCTS_WILAO_BLUR, 0 = off.
+        self.blur = blur_default() if blur is None else Fraction(blur)
         self.heuristic = heuristic
         self.epsilon = float(epsilon)
         self.max_expansions = int(max_expansions)
@@ -459,7 +491,7 @@ class WindowsLAO:
             d = self.durations[name]
             inert = self.prune_inert and self._inert(name)
             for gap in range(len(queue) + 1):
-                new = start_windows(windows, d, gap)
+                new = blur_windows(start_windows(windows, d, gap), self.blur)
                 if new is None:
                     self.stats["pruned_gap"] += 1
                     continue
@@ -470,6 +502,7 @@ class WindowsLAO:
             op = self.ops[x]
             if self._end_legal(op, facts):
                 rest, charge = end_windows(windows, [self.durations[k] for k in queue[1:]])
+                rest = blur_windows(rest, self.blur)
                 if rest is None:
                     self.stats["pruned_gap"] += 1
                 else:

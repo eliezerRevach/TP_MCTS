@@ -12,6 +12,7 @@ from comdp_plus_no_deadline.engines.temporal_stn_pdb import TemporalSTNPDB, ToyM
 from comdp_plus_no_deadline.engines.windows_lao import (  # noqa: E402
     WindowsLAO,
     WindowsTable,
+    blur_windows,
     end_windows,
     start_windows,
 )
@@ -353,3 +354,48 @@ def test_shifted_cover_is_never_below_the_leaf(ops, goals, D, facts):
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+# ---------------------------------------------------------------- blur (windows snapped outward)
+def test_blur_snaps_lo_down_and_hi_up_and_keeps_e():
+    assert blur_windows(((F(3), F(5), F(3)),), F(2)) == ((F(2), F(6), F(3)),)
+    assert blur_windows(((F(3), F(5), F(3)),), F(0)) == ((F(3), F(5), F(3)),)          # 0 = off
+    assert blur_windows(None, F(2)) is None
+
+
+def test_blur_is_off_by_default_and_read_from_the_environment(monkeypatch):
+    monkeypatch.delenv("TP_MCTS_WILAO_BLUR", raising=False)
+    assert WindowsLAO(ToyModel(A_B, {"g"}, 8)).blur == 0
+    monkeypatch.setenv("TP_MCTS_WILAO_BLUR", "5")
+    assert WindowsLAO(ToyModel(A_B, {"g"}, 8)).blur == 5
+    assert WindowsLAO(ToyModel(A_B, {"g"}, 8), blur=0).blur == 0                         # the argument wins
+    monkeypatch.setenv("TP_MCTS_WILAO_BLUR", "-1")
+    with pytest.raises(ValueError):
+        WindowsLAO(ToyModel(A_B, {"g"}, 8))
+
+
+@pytest.mark.parametrize("eps", [2, 3, 5])
+@pytest.mark.parametrize("ops,goals,D,facts", [
+    (A_B + [UNRELATED_C], {"g"}, 8, ()),
+    (_required_concurrency_ops(), {"goal"}, 5, {"a2_fresh"}),
+    ([{"name": "a", "duration": 3, "end": [(("pa",), (), 0.7), ((), (), 0.3)]},
+      {"name": "b", "duration": 2, "pre": ("pa",), "end": [(("g",), (), 0.6), ((), (), 0.4)]},
+      {"name": "c", "duration": 1, "end": [(("q",), (), 0.5), ((), (), 0.5)]}], {"g"}, 7, ()),
+])
+def test_blur_never_goes_below_the_exact_table(ops, goals, D, facts, eps):
+    """Looser windows are worth at least as much (monotone order): an upper bound at every r."""
+    exact = table(ops, goals, D, facts)
+    blurred = WindowsTable(WindowsLAO(ToyModel(ops, goals, D), heuristic="none", blur=eps), D)
+    assert blurred.build(set(facts))
+    for r in range(D + 1):
+        assert blurred.lookup(set(facts), r)[0] >= exact.lookup(set(facts), r)[0] - 1e-9
+
+
+def test_blur_keeps_the_deadline_exact():
+    """e is not rounded, so a retry still costs its full duration: the retry curve is unchanged.
+    (Rounding e down to the grid would charge 0 per try and give 1.0.)"""
+    ops = [{"name": "try", "duration": 2, "end": [(("g",), (), 0.6), ((), (), 0.4)]}]
+    blurred = WindowsTable(WindowsLAO(ToyModel(ops, {"g"}, 9), heuristic="none", blur=3), 9)
+    assert blurred.build(set())
+    for r in range(10):
+        assert blurred.lookup(set(), r)[0] == pytest.approx(1 - 0.4 ** (r // 2), abs=1e-12)

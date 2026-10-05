@@ -32,12 +32,17 @@ def test_needed_preconditions_come_first():
 
 
 def test_chain_until_reachable_then_threatened_then_the_rest():
-    assert grow_pattern(OPS, ["goal"], INITIAL, 5) == ["goal", "x", "z", "y", "w"]
+    assert grow_pattern(OPS, ["goal"], INITIAL, 5, skip_statics=False) == ["goal", "x", "z", "y", "w"]
     # x's achiever needs z (not initial) -> added before y (initial but deleted by c) -> then w
 
 
 def test_stops_when_nothing_is_left():
-    assert grow_pattern(OPS, ["goal"], INITIAL, 50) == ["goal", "x", "z", "y", "w"]
+    assert grow_pattern(OPS, ["goal"], INITIAL, 50, skip_statics=False) == ["goal", "x", "z", "y", "w"]
+
+
+def test_static_facts_are_never_candidates():
+    # w is read by a and changed by nothing: the projection already has its value
+    assert grow_pattern(OPS, ["goal"], INITIAL, 50) == ["goal", "x", "z", "y"]
 
 
 def test_cap_below_the_goal_count_keeps_the_goals():

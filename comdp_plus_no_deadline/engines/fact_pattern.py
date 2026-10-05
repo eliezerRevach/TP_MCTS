@@ -13,6 +13,7 @@ continue until reachable, then add more if there is room"):
             3. any other one
           ties: closest to the goal, then needed by more pattern achievers
     stop when there is no candidate
+    a STATIC fact (below) is never a candidate: the projection already has its value.
 
 Projection (``FactPatternModel``):
     state   = facts in phi  +  the inExecution slots of the pattern's actions
@@ -20,15 +21,21 @@ Projection (``FactPatternModel``):
     a precondition on a fact outside the pattern counts as TRUE (so is a mutex
     with an action outside the pattern): only more is allowed, the value stays
     an upper bound.
+    except a STATIC fact -- read by some action, changed by none (good(h1),
+    hand_of(h0, r0)): it keeps its initial value, so an action that needs
+    good(h1) while good(h1) is false never runs in the pattern either. Exact, and
+    free: a static never changes, so no state is added (impossible actions only
+    remove states). TP_MCTS_WILAO_EXACT_STATICS = 0 restores the old relaxation.
     outcomes come from the real transition function on a completed state (the
     projected facts, the initial state outside the pattern, and the action's
-    own preconditions), projected back onto the pattern.
+    own non-static preconditions), projected back onto the pattern.
 """
 
 from __future__ import annotations
 
+import os
 from collections import defaultdict
-from typing import Dict, FrozenSet, Hashable, Iterable, List, Sequence, Set, Tuple
+from typing import Dict, FrozenSet, Hashable, Iterable, List, Optional, Sequence, Set, Tuple
 
 Fact = Hashable
 
@@ -81,6 +88,22 @@ def op_reads(op) -> Set[Fact]:
     return out
 
 
+def exact_statics_default() -> bool:
+    """TP_MCTS_WILAO_EXACT_STATICS (1): static facts keep their initial value in every pattern."""
+    return (os.environ.get("TP_MCTS_WILAO_EXACT_STATICS") or "1").strip().lower() not in ("0", "false")
+
+
+def static_facts(ops: Dict[str, object]) -> Set[Fact]:
+    """Facts some action reads (a precondition, positive or negative) and no action
+    changes: they keep their initial value forever."""
+    read: Set[Fact] = set()
+    changed: Set[Fact] = set()
+    for op in ops.values():
+        read |= op_reads(op)
+        changed |= op_touches(op)
+    return read - changed
+
+
 def independent_goal_groups(ops: Dict[str, object], goals: Sequence[Fact]) -> List[List[Fact]]:
     """Split the goals into groups that cannot influence each other.
 
@@ -129,8 +152,11 @@ def independent_goal_groups(ops: Dict[str, object], goals: Sequence[Fact]) -> Li
 
 
 def grow_pattern(ops: Dict[str, object], goals: Sequence[Fact], initial_facts: Iterable[Fact],
-                 max_facts: int) -> List[Fact]:
+                 max_facts: int, skip_statics: Optional[bool] = None) -> List[Fact]:
     initial = set(initial_facts)
+    if skip_statics is None:
+        skip_statics = exact_statics_default()
+    statics = static_facts(ops) if skip_statics else set()
     achievers: Dict[Fact, List[str]] = defaultdict(list)
     deleted: Set[Fact] = set()
     for key, op in ops.items():
@@ -147,7 +173,7 @@ def grow_pattern(ops: Dict[str, object], goals: Sequence[Fact], initial_facts: I
         for f in phi:
             for key in achievers.get(f, ()):
                 for p in op_preconditions(ops[key]):
-                    if p in chosen:
+                    if p in chosen or p in statics:
                         continue
                     support[p] += 1
                     depth[p] = min(depth.get(p, 10 ** 9), level[f] + 1)
@@ -167,19 +193,39 @@ def grow_pattern(ops: Dict[str, object], goals: Sequence[Fact], initial_facts: I
 class FactPatternModel:
     """``EngineModel`` interface over a fact-capped pattern (see module doc)."""
 
-    def __init__(self, base, pattern_facts: Sequence[Fact], goals: Iterable[Fact], initial_facts: Iterable[Fact]):
+    def __init__(self, base, pattern_facts: Sequence[Fact], goals: Iterable[Fact], initial_facts: Iterable[Fact],
+                 exact_statics: Optional[bool] = None):
         self.base = base
         self.pattern_facts = frozenset(pattern_facts)
         self._goals = frozenset(goals)
+        initial = frozenset(initial_facts)
         all_ops = base.ops()
-        self._ops = {k: op for k, op in all_ops.items() if op_touches(op) & self.pattern_facts}
+        # Static facts outside the pattern keep their initial value (module doc).
+        self.exact_statics = exact_statics_default() if exact_statics is None else bool(exact_statics)
+        statics = (static_facts(all_ops) - self.pattern_facts) if self.exact_statics else set()
+        self._statics = frozenset(statics)
+        self._static_true = frozenset(f for f in statics if f in initial)
+        self._static_false = self._statics - self._static_true
+        self._static_ok: Dict[int, bool] = {}
+        # An action whose start needs a static it can never have never runs: not a pattern action.
+        self._ops = {k: op for k, op in all_ops.items()
+                     if op_touches(op) & self.pattern_facts and self._statics_hold(op.start_action)}
         slots: Set[Fact] = set()
         for op in self._ops.values():
             slots |= op_slots(op)
         self.keep = frozenset(self.pattern_facts | slots)
-        self._outside_initial = frozenset(f for f in initial_facts if f not in self.keep)
+        self._outside_initial = frozenset(f for f in initial if f not in self.keep)
         self._outcome_cache: Dict[Tuple[FrozenSet, int], tuple] = {}
         self.lost_probability_mass = 0.0
+
+    def _statics_hold(self, event) -> bool:
+        """The event's static preconditions, read in the initial state (they never change)."""
+        ok = self._static_ok.get(id(event))
+        if ok is None:
+            ok = not (set(event.pos_preconditions) & self._static_false) and \
+                not (set(getattr(event, "neg_preconditions", set()) or set()) & self._static_true)
+            self._static_ok[id(event)] = ok
+        return ok
 
     # -- EngineModel interface -------------------------------------------------
     @property
@@ -196,6 +242,8 @@ class FactPatternModel:
         return frozenset(f for f in facts if f in self.keep)
 
     def _event_legal(self, event, facts: FrozenSet) -> bool:
+        if not self._statics_hold(event):
+            return False
         pos = {f for f in event.pos_preconditions if f in self.keep}
         neg = {f for f in event.neg_preconditions if f in self.keep}
         return pos <= facts and not (neg & facts)
@@ -212,8 +260,9 @@ class FactPatternModel:
         hit = self._outcome_cache.get(key)
         if hit is not None:
             return hit
-        freed_pos = {f for f in action.pos_preconditions if f not in self.keep}
-        freed_neg = {f for f in action.neg_preconditions if f not in self.keep}
+        # outside conditions are assumed met -- statics excepted: they keep their initial value
+        freed_pos = {f for f in action.pos_preconditions if f not in self.keep and f not in self._statics}
+        freed_neg = {f for f in action.neg_preconditions if f not in self.keep and f not in self._statics}
         full = (set(self._outside_initial) | freed_pos) - freed_neg
         full |= facts
         folded: Dict[FrozenSet, float] = defaultdict(float)
