@@ -151,6 +151,103 @@ def independent_goal_groups(ops: Dict[str, object], goals: Sequence[Fact]) -> Li
     return list(groups.values())
 
 
+def _objects(fact) -> Tuple[str, ...]:
+    """The object arguments of a grounded fact: ``ready(h0, x1)`` -> ``("h0", "x1")``."""
+    text = str(fact)
+    if "(" not in text:
+        return ()
+    inside = text[text.index("(") + 1:text.rindex(")")]
+    return tuple(a.strip() for a in inside.split(",") if a.strip())
+
+
+def _goal_relevant_ops(ops: Dict[str, object], goal: Fact) -> Set[str]:
+    """Actions that change something the goal needs, grown backward to a fixpoint
+    (the same closure as independent_goal_groups)."""
+    reads = {k: op_reads(op) for k, op in ops.items()}
+    writes = {k: op_touches(op) for k, op in ops.items()}
+    needed, rel = {goal}, set()
+    changed = True
+    while changed:
+        changed = False
+        for k in ops:
+            if k not in rel and writes[k] & needed:
+                rel.add(k)
+                needed |= reads[k]
+                changed = True
+    return rel
+
+
+def resource_patterns(ops: Dict[str, object], groups: Sequence[Sequence[Fact]], initial_facts: Iterable[Fact],
+                      max_facts: int = 0) -> List[Tuple[List[Fact], List[Fact], str]]:
+    """A pattern COLLECTION ("goal group x one shared resource"), ``[(goals, facts, resource)]``.
+
+        base(G)     = the goals of G + every precondition of their achievers that is not true
+                      initially, closed backward (have_rock, calibrated, ...), resource facts left out
+        contested   = facts that relevant actions of TWO OR MORE goals of G read, and some action
+                      changes (statics excepted): the things the goals fight over (free_h(h0), full(s0))
+        resource(f) = every changeable fact that mentions an object of f other than the goals' own
+                      objects (hand h0: free_h(h0), ready(h0, x0), ready(h0, x1)); same objects merge
+        patterns    = base(G) + one resource, for every resource of G;
+                      a group without a resource (one goal, or nothing shared) -> base(G) only
+
+    Each pattern holds every goal of its group, so taking a resource for one goal is part of
+    the group's plan, not a loss for another pattern. Each is an upper bound on P(G): combine
+    with min inside the group, product across independent groups. ``max_facts`` > 0 trims a
+    resource (base facts are kept)."""
+    initial = set(initial_facts)
+    statics = static_facts(ops)
+    changeable: Set[Fact] = set()
+    for op in ops.values():
+        changeable |= op_touches(op)
+    achievers: Dict[Fact, List[str]] = defaultdict(list)
+    for key, op in ops.items():
+        for f in op_adds(op):
+            achievers[f].append(key)
+    out: List[Tuple[List[Fact], List[Fact], str]] = []
+    for group in groups:
+        goals = list(dict.fromkeys(group))
+        goal_set = set(goals)
+        rel = {g: _goal_relevant_ops(ops, g) for g in goals}
+        readers: Dict[Fact, Set] = defaultdict(set)
+        for g in goals:
+            for k in rel[g]:
+                for f in op_reads(ops[k]):
+                    readers[f].add(g)
+        contested = sorted((f for f, gs in readers.items()
+                            if len(gs) >= 2 and f in changeable and f not in statics and f not in goal_set),
+                           key=str)
+        goal_objects = set().union(*(set(_objects(g)) for g in goals)) if goals else set()
+        resources: Dict[Tuple[str, ...], List[Fact]] = {}
+        for f in contested:
+            objs = set(_objects(f)) - goal_objects          # the goals' own objects (x0) never define a resource
+            if not objs:
+                continue
+            key = tuple(sorted(objs))
+            if key in resources:
+                continue
+            members = sorted((x for x in changeable if x not in goal_set and objs & set(_objects(x))), key=str)
+            if max_facts > 0:
+                members = members[:max(0, max_facts - len(goals))]
+            resources[key] = members
+        in_resource = set().union(*resources.values()) if resources else set()
+        base = list(goals)
+        frontier = list(goals)
+        while frontier:
+            f = frontier.pop()
+            for key in achievers.get(f, ()):
+                for p in op_preconditions(ops[key]):
+                    if p in base or p in initial or p in statics or p in in_resource or p not in changeable:
+                        continue
+                    base.append(p)
+                    frontier.append(p)
+        if not resources:
+            out.append((goals, base, "base"))
+            continue
+        for key, members in resources.items():
+            out.append((goals, base + [m for m in members if m not in base], "+".join(key)))
+    return out
+
+
 def grow_pattern(ops: Dict[str, object], goals: Sequence[Fact], initial_facts: Iterable[Fact],
                  max_facts: int, skip_statics: Optional[bool] = None) -> List[Fact]:
     initial = set(initial_facts)

@@ -70,10 +70,15 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_PATTERN_GROWTH    cegar (counterexamples, cegar_pattern.py) |
                                     static (backward ranking, fact_pattern.py) |
                                     logic (untimed counterexamples from the initial
-                                    state + rollout states, logic_cegar.py)  (cegar)
+                                    state + rollout states, logic_cegar.py) |
+                                    pairs (a COLLECTION per goal group: the group's goals
+                                    + one shared resource each, fact_pattern.
+                                    resource_patterns; min inside a group)   (cegar)
     TP_MCTS_WILAO_LOGIC_SOURCES     logic only: rollouts random | greedy     (random)
     TP_MCTS_WILAO_LOGIC_ROLLOUTS    logic only: rollouts per round           (20)
     TP_MCTS_WILAO_LOGIC_DEPTH       logic only: steps per rollout            (60)
+    TP_MCTS_WILAO_LOGIC_RANK        logic only: frequency | restrict (facts most
+                                    actions need first)                      (frequency)
     TP_MCTS_WILAO_MISS              one | lazy                              (lazy)
     TP_MCTS_WILAO_QUERY_SECONDS     lazy budget per pattern per leaf        (0.05)
     TP_MCTS_WILAO_QUERY_EXPANSIONS  lazy expansions per pattern per leaf    (200)
@@ -100,7 +105,7 @@ from typing import Dict, List, Optional
 from comdp_plus_no_deadline.engines.cegar_pattern import cegar_pattern
 from comdp_plus_no_deadline.engines.logic_cegar import logic_cegar_patterns
 from comdp_plus_no_deadline.engines.fact_pattern import (FactPatternModel, exact_statics_default, grow_pattern,
-                                                         independent_goal_groups)
+                                                         independent_goal_groups, resource_patterns)
 from comdp_plus_no_deadline.engines.survivor_sweep import relaxed_actions_from_engine
 from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel, goal_relevance_closure
 from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO, WindowsTable, blur_default
@@ -158,13 +163,16 @@ class WindowsILAOPDBHeuristic:
         self.extend_offline = bool(_env_int("TP_MCTS_WILAO_OFFLINE_EXTEND", 1))
         self.full_table = bool(_env_int("TP_MCTS_WILAO_FULL_TABLE", 1))
         self.growth = (os.environ.get("TP_MCTS_WILAO_PATTERN_GROWTH") or "cegar").strip().lower()
-        if self.growth not in ("cegar", "static", "logic"):
-            raise ValueError(f"TP_MCTS_WILAO_PATTERN_GROWTH={self.growth!r}: use cegar | static | logic")
+        if self.growth not in ("cegar", "static", "logic", "pairs"):
+            raise ValueError(f"TP_MCTS_WILAO_PATTERN_GROWTH={self.growth!r}: use cegar | static | logic | pairs")
         self.logic_sources = (os.environ.get("TP_MCTS_WILAO_LOGIC_SOURCES") or "random").strip().lower()
         if self.logic_sources not in ("random", "greedy"):
             raise ValueError(f"TP_MCTS_WILAO_LOGIC_SOURCES={self.logic_sources!r}: use random | greedy")
         self.logic_rollouts = _env_int("TP_MCTS_WILAO_LOGIC_ROLLOUTS", 20)
         self.logic_depth = _env_int("TP_MCTS_WILAO_LOGIC_DEPTH", 60)
+        self.logic_rank = (os.environ.get("TP_MCTS_WILAO_LOGIC_RANK") or "frequency").strip().lower()
+        if self.logic_rank not in ("frequency", "restrict"):
+            raise ValueError(f"TP_MCTS_WILAO_LOGIC_RANK={self.logic_rank!r}: use frequency | restrict")
         self.pattern_facts = _env_int("TP_MCTS_WILAO_PATTERN_FACTS", 8)
         self.no_stn_pass = bool(_env_int("TP_MCTS_WILAO_NO_STN_PASS", 0))
         self.patterns: List[dict] = []
@@ -189,7 +197,7 @@ class WindowsILAOPDBHeuristic:
         base = EngineModel(self._mdp)
         goals = sorted(self._mdp.problem.goals, key=str)
         size = len(goals) if self.pattern_goals <= 0 else self.pattern_goals
-        if self.agg == "same":
+        if self.agg == "same" or self.growth == "pairs":
             # one pattern per group of goals that can influence each other; independent groups apart
             groups = [sorted(g, key=str) for g in independent_goal_groups(base.ops(), goals)] or [goals]
         else:
@@ -216,14 +224,20 @@ class WindowsILAOPDBHeuristic:
             t0 = time.perf_counter()
             logic = logic_cegar_patterns(self._mdp, base, groups, facts, max(self.pattern_facts, max(map(len, groups))),
                                          sources=self.logic_sources, rollouts=self.logic_rollouts,
-                                         depth=self.logic_depth)
+                                         depth=self.logic_depth, rank=self.logic_rank)
             self.logic_seconds = round(time.perf_counter() - t0, 2)
-        for index, group in enumerate(groups):
+        # pairs: several patterns per group (one per shared resource); otherwise one per group
+        entries = ([(g, f, r) for g, f, r in resource_patterns(base.ops(), groups, facts)]
+                   if self.growth == "pairs" else [(group, None, None) for group in groups])
+        for index, (group, fixed_phi, resource) in enumerate(entries):
             grown = None
-            if cegar:
+            if fixed_phi is not None:
+                phi = list(fixed_phi)
+                model = FactPatternModel(base, phi, group, facts)
+            elif cegar:
                 # Facts added by counterexamples (cegar_pattern.py); the table comes with them.
                 grown = cegar_pattern(base, group, facts, max(self.pattern_facts, len(group)), deadline,
-                                      time_budget=share(len(groups) - index, table_end))
+                                      time_budget=share(len(entries) - index, table_end))
                 phi = grown["facts"]
                 model = grown["model"] or FactPatternModel(base, phi, group, facts)
             elif logic is not None:
@@ -255,6 +269,7 @@ class WindowsILAOPDBHeuristic:
                 "solved_at_optimal": 0,
                 "cegar_log": None if grown is None else grown["log"],
                 "logic_stop": None if logic is None else logic[index]["stop"],
+                "resource": resource,
                 "cegar_seconds": None if grown is None else grown["seconds"],
             })
             if grown is not None and grown["table"] is not None:
@@ -301,9 +316,11 @@ class WindowsILAOPDBHeuristic:
         self.offline_report = {
             "patterns": len(self.patterns),
             "pattern_facts": [len(p["facts"]) if p["facts"] is not None else "all" for p in self.patterns],
-            "growth": "cegar" if cegar else ("logic" if logic is not None else "static"),
+            "growth": "cegar" if cegar else ("logic" if logic is not None else
+                                             ("pairs" if self.growth == "pairs" else "static")),
+            "resources": [p["resource"] for p in self.patterns],
             "logic": None if logic is None else {"sources": self.logic_sources, "rollouts": self.logic_rollouts,
-                                                 "depth": self.logic_depth, "seconds": self.logic_seconds,
+                                                 "depth": self.logic_depth, "rank": self.logic_rank, "seconds": self.logic_seconds,
                                                  "stop": [p["logic_stop"] for p in self.patterns]},
             "cegar_stop": [p["cegar_log"][-1].get("stop") if p["cegar_log"] else None for p in self.patterns],
             "cegar_seconds": [p["cegar_seconds"] for p in self.patterns],

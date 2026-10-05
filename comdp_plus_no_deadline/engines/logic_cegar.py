@@ -14,8 +14,11 @@ Kloessner et al. 2022), with three changes:
                        states follow the patterns' own plans
              A fact like free_h(h0) is a flaw only where the hand is already taken; from the
              initial state alone every hand is free, so the repo's ``cegar`` never adds it.
-    flaws    every failing fact of every replay; the facts that fail most often are added,
-             up to the cap, all of them in one round when they fit.
+    flaws    every failing fact of every replay; added up to the cap (all of them in one round
+             when they fit), ordered by TP_MCTS_WILAO_LOGIC_RANK:
+               frequency  the facts that fail most often first
+               restrict   the facts the most actions NEED first (a hand before a store): they cut
+                          how many actions can run at once, so the table stays small
 
     phi_g = goals of group g
     repeat:
@@ -36,7 +39,7 @@ import math
 import random
 from typing import Dict, List, Optional, Sequence
 
-from comdp_plus_no_deadline.engines.fact_pattern import FactPatternModel, _is_exec, op_touches
+from comdp_plus_no_deadline.engines.fact_pattern import FactPatternModel, _is_exec, op_reads, op_touches
 
 _BIG = 1e6
 _INSTANT_COST = 0.01
@@ -189,10 +192,17 @@ def rollout_states(mdp, n: int, depth: int, rng: random.Random, choose=None) -> 
 
 def logic_cegar_patterns(mdp, base, groups: Sequence[Sequence], initial_facts, max_facts: int,
                          sources: str = "random", rollouts: int = 20, depth: int = 60, seed: int = 0,
-                         max_rounds: int = 40, cap_states: int = 300_000) -> List[Dict[str, object]]:
+                         max_rounds: int = 40, cap_states: int = 300_000,
+                         rank: str = "frequency") -> List[Dict[str, object]]:
     """One fact list per goal group: ``[{"facts", "log", "stop"}]``."""
     if sources not in ("random", "greedy"):
         raise ValueError(f"logic CEGAR sources {sources!r}: use random | greedy")
+    if rank not in ("frequency", "restrict"):
+        raise ValueError(f"logic CEGAR rank {rank!r}: use frequency | restrict")
+    needed_by = collections.Counter()
+    for op in base.ops().values():
+        for f in op_reads(op):
+            needed_by[f] += 1
     rng = random.Random(seed)
     initial = frozenset(initial_facts)
     changeable = _changeable(base.ops())
@@ -231,7 +241,11 @@ def logic_cegar_patterns(mdp, base, groups: Sequence[Sequence], initial_facts, m
             for f in src:
                 for x in replay(model, V, succ, base, f, changeable):
                     flaws[x] += 1
-            new = [x for x, _n in sorted(flaws.items(), key=lambda kv: (-kv[1], str(kv[0]))) if x not in phi]
+            if rank == "restrict":
+                order = sorted(flaws.items(), key=lambda kv: (-needed_by[kv[0]], -kv[1], str(kv[0])))
+            else:
+                order = sorted(flaws.items(), key=lambda kv: (-kv[1], str(kv[0])))
+            new = [x for x, _n in order if x not in phi]
             logs[gi].append({"round": rnd, "facts": len(phi), "untimed_states": len(succ), "sources": len(src),
                              "flaws": len(new)})
             if not new:
