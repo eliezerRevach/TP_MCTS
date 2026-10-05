@@ -38,8 +38,12 @@ Spec: ``artifacts/Windows_ILAO_PDB.docx``.
               times it cannot: the value already counts starting it now). The table has
               no state that loose, so these lookups go to the miss path.
     value   : two settings
-                TP_MCTS_WILAO_AGG       how patterns are combined: min | avg
-                                        (both sound: each value >= P(its goal) >= P(all));
+                TP_MCTS_WILAO_AGG       how patterns are combined: min | avg | same
+                                        (all sound: each value >= P(its goal) >= P(all));
+                                        same = goals that can influence each other share ONE
+                                        pattern (fact_pattern.independent_goal_groups), so their
+                                        shared hands / stores / time are inside one table; the
+                                        groups are then combined by product (PATTERN_GOALS ignored);
                                         min is tightest, avg has more gradient
                 TP_MCTS_WILAO_GROUPING  0: AGG over all patterns
                                         1: the goals are split into groups that share no
@@ -68,8 +72,8 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_MISS              one | lazy                              (lazy)
     TP_MCTS_WILAO_QUERY_SECONDS     lazy budget per pattern per leaf        (0.05)
     TP_MCTS_WILAO_QUERY_EXPANSIONS  lazy expansions per pattern per leaf    (200)
-    TP_MCTS_WILAO_AGG               min | avg                               (min)
-    TP_MCTS_WILAO_GROUPING          1 = product across independent groups   (0)
+    TP_MCTS_WILAO_AGG               min | avg | same                        (min)
+    TP_MCTS_WILAO_GROUPING          1 = product across independent groups   (1)
     TP_MCTS_WILAO_NO_STN_PASS       1 = ignore the STN's remaining times    (0)
     TP_MCTS_WILAO_EXACT_STATICS     static facts (changed by no action) keep their
                                     initial value in every pattern; 0 = old
@@ -139,12 +143,12 @@ class WindowsILAOPDBHeuristic:
                                  f"and TP_MCTS_WILAO_GROUPING (0 | 1)")
             agg, grouping = _LEGACY_AGGREGATION[legacy]
         self.agg = agg or "min"
-        if self.agg not in ("min", "avg"):
-            raise ValueError(f"TP_MCTS_WILAO_AGG={self.agg!r}: use min | avg")
-        text = str(grouping if grouping is not None else "0").strip().lower()
+        if self.agg not in ("min", "avg", "same"):
+            raise ValueError(f"TP_MCTS_WILAO_AGG={self.agg!r}: use min | avg | same")
+        text = str(grouping if grouping is not None else "1").strip().lower()
         if text not in ("0", "1", "true", "false"):
             raise ValueError(f"TP_MCTS_WILAO_GROUPING={grouping!r}: use 0 | 1")
-        self.grouping = text in ("1", "true")
+        self.grouping = text in ("1", "true") or self.agg == "same"     # same: product across the groups
         self.extend_offline = bool(_env_int("TP_MCTS_WILAO_OFFLINE_EXTEND", 1))
         self.full_table = bool(_env_int("TP_MCTS_WILAO_FULL_TABLE", 1))
         self.growth = (os.environ.get("TP_MCTS_WILAO_PATTERN_GROWTH") or "cegar").strip().lower()
@@ -172,7 +176,11 @@ class WindowsILAOPDBHeuristic:
         base = EngineModel(self._mdp)
         goals = sorted(self._mdp.problem.goals, key=str)
         size = len(goals) if self.pattern_goals <= 0 else self.pattern_goals
-        groups = [goals[i:i + size] for i in range(0, len(goals), size)] or [goals]
+        if self.agg == "same":
+            # one pattern per group of goals that can influence each other; independent groups apart
+            groups = [sorted(g, key=str) for g in independent_goal_groups(base.ops(), goals)] or [goals]
+        else:
+            groups = [goals[i:i + size] for i in range(0, len(goals), size)] or [goals]
         deadline = int(float(self._mdp.deadline()))
         facts = frozenset(self._mdp.initial_state().predicates)
         unlimited = self.offline_seconds <= 0
