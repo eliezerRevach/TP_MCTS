@@ -187,12 +187,15 @@ def resource_patterns(ops: Dict[str, object], groups: Sequence[Sequence[Fact]], 
                       changes (statics excepted): the things the goals fight over (free_h(h0), full(s0))
         resource(f) = every changeable fact that mentions an object of f other than the goals' own
                       objects (hand h0: free_h(h0), ready(h0, x0), ready(h0, x1)); same objects merge
-        patterns    = base(G) + one resource, for every resource of G;
-                      a group without a resource (one goal, or nothing shared) -> base(G) only
+        users(R)    = the goals of G whose OWN achievers (of the goal and of its base facts) read a
+                      fact of R -- not the whole relevance closure, where everything touches everything
+        patterns    = users(R) + their base facts + R, for every resource R of G;
+                      goals that use no resource -> one pattern of those goals and their base
 
-    Each pattern holds every goal of its group, so taking a resource for one goal is part of
-    the group's plan, not a loss for another pattern. Each is an upper bound on P(G): combine
-    with min inside the group, product across independent groups. ``max_facts`` > 0 trims a
+    Each pattern holds every goal that uses its resource, so taking the resource for one of
+    them is part of that pattern's plan, not a loss for another pattern. Each is an upper
+    bound on P(its goals) >= P(G): combine with min inside the group, product across
+    independent groups. ``max_facts`` > 0 trims a
     resource (base facts are kept)."""
     initial = set(initial_facts)
     statics = static_facts(ops)
@@ -230,21 +233,37 @@ def resource_patterns(ops: Dict[str, object], groups: Sequence[Sequence[Fact]], 
                 members = members[:max(0, max_facts - len(goals))]
             resources[key] = members
         in_resource = set().union(*resources.values()) if resources else set()
-        base = list(goals)
-        frontier = list(goals)
-        while frontier:
-            f = frontier.pop()
-            for key in achievers.get(f, ()):
-                for p in op_preconditions(ops[key]):
-                    if p in base or p in initial or p in statics or p in in_resource or p not in changeable:
-                        continue
-                    base.append(p)
-                    frontier.append(p)
-        if not resources:
-            out.append((goals, base, "base"))
-            continue
+        def base_of(sub):
+            base = list(sub)
+            frontier = list(sub)
+            while frontier:
+                f = frontier.pop()
+                for key in achievers.get(f, ()):
+                    for p in op_preconditions(ops[key]):
+                        if p in base or p in initial or p in statics or p in in_resource or p not in changeable:
+                            continue
+                        base.append(p)
+                        frontier.append(p)
+            return base
+
+        own_reads = {}
+        for g in goals:
+            reads: Set[Fact] = set()
+            for f in base_of([g]):
+                for key in achievers.get(f, ()):
+                    reads |= op_reads(ops[key])
+            own_reads[g] = reads
+        covered: Set[Fact] = set()
         for key, members in resources.items():
-            out.append((goals, base + [m for m in members if m not in base], "+".join(key)))
+            users = [g for g in goals if own_reads[g] & set(members)]
+            if not users:
+                continue
+            covered |= set(users)
+            base = base_of(users)
+            out.append((users, base + [m for m in members if m not in base], "+".join(key)))
+        rest = [g for g in goals if g not in covered]
+        if rest:
+            out.append((rest, base_of(rest), "base"))
     return out
 
 

@@ -47,3 +47,28 @@ def test_logic_rank_is_validated():
     from comdp_plus_no_deadline.engines.logic_cegar import logic_cegar_patterns
     with pytest.raises(ValueError):
         logic_cegar_patterns(None, None, [], set(), 1, rank="bogus")
+
+
+def _op(pre=(), adds=(), dels=()):
+    from types import SimpleNamespace
+    start = SimpleNamespace(pos_preconditions=set(pre), neg_preconditions=set(), add_effects=set(),
+                            del_effects=set(dels), probabilistic_effects=[])
+    end = SimpleNamespace(pos_preconditions=set(), neg_preconditions=set(), add_effects=set(adds),
+                          del_effects=set(), probabilistic_effects=[])
+    return SimpleNamespace(start_action=start, end_action=end)
+
+
+def test_a_resource_pattern_holds_only_the_goals_that_use_it():
+    """Hand h serves x1, x2, x3; store s only x1 and x2 -> h: 3 goals, s: 2 goals."""
+    ops = {f"point_{i}": _op(pre=("free(h)",), adds=(f"at(h, x{i})",), dels=("free(h)",)) for i in (1, 2, 3)}
+    for i in (1, 2, 3):
+        pre = (f"at(h, x{i})",) + (("free(s)",) if i < 3 else ())
+        ops[f"do_{i}"] = _op(pre=pre, adds=(f"done(x{i})", "free(h)"),
+                             dels=(f"at(h, x{i})",) + (("free(s)",) if i < 3 else ()))
+    ops["release"] = _op(adds=("free(s)",))
+    goals = ["done(x1)", "done(x2)", "done(x3)"]
+    pats = {res: (gs, facts) for gs, facts, res in resource_patterns(ops, [goals], {"free(h)", "free(s)"})}
+    assert set(pats) == {"h", "s"}
+    assert pats["h"][0] == goals
+    assert pats["s"][0] == ["done(x1)", "done(x2)"]
+    assert set(pats["s"][1]) == {"done(x1)", "done(x2)", "free(s)"}
