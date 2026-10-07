@@ -73,7 +73,9 @@ Knobs (environment, set from experiments.ipynb):
                                     state + rollout states, logic_cegar.py) |
                                     pairs (a COLLECTION per goal group: the group's goals
                                     + one shared resource each, fact_pattern.
-                                    resource_patterns; min inside a group)   (cegar)
+                                    resource_patterns; min inside a group) |
+                                    llm_by_hand_nasa_two (facts picked by hand for
+                                    nasa_rover obj 2, hand_patterns.py)      (cegar)
     TP_MCTS_WILAO_LOGIC_SOURCES     logic only: rollouts random | greedy     (random)
     TP_MCTS_WILAO_LOGIC_ROLLOUTS    logic only: rollouts per round           (20)
     TP_MCTS_WILAO_LOGIC_DEPTH       logic only: steps per rollout            (60)
@@ -122,6 +124,7 @@ from collections import Counter
 from typing import Dict, List, Optional
 
 from comdp_plus_no_deadline.engines.cegar_pattern import cegar_pattern
+from comdp_plus_no_deadline.engines.hand_patterns import HAND_PATTERNS, hand_patterns
 from comdp_plus_no_deadline.engines.logic_cegar import logic_cegar_patterns
 from comdp_plus_no_deadline.engines.fact_pattern import (OPAQUE_EVENTS, FactPatternModel, exact_statics_default,
                                                          grow_pattern, independent_goal_groups, resource_patterns,
@@ -220,8 +223,9 @@ class WindowsILAOPDBHeuristic:
         self.extend_offline = bool(_env_int("TP_MCTS_WILAO_OFFLINE_EXTEND", 1))
         self.full_table = bool(_env_int("TP_MCTS_WILAO_FULL_TABLE", 1))
         self.growth = (os.environ.get("TP_MCTS_WILAO_PATTERN_GROWTH") or "cegar").strip().lower()
-        if self.growth not in ("cegar", "static", "logic", "pairs"):
-            raise ValueError(f"TP_MCTS_WILAO_PATTERN_GROWTH={self.growth!r}: use cegar | static | logic | pairs")
+        if self.growth not in ("cegar", "static", "logic", "pairs") and self.growth not in HAND_PATTERNS:
+            raise ValueError(f"TP_MCTS_WILAO_PATTERN_GROWTH={self.growth!r}: use cegar | static | logic | pairs | "
+                             + " | ".join(HAND_PATTERNS))
         self.logic_sources = (os.environ.get("TP_MCTS_WILAO_LOGIC_SOURCES") or "random").strip().lower()
         if self.logic_sources not in ("random", "greedy"):
             raise ValueError(f"TP_MCTS_WILAO_LOGIC_SOURCES={self.logic_sources!r}: use random | greedy")
@@ -324,8 +328,12 @@ class WindowsILAOPDBHeuristic:
                                          depth=self.logic_depth, rank=self.logic_rank)
             self.logic_seconds = round(time.perf_counter() - t0, 2)
         # pairs: several patterns per group (one per shared resource); otherwise one per group
-        entries = ([(g, f, r) for g, f, r in resource_patterns(base.ops(), groups, facts)]
-                   if self.growth == "pairs" else [(group, None, None) for group in groups])
+        if self.growth in HAND_PATTERNS:
+            entries = hand_patterns(self.growth, self._facts_by_name(base), goals)
+        elif self.growth == "pairs":
+            entries = [(g, f, r) for g, f, r in resource_patterns(base.ops(), groups, facts)]
+        else:
+            entries = [(group, None, None) for group in groups]
         for index, (group, fixed_phi, resource) in enumerate(entries):
             grown = None
             if fixed_phi is not None:
@@ -413,8 +421,9 @@ class WindowsILAOPDBHeuristic:
         self.offline_report = {
             "patterns": len(self.patterns),
             "pattern_facts": [len(p["facts"]) if p["facts"] is not None else "all" for p in self.patterns],
-            "growth": "cegar" if cegar else ("logic" if logic is not None else
-                                             ("pairs" if self.growth == "pairs" else "static")),
+            "growth": self.growth if self.growth in HAND_PATTERNS else (
+                "cegar" if cegar else ("logic" if logic is not None else
+                                       ("pairs" if self.growth == "pairs" else "static"))),
             "resources": [p["resource"] for p in self.patterns],
             "logic": None if logic is None else {"sources": self.logic_sources, "rollouts": self.logic_rollouts,
                                                  "depth": self.logic_depth, "rank": self.logic_rank, "seconds": self.logic_seconds,
@@ -508,17 +517,8 @@ class WindowsILAOPDBHeuristic:
         os.replace(tmp, path)                       # atomic: a reader never sees half a file
         return True
 
-    def _load_cache(self, path: str) -> bool:
-        try:
-            with open(path, "rb") as fh:
-                head = pickle.load(fh)
-                if not isinstance(head, dict) or head.get("version") != self._CACHE_VERSION:
-                    return False
-                records = [pickle.load(fh) for _ in range(head["patterns"])]
-        except Exception:
-            return False
-        base = EngineModel(self._mdp)
-        deadline = int(float(self._mdp.deadline()))
+    def _facts_by_name(self, base) -> Dict[str, object]:
+        """Every fact of the problem (initial state, goals, anything an action reads or writes) by name."""
         initial = frozenset(self._mdp.initial_state().predicates)
         fact = {str(f): f for f in initial | set(self._mdp.problem.goals)}
         for op in base.ops().values():
@@ -531,6 +531,21 @@ class WindowsILAOPDBHeuristic:
                 for pe in getattr(ev, "probabilistic_effects", []) or []:
                     for f in getattr(pe, "fluents", []) or []:
                         fact.setdefault(str(f), f)
+        return fact
+
+    def _load_cache(self, path: str) -> bool:
+        try:
+            with open(path, "rb") as fh:
+                head = pickle.load(fh)
+                if not isinstance(head, dict) or head.get("version") != self._CACHE_VERSION:
+                    return False
+                records = [pickle.load(fh) for _ in range(head["patterns"])]
+        except Exception:
+            return False
+        base = EngineModel(self._mdp)
+        deadline = int(float(self._mdp.deadline()))
+        initial = frozenset(self._mdp.initial_state().predicates)
+        fact = self._facts_by_name(base)
         patterns = []
         for rec in records:
             try:
