@@ -71,6 +71,16 @@ def op_preconditions(op) -> Set[Fact]:
     return out
 
 
+def op_transition_reads(op) -> Set[Fact]:
+    """Facts the op's outcome probabilities read (``transition_reads``), running flags excepted."""
+    if not transition_reads_default():
+        return set()
+    out: Set[Fact] = set()
+    for event in _events(op):
+        out |= {f for f in transition_reads(event) if not _is_exec(f)}
+    return out
+
+
 def op_slots(op) -> Set[Fact]:
     out: Set[Fact] = set()
     for event in _events(op):
@@ -80,11 +90,110 @@ def op_slots(op) -> Set[Fact]:
 
 def op_reads(op) -> Set[Fact]:
     """Every precondition, positive AND negative (a negative one is still a fact
-    the action depends on: sample needs "not full(store)")."""
+    the action depends on: sample needs "not full(store)"), plus every fact an
+    outcome probability reads (``transition_reads``: push reads rock_under_car)."""
     out: Set[Fact] = set()
     for event in _events(op):
         out |= {f for f in event.pos_preconditions if not _is_exec(f)}
         out |= {f for f in getattr(event, "neg_preconditions", set()) or set() if not _is_exec(f)}
+        if transition_reads_default():
+            out |= {f for f in transition_reads(event) if not _is_exec(f)}
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Facts a transition reads
+# ---------------------------------------------------------------------------
+#
+# A probabilistic effect is a Python function of the state: push succeeds with
+# 0.1 / 0.2 / 0.9 depending on rock_under_car, which is no precondition. The
+# function is run on a recording fact set that logs every ``fact in state``
+# check; it is rerun under every value of the facts found so far until no new
+# fact appears, so every branch is followed. Any other use of the set
+# (iteration, len, set algebra) cannot be traced: the event is listed in
+# ``OPAQUE_EVENTS`` and only the facts seen so far count.
+
+_TRANSITION_READS: Dict[int, FrozenSet] = {}
+_TRANSITION_EVENTS: Dict[int, object] = {}          # keeps the event alive while its id is a key
+OPAQUE_EVENTS: Set[str] = set()
+MAX_TRACED_READS = 12
+
+
+def transition_reads_default() -> bool:
+    """TP_MCTS_WILAO_TRANSITION_READS (1): facts read by outcome probabilities count as read
+    facts (grouping, resources, growth) and, when outside a pattern, VI picks their value."""
+    return (os.environ.get("TP_MCTS_WILAO_TRANSITION_READS") or "1").strip().lower() not in ("0", "false")
+
+
+class _RecordingFacts(set):
+    def __init__(self, items, log: Dict[Fact, None]):
+        super().__init__(items)
+        self._log = log
+
+    def __contains__(self, fact) -> bool:
+        self._log.setdefault(fact, None)
+        return super().__contains__(fact)
+
+    def _untraced(self, *args, **kwargs):
+        raise _Untraceable()
+
+
+class _Untraceable(Exception):
+    pass
+
+
+for _name in ("__iter__", "__len__", "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__",
+              "__xor__", "__eq__", "__le__", "__lt__", "__ge__", "__gt__", "issubset", "issuperset",
+              "isdisjoint", "intersection", "difference", "union", "symmetric_difference", "copy"):
+    setattr(_RecordingFacts, _name, _RecordingFacts._untraced)
+
+
+class _RecordingState:
+    """What a probability function gets: ``predicates`` (and ``_predicates``) is the recording set."""
+
+    def __init__(self, facts: _RecordingFacts):
+        self.predicates = facts
+        self._predicates = facts
+
+
+def _run_traced(pe, true_facts: Set[Fact]) -> Tuple[List[Fact], bool]:
+    """(facts checked, untraceable?) for one run of the probability function, called the way
+    the MDP calls it (``probability_function(state, None)``)."""
+    log: Dict[Fact, None] = {}
+    try:
+        pe.probability_function(_RecordingState(_RecordingFacts(true_facts, log)), None)
+    except Exception:                       # set algebra / iteration / another state attribute
+        return list(log), True
+    return list(log), False
+
+
+def transition_reads(event) -> FrozenSet:
+    """Every fact the event's outcome probabilities read (module comment above)."""
+    hit = _TRANSITION_READS.get(id(event))
+    if hit is not None:
+        return hit
+    found: List[Fact] = []
+    for pe in getattr(event, "probabilistic_effects", []) or []:
+        known: List[Fact] = []
+        grown = True
+        while grown and len(known) <= MAX_TRACED_READS:
+            grown = False
+            for bits in range(2 ** len(known)):
+                true = {f for i, f in enumerate(known) if bits >> i & 1}
+                read, opaque = _run_traced(pe, true)
+                if opaque:
+                    OPAQUE_EVENTS.add(str(getattr(event, "name", event)))
+                new = [f for f in read if f not in known]
+                if new:
+                    known += new
+                    grown = True
+                    break
+        if len(known) > MAX_TRACED_READS:
+            OPAQUE_EVENTS.add(str(getattr(event, "name", event)))
+        found += [f for f in known if f not in found]
+    out = frozenset(found)
+    _TRANSITION_READS[id(event)] = out
+    _TRANSITION_EVENTS[id(event)] = event
     return out
 
 
@@ -239,7 +348,8 @@ def resource_patterns(ops: Dict[str, object], groups: Sequence[Sequence[Fact]], 
             while frontier:
                 f = frontier.pop()
                 for key in achievers.get(f, ()):
-                    for p in op_preconditions(ops[key]):
+                    # facts the achiever's outcome probability reads first: they change how likely it works
+                    for p in sorted(op_transition_reads(ops[key]), key=str) + sorted(op_preconditions(ops[key]), key=str):
                         if p in base or p in initial or p in statics or p in in_resource or p not in changeable:
                             continue
                         base.append(p)
@@ -286,9 +396,12 @@ def grow_pattern(ops: Dict[str, object], goals: Sequence[Fact], initial_facts: I
         chosen = set(phi)
         support: Dict[Fact, int] = defaultdict(int)
         depth: Dict[Fact, int] = {}
+        transition: Set[Fact] = set()
         for f in phi:
             for key in achievers.get(f, ()):
-                for p in op_preconditions(ops[key]):
+                reads = op_transition_reads(ops[key])
+                transition |= reads
+                for p in op_preconditions(ops[key]) | reads:
                     if p in chosen or p in statics:
                         continue
                     support[p] += 1
@@ -297,8 +410,10 @@ def grow_pattern(ops: Dict[str, object], goals: Sequence[Fact], initial_facts: I
             break
 
         def rank(p):
+            # a fact an achiever's outcome probability reads comes first (it sets how likely
+            # the achiever works); then: not true initially, deleted by some action, the rest
             tier = 0 if p not in initial else (1 if p in deleted else 2)
-            return (tier, depth[p], -support[p], str(p))
+            return (0 if p in transition else 1, tier, depth[p], -support[p], str(p))
 
         best = min(support, key=rank)
         phi.append(best)
@@ -333,6 +448,11 @@ class FactPatternModel:
         self._outside_initial = frozenset(f for f in initial if f not in self.keep)
         self._outcome_cache: Dict[Tuple[FrozenSet, int], tuple] = {}
         self.lost_probability_mass = 0.0
+        # outcome probabilities that read facts outside the pattern (outcome_variants)
+        self.transition_reads = transition_reads_default()
+        self._hidden: Dict[int, Tuple[Fact, ...]] = {}
+        self._variant_cache: Dict[Tuple[FrozenSet, int], Tuple[tuple, ...]] = {}
+        self.variant_events: Set[str] = set()
 
     def _statics_hold(self, event) -> bool:
         """The event's static preconditions, read in the initial state (they never change)."""
@@ -370,22 +490,75 @@ class FactPatternModel:
     def end_legal_op(self, op, facts: FrozenSet) -> bool:
         return self._event_legal(op.end_action, facts)
 
+    def _completed(self, action, facts: FrozenSet) -> Set[Fact]:
+        """The full state an event is read on: pattern facts, the initial state outside the
+        pattern, and the event's outside preconditions (assumed met) -- statics keep their value."""
+        freed_pos = {f for f in action.pos_preconditions if f not in self.keep and f not in self._statics}
+        freed_neg = {f for f in action.neg_preconditions if f not in self.keep and f not in self._statics}
+        full = (set(self._outside_initial) | freed_pos) - freed_neg
+        return full | facts
+
+    def _projected(self, action, full) -> tuple:
+        folded: Dict[FrozenSet, float] = defaultdict(float)
+        for next_facts, p in self.base.outcomes(action, frozenset(full)):
+            folded[self.project(next_facts)] += p
+        return tuple(folded.items())
+
     def outcomes(self, action, facts: FrozenSet):
+        """One distribution: outside facts at their initial value. Exact unless the outcome
+        probabilities read a fact outside the pattern -- the windows solver uses
+        ``outcome_variants`` instead."""
         facts = self.project(facts)
         key = (facts, id(action))
         hit = self._outcome_cache.get(key)
         if hit is not None:
             return hit
-        # outside conditions are assumed met -- statics excepted: they keep their initial value
-        freed_pos = {f for f in action.pos_preconditions if f not in self.keep and f not in self._statics}
-        freed_neg = {f for f in action.neg_preconditions if f not in self.keep and f not in self._statics}
-        full = (set(self._outside_initial) | freed_pos) - freed_neg
-        full |= facts
-        folded: Dict[FrozenSet, float] = defaultdict(float)
-        for next_facts, p in self.base.outcomes(action, frozenset(full)):
-            folded[self.project(next_facts)] += p
-        out = tuple(folded.items())
+        out = self._projected(action, self._completed(action, facts))
         self._outcome_cache[key] = out
+        return out
+
+    def hidden_reads(self, action) -> Tuple[Fact, ...]:
+        """Facts the event's outcome probabilities read that the pattern does not hold
+        (statics excepted: their value is known)."""
+        hit = self._hidden.get(id(action))
+        if hit is None:
+            reads = transition_reads(action) if self.transition_reads else frozenset()
+            hit = tuple(sorted((f for f in reads if f not in self.keep and f not in self._statics), key=str))
+            self._hidden[id(action)] = hit
+        return hit
+
+    def outcome_variants(self, action, facts: FrozenSet) -> Tuple[tuple, ...]:
+        """One distribution per value of the hidden facts, duplicates merged:
+
+            Q(s, a) = max over v of  sum_s' P(s' | s_pattern, v) V(s')
+
+        The pattern's own facts filter (they have their real value in s); the hidden
+        ones are free and the solver takes the best, so the value stays an upper bound
+        (reality is one of the v). A hidden fact that is also an outside precondition
+        is not free: the precondition fixes it. The choice may differ at every event
+        (looser than one fixed value, never below reality)."""
+        facts = self.project(facts)
+        key = (facts, id(action))
+        hit = self._variant_cache.get(key)
+        if hit is not None:
+            return hit
+        full = self._completed(action, facts)
+        fixed = set(action.pos_preconditions) | set(action.neg_preconditions)
+        hidden = [f for f in self.hidden_reads(action) if f not in fixed]
+        if not hidden:
+            out = (self.outcomes(action, facts),)
+        else:
+            seen, variants = set(), []
+            rest = full - set(hidden)
+            for bits in range(2 ** len(hidden)):
+                variant = self._projected(action, rest | {f for i, f in enumerate(hidden) if bits >> i & 1})
+                sig = frozenset(variant)
+                if sig not in seen:
+                    seen.add(sig)
+                    variants.append(variant)
+            out = tuple(variants)
+            self.variant_events.add(str(getattr(action, "name", action)))
+        self._variant_cache[key] = out
         return out
 
     def start_is_inert(self, key: str) -> bool:

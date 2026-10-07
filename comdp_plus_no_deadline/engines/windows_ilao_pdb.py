@@ -88,6 +88,14 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_EXACT_STATICS     static facts (changed by no action) keep their
                                     initial value in every pattern; 0 = old
                                     relaxation (h1 counted as a good hand)   (1)
+    TP_MCTS_WILAO_TRANSITION_READS  facts an outcome probability reads (push reads
+                                    rock_under_car, no precondition) count as read
+                                    facts: grouping, pairs resources and growth add
+                                    them first; when one is still outside a pattern,
+                                    every value of it is its own option and VI takes
+                                    the best (fact_pattern.outcome_variants), so h
+                                    stays an upper bound; 0 = old (outside facts at
+                                    their initial value -- can go BELOW V*)  (1)
     TP_MCTS_WILAO_BLUR              window grid eps: lo down / hi up to eps, e exact
                                     (fewer states, still an upper bound;
                                     windows_lao.py "Blur"); 0 = off          (0)
@@ -115,8 +123,9 @@ from typing import Dict, List, Optional
 
 from comdp_plus_no_deadline.engines.cegar_pattern import cegar_pattern
 from comdp_plus_no_deadline.engines.logic_cegar import logic_cegar_patterns
-from comdp_plus_no_deadline.engines.fact_pattern import (FactPatternModel, exact_statics_default, grow_pattern,
-                                                         independent_goal_groups, resource_patterns)
+from comdp_plus_no_deadline.engines.fact_pattern import (OPAQUE_EVENTS, FactPatternModel, exact_statics_default,
+                                                         grow_pattern, independent_goal_groups, resource_patterns,
+                                                         transition_reads_default)
 from comdp_plus_no_deadline.engines.survivor_sweep import relaxed_actions_from_engine
 from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel, goal_relevance_closure
 from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO, WindowsTable, blur_default
@@ -420,6 +429,10 @@ class WindowsILAOPDBHeuristic:
             "grouping": self.grouping,
             "no_stn_pass": self.no_stn_pass,
             "exact_statics": exact_statics_default(),
+            "transition_reads": transition_reads_default(),
+            "hidden_read_events": [sorted(getattr(p["model"], "variant_events", ())) if p.get("model") is not None
+                                   else [] for p in self.patterns],
+            "opaque_events": sorted(OPAQUE_EVENTS),
             "blur": str(blur_default()),
             "groups": [[self.patterns[i]["goals"][0] for i in members] for members in self.groups],
             "values": [None if p["offline_value"] is None else round(p["offline_value"], 6)
@@ -434,7 +447,7 @@ class WindowsILAOPDBHeuristic:
         }
 
     # -- table cache -----------------------------------------------------------
-    _CACHE_VERSION = 2
+    _CACHE_VERSION = 3
 
     def _cache_key(self) -> str:
         """The problem (actions, initial state, goals, deadline) and every setting that
@@ -458,7 +471,8 @@ class WindowsILAOPDBHeuristic:
         h.update(f"|deadline:{self._mdp.deadline()}".encode())
         settings = (self._CACHE_VERSION, self.growth, self.pattern_facts, self.pattern_goals, self.agg,
                     self.grouping, self.full_table, self.offline_seconds, self.extend_offline,
-                    exact_statics_default(), str(blur_default()), self.logic_sources, self.logic_rollouts,
+                    exact_statics_default(), transition_reads_default(), str(blur_default()),
+                    self.logic_sources, self.logic_rollouts,
                     self.logic_depth, self.logic_rank)
         h.update(repr(settings).encode())
         return h.hexdigest()[:16]

@@ -32,6 +32,12 @@ least as much -- the value stays an upper bound. e is NOT rounded: rounding it
 down charges less than the real time (eps = 3 gave V = 1.0 everywhere on nasa).
 Only the window variants shrink (facts and end orders are untouched).
 
+Hidden reads: an outcome probability may read a fact outside a fact-capped pattern
+(push reads rock_under_car). Each value of those facts gives its own option of the
+same event, so the max over options picks the best one -- an upper bound
+(``FactPatternModel.outcome_variants``). The survivor sweep ``h`` (ILAO*'s guide,
+not used by the full table) still reads them at their initial value.
+
 Pruned, never generated or never expanded:
     * a gap whose windows are inconsistent (lo > hi)           -- STN reject
     * an end with r - e_x < 0                                   -- past the deadline
@@ -484,9 +490,10 @@ class WindowsLAO:
             op = self.ops.get(name)
             if op is None:
                 continue
-            outs = self._outcomes(op, "S", facts)
+            variants = self._outcome_variants(op, "S", facts)
             if op.end_action is None:
-                yield ("do", name), Fraction(0), None, queue, windows, outs
+                for outs in variants:
+                    yield ("do", name), Fraction(0), None, queue, windows, outs
                 continue
             d = self.durations[name]
             inert = self.prune_inert and self._inert(name)
@@ -495,8 +502,9 @@ class WindowsLAO:
                 if new is None:
                     self.stats["pruned_gap"] += 1
                     continue
-                yield (("start", name, gap), Fraction(0), new[gap][2] if inert else None,
-                       queue[:gap] + (name,) + queue[gap:], new, outs)
+                for outs in variants:
+                    yield (("start", name, gap), Fraction(0), new[gap][2] if inert else None,
+                           queue[:gap] + (name,) + queue[gap:], new, outs)
         if queue:
             x = queue[0]
             op = self.ops[x]
@@ -506,7 +514,8 @@ class WindowsLAO:
                 if rest is None:
                     self.stats["pruned_gap"] += 1
                 else:
-                    yield ("end", x), charge, None, queue[1:], rest, self._outcomes(op, "E", facts)
+                    for outs in self._outcome_variants(op, "E", facts):
+                        yield ("end", x), charge, None, queue[1:], rest, outs
 
     def _expand(self, s: State) -> None:
         facts, queue, windows, r = s
@@ -579,6 +588,15 @@ class WindowsLAO:
         if isinstance(op.start_action, str):
             return self.model.outcomes((op.key, which), facts)
         return self.model.outcomes(op.start_action if which == "S" else op.end_action, facts)
+
+    def _outcome_variants(self, op, which, facts):
+        """Outcome distributions of one event, one per value of the facts its probability reads
+        outside a fact-capped pattern (``FactPatternModel.outcome_variants``); each is its own
+        option, so the max over options picks the best value. One distribution otherwise."""
+        getter = getattr(self.model, "outcome_variants", None)
+        if getter is None or isinstance(op.start_action, str):
+            return (self._outcomes(op, which, facts),)
+        return getter(op.start_action if which == "S" else op.end_action, facts)
 
     def _end_legal(self, op, facts) -> bool:
         if isinstance(op.start_action, str):
