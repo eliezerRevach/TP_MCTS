@@ -25,6 +25,11 @@ def main():
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
     args = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):              # box-drawing / arrows on any console
+        try:
+            stream.reconfigure(errors="replace")
+        except AttributeError:
+            pass
 
     with open(args.notebook, encoding="utf-8") as fh:
         cells = json.load(fh)["cells"]
