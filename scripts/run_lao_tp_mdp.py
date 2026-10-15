@@ -36,13 +36,15 @@ def build_mdp(domain, object_amount, garbage_amount, deadline):
     from unified_planning.engines.convert_problem import Convert_problem
     from unified_planning.engines.mdp import MDP
 
-    # the table of unified_planning/run_domain.py (that module runs an experiment on import)
-    domains = dict(machine_shop=up.domains.Machine_Shop, nasa_rover=up.domains.Nasa_Rover,
-                   stuck_car_1o=up.domains.Stuck_Car_1o, stuck_car=up.domains.Stuck_Car, conc=up.domains.Conc,
-                   full_conc=up.domains.Full_Conc, prob_conc=up.domains.Prob_Conc,
-                   best_no_parallel=up.domains.Best_No_Parallel, simple=up.domains.Simple,
-                   hosting=up.domains.Hosting, prob_match_cellar=up.domains.Prob_MatchCellar,
-                   robot_lab=up.domains.Robot_Lab)
+    # the table of unified_planning/run_domain.py (that module runs an experiment on import);
+    # a domain class this checkout does not have is simply not offered
+    names = dict(machine_shop="Machine_Shop", nasa_rover="Nasa_Rover", stuck_car_1o="Stuck_Car_1o",
+                 stuck_car="Stuck_Car", conc="Conc", full_conc="Full_Conc", prob_conc="Prob_Conc",
+                 best_no_parallel="Best_No_Parallel", simple="Simple", hosting="Hosting",
+                 prob_match_cellar="Prob_MatchCellar", robot_lab="Robot_Lab")
+    domains = {k: getattr(up.domains, v) for k, v in names.items() if hasattr(up.domains, v)}
+    if domain not in domains:
+        raise SystemExit(f"unknown domain {domain!r}; available: {sorted(domains)}")
     model = domains[domain](kind="regular", deadline=deadline, object_amount=object_amount,
                             garbage_amount=garbage_amount)
     if domain == "nasa_rover":
