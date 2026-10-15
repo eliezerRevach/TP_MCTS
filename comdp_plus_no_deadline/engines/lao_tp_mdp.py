@@ -757,6 +757,7 @@ class TPMDPLAO:
                                       dropped_noops=self.stats["dropped_noop"])
         out["by_root_option"] = self._by_root_option()
         if walk:
+            out["dominance"] = self.dominance_summary()
             out["same_facts_groups"] = self._same_facts_groups()
             out["main_path"] = self._main_path()
         if walk:
@@ -793,6 +794,86 @@ class TPMDPLAO:
             steps.append(dict(action=n.via, time=round(n.current_time, 2), depth=n.depth))
             n = self.nodes.get(n.parent)
         return list(reversed(steps))
+
+    @staticmethod
+    def _bound_map(signature) -> Dict[tuple, object]:
+        out = {}
+        for label, row in signature:
+            if row is None:
+                continue
+            for lab2, b in row:
+                out[(label, lab2)] = b
+        return out
+
+    @staticmethod
+    def _looser(a: Dict[tuple, object], b: Dict[tuple, object]) -> bool:
+        """Every bound of a is >= the same bound of b (None = no bound): every schedule b allows, a allows."""
+        if a.keys() != b.keys():
+            return False
+        for k, vb in b.items():
+            va = a[k]
+            if va is None:
+                continue
+            if vb is None or va < vb:
+                return False
+        return True
+
+    def dominance_pairs(self, max_group: int = 2000):
+        """Yield (dominator, dominated) node pairs: same facts, the dominator's STN looser in every bound,
+        so V(dominator) >= V(dominated). Groups larger than max_group are only scanned on their first
+        max_group members (reported)."""
+        groups: Dict[frozenset, List[Node]] = defaultdict(list)
+        for n in self.nodes.values():
+            groups[n.key[0]].append(n)
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            members = members[:max_group]
+            maps = [self._bound_map(n.key[1]) for n in members]
+            for i, bi in enumerate(maps):
+                for j, bj in enumerate(maps):
+                    if i != j and self._looser(bj, bi):
+                        yield members[j], members[i]
+                        break
+
+    def dominance_summary(self, max_group: int = 1000, budget: float = 600.0) -> Dict[str, object]:
+        """How much dominance would merge: nodes per equal-facts group that another node of the group
+        dominates (looser STN, same facts), and what would be left (the undominated frontier)."""
+        groups: Dict[frozenset, List[Node]] = defaultdict(list)
+        for n in self.nodes.values():
+            groups[n.key[0]].append(n)
+        sizes = sorted((len(m) for m in groups.values()), reverse=True)
+        dominated = 0
+        clipped = 0
+        largest = []
+        started = time.perf_counter()
+        scanned_nodes = scanned_groups = 0
+        for facts, members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            if len(members) < 2:
+                continue
+            if time.perf_counter() - started > budget:
+                break                                    # out of time: what was scanned is reported
+            if len(members) > max_group:
+                clipped += 1
+            scan = members[:max_group]
+            maps = [self._bound_map(n.key[1]) for n in scan]
+            dom_here = sum(1 for i, bi in enumerate(maps)
+                           if any(i != j and self._looser(bj, bi) for j, bj in enumerate(maps)))
+            dominated += dom_here
+            scanned_nodes += len(scan)
+            scanned_groups += 1
+            if len(largest) < 10:
+                largest.append(dict(size=len(members), scanned=len(scan), dominated=dom_here,
+                                    frontier=len(scan) - dom_here,
+                                    times=sorted({round(n.current_time, 2) for n in scan})[:12]))
+        total = len(self.nodes)
+        return dict(nodes=total, distinct_facts=len(groups), largest_facts_group=sizes[0] if sizes else 0,
+                    dominated=dominated, left_after_dominance=total - dominated,
+                    dominated_pct=round(100 * dominated / max(1, total), 2), clipped_groups=clipped,
+                    groups_with_2_or_more=sum(1 for m in groups.values() if len(m) >= 2),
+                    scanned_groups=scanned_groups, scanned_nodes=scanned_nodes,
+                    dominated_pct_of_scanned=round(100 * dominated / max(1, scanned_nodes), 2),
+                    largest_groups=largest)
 
     def _same_facts_groups(self, groups: int = 3, members: int = 3) -> List[Dict[str, object]]:
         """The largest groups of nodes with the same facts at the same time (they differ only in the

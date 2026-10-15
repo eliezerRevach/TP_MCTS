@@ -163,3 +163,25 @@ def test_canonical_starts_keep_the_optimum(pdb_env):
         assert canon.stats["canonical_skipped"] > 0
         assert canon.stats["generated"] <= full.stats["generated"]
         assert PolicyExecution(canon).exact()["executed_value"] == pytest.approx(canon.root.value, abs=1e-6)
+
+
+def test_dominance_is_sound_on_exact_values():
+    """Same facts and a looser STN (every bound >=) can never be worth less: checked on the whole MDP
+    with exact values."""
+    from comdp_plus_no_deadline.engines.lao_tp_mdp import TPMDPLAO
+
+    mdp = _mdp("stuck_car", 10, object_amount=1)
+    lao = TPMDPLAO(mdp, heuristic=None)
+    lao.expand_all()
+    for _ in range(100):
+        change = 0.0
+        for n in lao.nodes.values():
+            if n.options and not n.goal and not n.dead:
+                old = n.value
+                lao._backup(n)
+                change = max(change, abs(old - n.value))
+        if change < 1e-13:
+            break
+    pairs = list(lao.dominance_pairs())
+    assert pairs
+    assert all(a.value >= b.value - 1e-9 for a, b in pairs)
