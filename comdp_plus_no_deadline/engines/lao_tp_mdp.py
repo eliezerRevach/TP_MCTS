@@ -221,7 +221,7 @@ def compact_stn(stn, bounds):
 
 class Node:
     __slots__ = ("key", "state", "stn", "prev", "value", "best", "options", "goal", "dead",
-                 "current_time", "h0", "depth", "last", "parent", "via", "branch", "weak")
+                 "current_time", "h0", "depth", "last", "parent", "via", "branch", "weak", "lower")
 
     def __init__(self, key, state, stn, prev):
         self.key = key
@@ -241,6 +241,7 @@ class Node:
         self.via = None                # by this action,
         self.branch = None             # under this root option
         self.weak = None               # diagnostics: the PDB goal group with the lowest value at h0
+        self.lower = 0.0               # algorithm="bounded": a value some policy is known to reach
 
 
 _GAP_EDGES = (1e-4, 1e-3, 1e-2, 5e-2)
@@ -397,7 +398,7 @@ class LAODiagnostics:
         self._last = time.perf_counter()
         self.progress.append(dict(seconds=round(self._last - self.started, 1),
                                   generated=solver.stats["generated"], expanded=solver.stats["expanded"],
-                                  lower_bound=round(policy["lower_bound"], 6),
+                                  lower_bound=round(max(policy["lower_bound"], getattr(solver.root, "lower", 0.0)), 6),
                                   upper_bound=round(solver.root.value, 6),
                                   policy_decision=policy["decision"], policy_tips=policy["tips"],
                                   policy_goals=policy["goals"], policy_dead=policy["dead"],
@@ -417,7 +418,8 @@ class TPMDPLAO:
     def __init__(self, mdp, heuristic: Optional[Callable] = None, epsilon: float = 1e-9,
                  max_nodes: int = 0, time_budget: float = 0.0, on_pass: Optional[Callable] = None,
                  compact: bool = True, diagnostics: bool = False, diagnostics_interval: float = 600.0,
-                 canonical_starts: bool = False, diagnostics_tips: int = 0):
+                 canonical_starts: bool = False, diagnostics_tips: int = 0, algorithm: str = "ilao",
+                 gap_epsilon: float = 0.0):
         from unified_planning.engines.utils import create_init_stn
 
         self.mdp = mdp
@@ -434,12 +436,23 @@ class TPMDPLAO:
         # canonical_starts: two independent starts in a row (no event between them) are only taken in
         # name order -- the other order reaches the same facts. Not exact in general: the STN keeps
         # "a before b" vs "b before a", and a later end order can need one of them.
+        # algorithm: "ilao" = ILAO* (upper bounds only, depth-first passes over the best partial policy);
+        # "bounded" = two bounds per node (upper = h backed up, lower = what a policy is known to reach),
+        # FRTDP-style trials: follow the best upper-bound action, take the outcome with the largest
+        # p * (upper - lower), back both bounds up; an option whose upper bound is <= the node's lower
+        # bound can never win and is never followed. Stops when upper(s0) - lower(s0) <= gap_epsilon
+        # (0 = exact; > 0 = the returned policy is provably within gap_epsilon of optimal).
+        if algorithm not in ("ilao", "bounded"):
+            raise ValueError(f"algorithm={algorithm!r}: use ilao | bounded")
+        self.algorithm = algorithm
+        self.gap_epsilon = float(gap_epsilon)
         self.canonical = bool(canonical_starts)
         self._commute = _commute_table(mdp) if self.canonical else {}
         self._deadline_at = None        # perf_counter() time at which solve() stops (time_budget)
         self.stats = dict(generated=0, expanded=0, passes=0, backups=0, h_calls=0, h_seconds=0.0,
                           key_seconds=0.0, expand_seconds=0.0, inconsistent=0, folded=0, dropped_noop=0,
-                          cycles=0, seconds=0.0, complete=False, canonical_skipped=0)
+                          cycles=0, seconds=0.0, complete=False, canonical_skipped=0, trials=0,
+                          cut_options=0)
         stn = exact_stn(create_init_stn(mdp))           # exact consistency (Floyd-Warshall)
         self.root = self._node(mdp.initial_state(), stn, None)
 
@@ -478,6 +491,7 @@ class TPMDPLAO:
         self.stats["generated"] += 1
         if self.mdp.is_terminal(state):
             node.goal, node.value, node.options, node.stn = True, 1.0, [], None
+            node.lower = 1.0
         elif self.heuristic is None:
             node.value = 1.0
         else:
@@ -569,6 +583,8 @@ class TPMDPLAO:
 
     # -- search --------------------------------------------------------------
     def solve(self) -> float:
+        if self.algorithm == "bounded":
+            return self._solve_bounded()
         started = time.perf_counter()
         self._deadline_at = started + self.time_budget if self.time_budget else None
         while True:
@@ -588,6 +604,96 @@ class TPMDPLAO:
         if self.diag is not None:
             self.diag.record(self)                       # the final lower / upper bound
         return self.root.value
+
+    # -- algorithm = "bounded": upper and lower bounds, FRTDP-style trials -------------------------
+    def _backup_both(self, node: Node) -> None:
+        """Both bounds from the children: upper = max_a sum p * upper(child), lower = max_a sum p *
+        lower(child). best = the action with the highest upper bound (ties: the higher lower bound)."""
+        if node.goal or node.dead or not node.options:
+            return
+        best_u = best_l = -1.0
+        best_i = None
+        lower = 0.0
+        q_lower = []
+        for i, (_name, branches) in enumerate(node.options):
+            qu = sum(p * self.nodes[k].value for p, k in branches)
+            ql = sum(p * self.nodes[k].lower for p, k in branches)
+            q_lower.append((qu, ql))
+            lower = max(lower, ql)
+            if best_i is None or qu > best_u + _EPS or (abs(qu - best_u) <= _EPS and ql > best_l):
+                best_u, best_l, best_i = qu, ql, i
+        node.value, node.best = best_u, best_i
+        node.lower = min(lower, best_u)                  # both are exact once they meet
+        self.stats["backups"] += 1
+
+    def _trial(self) -> bool:
+        """One dive from the root: best upper-bound action, outcome with the largest p * gap, expanding
+        tips on the way; then both bounds are backed up along the path. False = out of time."""
+        path, on_path, n = [], set(), self.root
+        tol = 1e-12
+        while not (n.goal or n.dead):
+            if n.key in on_path:
+                self.stats["cycles"] += 1                # a zero-time cycle: end the dive here
+                break
+            on_path.add(n.key)
+            path.append(n)
+            if n.options is None:
+                if self._deadline_at is not None and time.perf_counter() >= self._deadline_at:
+                    for m in reversed(path):
+                        self._backup_both(m)
+                    return False
+                self._expand(n)
+                if self.diag is not None and self.diag.due():
+                    self.diag.record(self)
+                if n.dead:
+                    break
+                self._backup_both(n)
+            if n.value - n.lower <= tol:
+                break                                    # solved here: nothing to gain below
+            branches = n.options[n.best][1]
+            weight, child = max(((p * (self.nodes[k].value - self.nodes[k].lower), k) for p, k in branches),
+                                key=lambda t: t[0])
+            if weight <= tol:
+                break
+            n = self.nodes[child]
+        for m in reversed(path):
+            self._backup_both(m)
+        return True
+
+    def _solve_bounded(self) -> float:
+        started = time.perf_counter()
+        self._deadline_at = started + self.time_budget if self.time_budget else None
+        target = max(self.gap_epsilon, 1e-12)
+        while self.root.value - self.root.lower > target:
+            self.stats["trials"] += 1
+            self.stats["passes"] = self.stats["trials"]
+            if not self._trial():
+                break
+            if self.on_pass is not None and self.stats["trials"] % 1000 == 0:
+                self.on_pass(self, time.perf_counter() - started)
+            if self.max_nodes and len(self.nodes) >= self.max_nodes:
+                break
+        gap = self.root.value - self.root.lower
+        self.stats["complete"] = gap <= target
+        self.stats["gap"] = gap
+        # The policy to report and execute: the one the lower bound belongs to (its value is reached).
+        cut = 0
+        for n in self.nodes.values():
+            if n.options and not n.goal and not n.dead:
+                best_i, best_l = None, -1.0
+                for i, (_name, branches) in enumerate(n.options):
+                    ql = sum(p * self.nodes[k].lower for p, k in branches)
+                    qu = sum(p * self.nodes[k].value for p, k in branches)
+                    if qu <= n.lower + 1e-12 and ql < n.lower - 1e-12:
+                        cut += 1                         # can never beat what is already reached
+                    if ql > best_l + _EPS:
+                        best_l, best_i = ql, i
+                n.best = best_i
+        self.stats["cut_options"] = cut
+        self.stats["seconds"] = time.perf_counter() - started
+        if self.diag is not None:
+            self.diag.record(self)
+        return self.root.lower
 
     def _pass(self) -> Tuple[int, float]:
         """One depth-first pass over the best partial policy: expand its tips, back up in post-order."""

@@ -90,6 +90,10 @@ def main():
     ap.add_argument("--diagnostics", action="store_true",
                     help="per-depth report: STN-rejected actions, ties, Q spread (gradient), h-pruned options,"
                          " tightness h0 vs V* on finished runs, lower bound on V(s0) over time")
+    ap.add_argument("--algorithm", choices=("ilao", "bounded"), default="ilao",
+                    help="ilao = ILAO* (upper bounds); bounded = upper + lower bounds, FRTDP-style trials")
+    ap.add_argument("--gap_epsilon", type=float, default=0.0,
+                    help="bounded only: stop when upper(s0) - lower(s0) <= this (0 = exact)")
     ap.add_argument("--build_only", action="store_true",
                     help="build (and cache) the PDB tables, report their size and time, and stop")
     ap.add_argument("--canonical_starts", action="store_true",
@@ -181,7 +185,8 @@ def main():
     lao = TPMDPLAO(mdp, heuristic=h, max_nodes=args.max_nodes, time_budget=budget,
                    on_pass=progress if args.progress else None, diagnostics=args.diagnostics,
                    diagnostics_interval=args.diagnostics_interval, canonical_starts=args.canonical_starts,
-                   diagnostics_tips=args.diagnostics_tips)
+                   diagnostics_tips=args.diagnostics_tips, algorithm=args.algorithm,
+                   gap_epsilon=args.gap_epsilon)
     run["lao"] = lao
 
     if args.progress:                              # counts every 30 s, also inside one long pass
@@ -249,6 +254,9 @@ def main():
         "inconsistent_actions": s["inconsistent"], "folded_zero_time_loops": s["folded"],
         "dropped_noops": s["dropped_noop"], "cycles": s["cycles"],
         "canonical_starts": args.canonical_starts, "canonical_skipped": s["canonical_skipped"],
+        "algorithm": args.algorithm, "gap_epsilon": args.gap_epsilon,
+        "upper_bound(s0)": round(lao.root.value, 6), "lower_bound(s0)": round(getattr(lao.root, "lower", 0.0), 6),
+        "trials": s["trials"], "cut_options": s["cut_options"],
         "pdb": pdb_report,
     }
     report["peak_rss_gb"] = _peak_rss_gb()

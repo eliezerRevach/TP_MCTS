@@ -185,3 +185,19 @@ def test_dominance_is_sound_on_exact_values():
     pairs = list(lao.dominance_pairs())
     assert pairs
     assert all(a.value >= b.value - 1e-9 for a, b in pairs)
+
+
+def test_bounded_search_matches_ilao(pdb_env):
+    """algorithm="bounded" (upper + lower bounds, FRTDP-style trials) with gap 0 returns the same V* as
+    ILAO*, both bounds meet, and its policy executes at exactly that value."""
+    from comdp_plus_no_deadline.engines.lao_tp_mdp import PolicyExecution, TPMDPLAO, windows_pdb_heuristic
+
+    for domain, kwargs in (("stuck_car", dict(object_amount=1)), ("prob_conc", dict(garbage_amount=2))):
+        mdp = _mdp(domain, 10, **kwargs)
+        h = windows_pdb_heuristic(mdp)
+        exact = TPMDPLAO(mdp, heuristic=h).solve()
+        bounded = TPMDPLAO(mdp, heuristic=h, algorithm="bounded")
+        v = bounded.solve()
+        assert v == pytest.approx(exact, abs=1e-9)
+        assert bounded.stats["complete"] and bounded.root.value - bounded.root.lower <= 1e-9
+        assert PolicyExecution(bounded).exact()["executed_value"] == pytest.approx(v, abs=1e-6)
