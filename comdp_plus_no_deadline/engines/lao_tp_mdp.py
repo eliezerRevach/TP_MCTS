@@ -278,6 +278,7 @@ class LAODiagnostics:
         self.interval = float(interval)
         self.by_depth: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self.progress: List[Dict[str, float]] = []
+        self._groups: Dict[int, set] = {}
         self.started = time.perf_counter()
         self._last = self.started
 
@@ -307,15 +308,30 @@ class LAODiagnostics:
         if len(q_values) == 1:
             d["single_option"] += 1
 
+    def created(self, node) -> None:
+        """Every new node: count it per (creation depth) and per (facts, time) group, so the symmetry
+        measure does not need a walk at the end."""
+        d = self.by_depth[node.depth]
+        d["created"] += 1
+        groups = self._groups.setdefault(node.depth, set())
+        before = len(groups)
+        groups.add(hash((node.key[0], node.current_time)))
+        if len(groups) > before:
+            d["facts_time_groups"] += 1
+
     def due(self) -> bool:
         return self.interval > 0 and time.perf_counter() - self._last >= self.interval
 
     def record(self, solver: "TPMDPLAO") -> None:
+        policy = solver.policy_stats()
         self._last = time.perf_counter()
         self.progress.append(dict(seconds=round(self._last - self.started, 1),
                                   generated=solver.stats["generated"], expanded=solver.stats["expanded"],
-                                  lower_bound=round(solver.policy_lower_bound(), 6),
-                                  upper_bound=round(solver.root.value, 6)))
+                                  lower_bound=round(policy["lower_bound"], 6),
+                                  upper_bound=round(solver.root.value, 6),
+                                  policy_decision=policy["decision"], policy_tips=policy["tips"],
+                                  policy_goals=policy["goals"], policy_dead=policy["dead"],
+                                  policy_depth=policy["max_depth"]))
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +409,8 @@ class TPMDPLAO:
             self.stats["h_seconds"] += time.perf_counter() - t1
             self.stats["h_calls"] += 1
         node.h0 = node.value
+        if self.diag is not None:
+            self.diag.created(node)
         return node
 
     def _expand(self, node: Node) -> None:
@@ -575,7 +593,14 @@ class TPMDPLAO:
     def policy_lower_bound(self) -> float:
         """V of the current best partial policy with every unsolved tip counted as 0: a policy that
         can actually be followed, so a lower bound on V*(s0). Cycles count as 0 (conservative)."""
+        return self.policy_stats()["lower_bound"]
+
+    def policy_stats(self) -> Dict[str, float]:
+        """One walk over the current best partial policy (best action, every outcome): its lower
+        bound (tips = 0) and its size -- decision nodes, unexpanded tips, goal leaves, dead ends,
+        depth. The size of the policy is the least work any exact method needs from here."""
         value: Dict[tuple, float] = {}
+        size = dict(decision=0, tips=0, goals=0, dead=0, max_depth=0)
         on_path = set()
         stack = [(self.root.key, False)]
         while stack:
@@ -585,19 +610,23 @@ class TPMDPLAO:
             n = self.nodes[k]
             if n.goal:
                 value[k] = 1.0
+                size["goals"] += 1
                 continue
             if n.dead or n.options is None or n.best is None:
                 value[k] = 0.0
+                size["dead" if n.dead else "tips"] += 1
                 continue
             branches = n.options[n.best][1]
             if ready:
                 on_path.discard(k)
                 value[k] = sum(p * value.get(c, 0.0) for p, c in branches)
+                size["decision"] += 1
+                size["max_depth"] = max(size["max_depth"], n.depth)
                 continue
             on_path.add(k)
             stack.append((k, True))
             stack.extend((c, False) for _p, c in branches if c not in value and c not in on_path)
-        return value[self.root.key]
+        return dict(lower_bound=value[self.root.key], **size)
 
     def diagnostics(self, walk: bool = True) -> Dict[str, object]:
         """The diagnostics report (needs diagnostics=True). walk=False skips the passes over the
@@ -635,15 +664,10 @@ class TPMDPLAO:
                 total, pruned = pruned_by_depth.get(depth, [0, 0])
                 row["h_pruned_pct"] = round(100 * pruned / max(1, total), 1)
             rows.append(row)
-        if walk:
-            groups: Dict[int, set] = defaultdict(set)
-            counts: Dict[int, int] = defaultdict(int)
-            for n in self.nodes.values():
-                groups[n.depth].add((n.key[0], n.current_time))
-                counts[n.depth] += 1
-            for row in rows:
-                g = len(groups.get(row["depth"], ())) or 1
-                row["nodes_per_facts_time"] = round(counts.get(row["depth"], 0) / g, 2)
+        for row in rows:                                # symmetry, from the online counters
+            d = self.diag.by_depth[row["depth"]]
+            row["created"] = int(d["created"])
+            row["nodes_per_facts_time"] = round(d["created"] / max(1.0, d["facts_time_groups"]), 2)
         out: Dict[str, object] = dict(by_depth=rows, progress=list(self.diag.progress),
                                       cycles=self.stats["cycles"], folded=self.stats["folded"],
                                       canonical_skipped=self.stats["canonical_skipped"],
