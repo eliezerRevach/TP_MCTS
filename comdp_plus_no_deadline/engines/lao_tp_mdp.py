@@ -962,7 +962,7 @@ class TPMDPLAO:
         """Where the nodes are: per first move from the root, nodes created / expanded and the
         deepest one, with that option's current Q (upper bound) and whether it is the best now."""
         q_now = {}
-        if self.root.options:
+        if self.root.options and all(k in self.nodes for _n, br in self.root.options for _p, k in br):
             for i, (name, branches) in enumerate(self.root.options):
                 q_now[name] = (sum(p * self.nodes[k].value for p, k in branches), i == self.root.best)
         rows = []
