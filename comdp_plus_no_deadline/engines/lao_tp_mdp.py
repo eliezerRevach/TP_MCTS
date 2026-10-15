@@ -221,7 +221,7 @@ def compact_stn(stn, bounds):
 
 class Node:
     __slots__ = ("key", "state", "stn", "prev", "value", "best", "options", "goal", "dead",
-                 "current_time", "h0", "depth", "last")
+                 "current_time", "h0", "depth", "last", "parent", "via", "branch")
 
     def __init__(self, key, state, stn, prev):
         self.key = key
@@ -237,6 +237,9 @@ class Node:
         self.h0 = 0.0                  # the heuristic's value when the node was created
         self.depth = 0                 # fewest steps from the root seen so far
         self.last = None               # canonical_starts: the last start, if it may be reordered
+        self.parent = None             # diagnostics: the node it was first created from,
+        self.via = None                # by this action,
+        self.branch = None             # under this root option
 
 
 def _commute_table(mdp) -> Dict[str, frozenset]:
@@ -280,10 +283,12 @@ class LAODiagnostics:
         self.by_depth: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self.progress: List[Dict[str, float]] = []
         self._groups: Dict[int, set] = {}
+        self.by_branch: Dict[object, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self.started = time.perf_counter()
         self._last = self.started
 
     def expansion(self, node, legal: int, rejected: int, option_rows, q_values) -> None:
+        self.by_branch[node.branch]["expanded"] += 1
         d = self.by_depth[node.depth]
         d["expanded"] += 1
         d["legal"] += legal
@@ -311,7 +316,10 @@ class LAODiagnostics:
 
     def created(self, node) -> None:
         """Every new node: count it per (creation depth) and per (facts, time) group, so the symmetry
-        measure does not need a walk at the end."""
+        measure does not need a walk at the end; and per root option (which first move it is under)."""
+        b = self.by_branch[node.branch]
+        b["created"] += 1
+        b["max_depth"] = max(b["max_depth"], node.depth)
         d = self.by_depth[node.depth]
         d["created"] += 1
         groups = self._groups.setdefault(node.depth, set())
@@ -385,7 +393,7 @@ class TPMDPLAO:
         """The name a node remembers after `action` (canonical mode): a start that may be reordered."""
         return action.name if self.canonical and action.name in self._commute else None
 
-    def _node(self, state, stn, prev, depth: int = 0, last=None) -> Node:
+    def _node(self, state, stn, prev, depth: int = 0, last=None, parent: "Node" = None, via=None) -> Node:
         t0 = time.perf_counter()
         signature, _points, bounds = stn_minimal_network(stn, prev)
         key = self.node_key(state, signature, last)
@@ -400,6 +408,9 @@ class TPMDPLAO:
         node = Node(key, state, stn, prev)
         node.depth = depth
         node.last = last
+        if self.diag is not None and parent is not None:
+            node.parent, node.via = parent.key, via
+            node.branch = via if parent is self.root else parent.branch
         node.current_time = float(stn.get_current_end_time())
         self.nodes[key] = node
         self.stats["generated"] += 1
@@ -444,7 +455,8 @@ class TPMDPLAO:
                 if p <= _EPS:
                     continue
                 before = self.stats["generated"]
-                child = self._node(next_state, child_stn, new_prev, node.depth + 1, self.last_of(action))
+                child = self._node(next_state, child_stn, new_prev, node.depth + 1, self.last_of(action),
+                                   parent=node, via=action.name)
                 if self.stats["generated"] > before:
                     new += 1
                 else:
@@ -743,6 +755,10 @@ class TPMDPLAO:
                                       cycles=self.stats["cycles"], folded=self.stats["folded"],
                                       canonical_skipped=self.stats["canonical_skipped"],
                                       dropped_noops=self.stats["dropped_noop"])
+        out["by_root_option"] = self._by_root_option()
+        if walk:
+            out["same_facts_groups"] = self._same_facts_groups()
+            out["main_path"] = self._main_path()
         if walk:
             total = sum(v[0] for v in pruned_by_depth.values())
             pruned = sum(v[1] for v in pruned_by_depth.values())
@@ -750,6 +766,79 @@ class TPMDPLAO:
             out["tightness"] = self._tightness() if self.stats["complete"] else (
                 "run not finished: V* unknown below the root -- see progress (lower / upper bound)")
         return out
+
+    def _by_root_option(self) -> List[Dict[str, object]]:
+        """Where the nodes are: per first move from the root, nodes created / expanded and the
+        deepest one, with that option's current Q (upper bound) and whether it is the best now."""
+        q_now = {}
+        if self.root.options:
+            for i, (name, branches) in enumerate(self.root.options):
+                q_now[name] = (sum(p * self.nodes[k].value for p, k in branches), i == self.root.best)
+        rows = []
+        for branch, b in self.diag.by_branch.items():
+            if branch is None:
+                continue
+            q, best = q_now.get(branch, (None, False))
+            rows.append(dict(root_option=branch, created=int(b["created"]), expanded=int(b["expanded"]),
+                             max_depth=int(b["max_depth"]), q_upper=None if q is None else round(q, 6),
+                             best_now=best))
+        rows.sort(key=lambda r: -r["created"])
+        return rows
+
+    def path_to(self, node) -> List[Dict[str, object]]:
+        """The actions from the root to `node` along the parents it was first created from."""
+        steps = []
+        n = node
+        while n is not None and n.parent is not None:
+            steps.append(dict(action=n.via, time=round(n.current_time, 2), depth=n.depth))
+            n = self.nodes.get(n.parent)
+        return list(reversed(steps))
+
+    def _same_facts_groups(self, groups: int = 3, members: int = 3) -> List[Dict[str, object]]:
+        """The largest groups of nodes with the same facts at the same time (they differ only in the
+        STN): for a few members, the path that made each one and its STN signature -- what differs."""
+        by_group: Dict[tuple, List[Node]] = defaultdict(list)
+        for n in self.nodes.values():
+            if n.parent is not None:
+                by_group[(n.key[0], n.current_time)].append(n)
+        top = sorted(by_group.values(), key=len, reverse=True)[:groups]
+        init = frozenset(self.mdp.initial_state().predicates)
+        out = []
+        for g in top:
+            facts = g[0].key[0]
+            entry = dict(size=len(g), time=g[0].current_time, depths=sorted({n.depth for n in g})[:10],
+                         root_options=sorted({str(n.branch) for n in g})[:14],
+                         running=sorted(str(f) for f in facts if "inExecution" in str(f)),
+                         gained=sorted(str(f) for f in facts - init if "inExecution" not in str(f)),
+                         members=[])
+            for n in sorted(g, key=lambda n: n.depth)[:members]:
+                entry["members"].append(dict(depth=n.depth, value=round(n.value, 6), expanded=n.options is not None,
+                                             path=[f"{st['action']}@{st['time']}" for st in self.path_to(n)],
+                                             signature=str(n.key[1])))
+            out.append(entry)
+        return out
+
+    def _main_path(self, limit: int = 150) -> List[Dict[str, object]]:
+        """From the root: the best action and its most likely outcome, step by step, until a tip or
+        a leaf -- with h0, the current value, the options there and how many tie with the best."""
+        steps, n, seen = [], self.root, set()
+        while n is not None and n.key not in seen and len(steps) < limit:
+            seen.add(n.key)
+            row = dict(depth=n.depth, time_left=round(self.diag.deadline - n.current_time, 2),
+                       h0=round(n.h0, 6), value=round(n.value, 6), goal=n.goal, dead=n.dead,
+                       expanded=n.options is not None)
+            if not n.options or n.best is None:
+                steps.append(row)
+                break
+            qs = [sum(p * self.nodes[k].value for p, k in br) for _a, br in n.options]
+            best_q = qs[n.best]
+            name, branches = n.options[n.best]
+            p_top, k_top = max(branches, key=lambda pk: pk[0])
+            row.update(action=name, options=len(qs), ties_0_001=sum(1 for q in qs if best_q - q <= 1e-3) - 1,
+                       outcomes=len(branches), p_followed=round(p_top, 4))
+            steps.append(row)
+            n = self.nodes[k_top]
+        return steps
 
     def _tightness(self) -> Dict[str, object]:
         """On a finished run every node of the optimal policy has V = V*: compare it with h0 there.
