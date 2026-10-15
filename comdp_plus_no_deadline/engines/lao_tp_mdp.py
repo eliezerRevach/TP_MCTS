@@ -273,9 +273,10 @@ class LAODiagnostics:
 
     TIES = (1e-3, 1e-2)
 
-    def __init__(self, deadline: float, interval: float = 600.0):
+    def __init__(self, deadline: float, interval: float = 600.0, tips: int = 0):
         self.deadline = float(deadline)
         self.interval = float(interval)
+        self.tips = int(tips)           # per sample: the k tips carrying most of V(s0), expanded and shown
         self.by_depth: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self.progress: List[Dict[str, float]] = []
         self._groups: Dict[int, set] = {}
@@ -332,6 +333,8 @@ class LAODiagnostics:
                                   policy_decision=policy["decision"], policy_tips=policy["tips"],
                                   policy_goals=policy["goals"], policy_dead=policy["dead"],
                                   policy_depth=policy["max_depth"]))
+        if self.tips > 0:
+            self.progress[-1]["top_tips"] = solver.top_tips(self.tips)
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +348,7 @@ class TPMDPLAO:
     def __init__(self, mdp, heuristic: Optional[Callable] = None, epsilon: float = 1e-9,
                  max_nodes: int = 0, time_budget: float = 0.0, on_pass: Optional[Callable] = None,
                  compact: bool = True, diagnostics: bool = False, diagnostics_interval: float = 600.0,
-                 canonical_starts: bool = False):
+                 canonical_starts: bool = False, diagnostics_tips: int = 0):
         from unified_planning.engines.utils import create_init_stn
 
         self.mdp = mdp
@@ -356,7 +359,8 @@ class TPMDPLAO:
         self.on_pass = on_pass          # called after every pass with (solver, seconds so far)
         self.compact = compact          # store each node's STN reduced to its kept points
         self.nodes: Dict[tuple, Node] = {}
-        self.diag = LAODiagnostics(float(mdp.deadline()), diagnostics_interval) if diagnostics else None
+        self.diag = (LAODiagnostics(float(mdp.deadline()), diagnostics_interval, diagnostics_tips)
+                     if diagnostics else None)
         # canonical_starts: two independent starts in a row (no event between them) are only taken in
         # name order -- the other order reaches the same facts. Not exact in general: the STN keeps
         # "a before b" vs "b before a", and a later end order can need one of them.
@@ -627,6 +631,73 @@ class TPMDPLAO:
             stack.append((k, True))
             stack.extend((c, False) for _p, c in branches if c not in value and c not in on_path)
         return dict(lower_bound=value[self.root.key], **size)
+
+    def top_tips(self, k: int = 5, expand: bool = True) -> List[Dict[str, object]]:
+        """The k unexpanded tips of the current best policy that carry the most of V(s0):
+        contribution = P(reach the tip under the policy) * its value (= h0, an upper bound). For each:
+        time left, running actions, facts changed since s0, h per pattern (which pattern is the binding
+        min), and -- with expand -- its value after one expansion (how far h drops one step later).
+        Expanding them is what ILAO* would do next anyway."""
+        order, seen, stack = [], set(), [(self.root.key, False)]
+        while stack:                                     # post-order over the policy (a DAG here)
+            key, ready = stack.pop()
+            if ready:
+                order.append(key)
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            n = self.nodes[key]
+            stack.append((key, True))
+            if n.options and n.best is not None and not n.goal:
+                stack.extend((c, False) for _p, c in n.options[n.best][1] if c not in seen)
+        reach: Dict[tuple, float] = defaultdict(float)
+        reach[self.root.key] = 1.0
+        tips = []
+        for key in reversed(order):                      # parents before children
+            n = self.nodes[key]
+            if n.goal or n.dead:
+                continue
+            if n.options is None or n.best is None:
+                tips.append(key)
+                continue
+            for p, c in n.options[n.best][1]:
+                reach[c] += reach[key] * p
+        upper = max(self.root.value, 1e-12)
+        ranked = sorted(tips, key=lambda t: reach[t] * self.nodes[t].value, reverse=True)[:k]
+        init = frozenset(self.mdp.initial_state().predicates)
+        out = []
+        for key in ranked:
+            n = self.nodes[key]
+            facts = n.key[0]
+            row = dict(share_of_upper=round(reach[key] * n.value / upper, 4), reach=round(reach[key], 6),
+                       value=round(n.value, 6), h0=round(n.h0, 6), depth=n.depth,
+                       time_left=round(self.diag.deadline - n.current_time, 2) if self.diag else None,
+                       running=sorted(str(f) for f in facts if "inExecution" in str(f)),
+                       gained=sorted(str(f) for f in facts - init if "inExecution" not in str(f)),
+                       lost=sorted(str(f) for f in init - facts if "inExecution" not in str(f)))
+            pdb = getattr(self.heuristic, "pdb", None)
+            if pdb is not None and n.stn is not None:
+                self.heuristic(n)                        # recompute only to read the per-pattern values
+                values = list(getattr(pdb, "last_values", []) or [])
+                groups = getattr(pdb, "groups", None) or [list(range(len(values)))]
+                pats = []
+                for gi, members in enumerate(groups):
+                    group_vals = [values[i] for i in members if i < len(values)]
+                    low = min(group_vals) if group_vals else None
+                    for i in members:
+                        if i < len(values):
+                            pat = pdb.patterns[i]
+                            pats.append(dict(group=gi, goals=pat.get("goals"), facts=pat.get("facts"),
+                                             value=round(values[i], 6), binding=values[i] == low))
+                row["patterns"] = pats
+            if expand and n.options is None and not n.goal:
+                self._expand(n)
+                self._backup(n)
+                row["after_expand"] = round(n.value, 6)
+                row["after_expand_dead"] = n.dead
+            out.append(row)
+        return out
 
     def diagnostics(self, walk: bool = True) -> Dict[str, object]:
         """The diagnostics report (needs diagnostics=True). walk=False skips the passes over the

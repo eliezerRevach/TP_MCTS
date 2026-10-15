@@ -82,6 +82,9 @@ def main():
                          " tightness h0 vs V* on finished runs, lower bound on V(s0) over time")
     ap.add_argument("--canonical_starts", action="store_true",
                     help="two independent starts in a row only in name order (fewer orderings; check V* on/off)")
+    ap.add_argument("--diagnostics_tips", type=int, default=0,
+                    help="per sample, the k tips carrying most of V(s0): facts, time left, h per pattern, value"
+                         " after one expansion (0 = off)")
     ap.add_argument("--diagnostics_interval", type=float, default=600.0,
                     help="seconds between lower-bound samples (0 = only at the end)")
     args = ap.parse_args()
@@ -156,7 +159,8 @@ def main():
         budget = min(budget, left) if budget else left
     lao = TPMDPLAO(mdp, heuristic=h, max_nodes=args.max_nodes, time_budget=budget,
                    on_pass=progress if args.progress else None, diagnostics=args.diagnostics,
-                   diagnostics_interval=args.diagnostics_interval, canonical_starts=args.canonical_starts)
+                   diagnostics_interval=args.diagnostics_interval, canonical_starts=args.canonical_starts,
+                   diagnostics_tips=args.diagnostics_tips)
     run["lao"] = lao
 
     if args.progress:                              # counts every 30 s, also inside one long pass

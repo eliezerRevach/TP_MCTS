@@ -638,6 +638,7 @@ class WindowsILAOPDBHeuristic:
                 memo[mkey] = (value, kind)
             values.append(value)
         self.query_seconds_total += time.perf_counter() - started
+        self.last_values = values                       # per pattern, for diagnostics (read-only)
         if not values:
             return 1.0
         if not self.grouping:
