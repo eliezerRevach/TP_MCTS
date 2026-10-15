@@ -221,7 +221,7 @@ def compact_stn(stn, bounds):
 
 class Node:
     __slots__ = ("key", "state", "stn", "prev", "value", "best", "options", "goal", "dead",
-                 "current_time")
+                 "current_time", "h0", "depth")
 
     def __init__(self, key, state, stn, prev):
         self.key = key
@@ -234,6 +234,69 @@ class Node:
         self.goal = False
         self.dead = False
         self.current_time = 0.0
+        self.h0 = 0.0                  # the heuristic's value when the node was created
+        self.depth = 0                 # fewest steps from the root seen so far
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics (opt-in): what the search does, per depth
+# ---------------------------------------------------------------------------
+
+class LAODiagnostics:
+    """Counters filled while ILAO* runs (one dict per depth, nothing per node beyond depth and h0),
+    plus a lower bound on V(s0) every ``interval`` seconds. Read with ``TPMDPLAO.diagnostics()``.
+
+    per expansion: legal actions, how many the STN rejects, options kept, outcomes per option,
+    children that are new vs merged into an existing node, zero-time (instantaneous) options,
+    folded self-loops, and the heuristic's own ranking of the options: Q_h(a) = sum p * h(child),
+    the spread best - worst and how many options are within 1e-3 / 1e-2 of the best (ties: an
+    upper bound can never cut those)."""
+
+    TIES = (1e-3, 1e-2)
+
+    def __init__(self, deadline: float, interval: float = 600.0):
+        self.deadline = float(deadline)
+        self.interval = float(interval)
+        self.by_depth: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self.progress: List[Dict[str, float]] = []
+        self.started = time.perf_counter()
+        self._last = self.started
+
+    def expansion(self, node, legal: int, rejected: int, option_rows, q_values) -> None:
+        d = self.by_depth[node.depth]
+        d["expanded"] += 1
+        d["legal"] += legal
+        d["stn_rejected"] += rejected
+        d["h0_sum"] += node.h0
+        d["time_left_sum"] += self.deadline - node.current_time
+        if not q_values:
+            d["dead_ends"] += 1
+            return
+        for outcomes, new, merged, zero_time, folded in option_rows:
+            d["options"] += 1
+            d["outcomes"] += outcomes
+            d["new_children"] += new
+            d["merged_children"] += merged
+            d["zero_time_options"] += zero_time
+            d["folded_loops"] += folded
+        best = max(q_values)
+        spread = best - min(q_values)
+        d["spread_sum"] += spread
+        d["spread_max"] = max(d["spread_max"], spread)
+        for eps in self.TIES:
+            d[f"ties_{eps:g}"] += sum(1 for v in q_values if best - v <= eps) - 1
+        if len(q_values) == 1:
+            d["single_option"] += 1
+
+    def due(self) -> bool:
+        return self.interval > 0 and time.perf_counter() - self._last >= self.interval
+
+    def record(self, solver: "TPMDPLAO") -> None:
+        self._last = time.perf_counter()
+        self.progress.append(dict(seconds=round(self._last - self.started, 1),
+                                  generated=solver.stats["generated"], expanded=solver.stats["expanded"],
+                                  lower_bound=round(solver.policy_lower_bound(), 6),
+                                  upper_bound=round(solver.root.value, 6)))
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +309,7 @@ class TPMDPLAO:
 
     def __init__(self, mdp, heuristic: Optional[Callable] = None, epsilon: float = 1e-9,
                  max_nodes: int = 0, time_budget: float = 0.0, on_pass: Optional[Callable] = None,
-                 compact: bool = True):
+                 compact: bool = True, diagnostics: bool = False, diagnostics_interval: float = 600.0):
         from unified_planning.engines.utils import create_init_stn
 
         self.mdp = mdp
@@ -257,6 +320,8 @@ class TPMDPLAO:
         self.on_pass = on_pass          # called after every pass with (solver, seconds so far)
         self.compact = compact          # store each node's STN reduced to its kept points
         self.nodes: Dict[tuple, Node] = {}
+        self.diag = LAODiagnostics(float(mdp.deadline()), diagnostics_interval) if diagnostics else None
+        self._deadline_at = None        # perf_counter() time at which solve() stops (time_budget)
         self.stats = dict(generated=0, expanded=0, passes=0, backups=0, h_calls=0, h_seconds=0.0,
                           key_seconds=0.0, expand_seconds=0.0, inconsistent=0, folded=0, dropped_noop=0,
                           cycles=0, seconds=0.0, complete=False)
@@ -264,17 +329,20 @@ class TPMDPLAO:
         self.root = self._node(mdp.initial_state(), stn, None)
 
     # -- nodes ---------------------------------------------------------------
-    def _node(self, state, stn, prev) -> Node:
+    def _node(self, state, stn, prev, depth: int = 0) -> Node:
         t0 = time.perf_counter()
         signature, _points, bounds = stn_minimal_network(stn, prev)
         key = (frozenset(state.predicates), signature)
         self.stats["key_seconds"] += time.perf_counter() - t0
         node = self.nodes.get(key)
         if node is not None:
+            if depth < node.depth:
+                node.depth = depth
             return node
         if self.compact and prev is not None:
             stn = compact_stn(stn, bounds)
         node = Node(key, state, stn, prev)
+        node.depth = depth
         node.current_time = float(stn.get_current_end_time())
         self.nodes[key] = node
         self.stats["generated"] += 1
@@ -287,6 +355,7 @@ class TPMDPLAO:
             node.value = float(self.heuristic(node))
             self.stats["h_seconds"] += time.perf_counter() - t1
             self.stats["h_calls"] += 1
+        node.h0 = node.value
         return node
 
     def _expand(self, node: Node) -> None:
@@ -294,19 +363,29 @@ class TPMDPLAO:
 
         t0 = time.perf_counter()
         options = []
+        legal = rejected = 0
+        rows = []                                        # per option, for the diagnostics
         for action in self.mdp.legal_actions(node.state):
+            legal += 1
             child_stn = node.stn.clone()
             new_prev = update_stn(child_stn, action, node.prev)
             if not child_stn.is_consistent():
                 self.stats["inconsistent"] += 1
+                rejected += 1
                 continue
             folded: Dict[tuple, float] = {}
             children = {}
+            new = merged = 0
             for next_state, p in self.mdp.transition_function(node.state, action):
                 p = float(p)
                 if p <= _EPS:
                     continue
-                child = self._node(next_state, child_stn, new_prev)
+                before = self.stats["generated"]
+                child = self._node(next_state, child_stn, new_prev, node.depth + 1)
+                if self.stats["generated"] > before:
+                    new += 1
+                else:
+                    merged += 1
                 folded[child.key] = folded.get(child.key, 0.0) + p
                 children[child.key] = child
             q = folded.pop(node.key, 0.0)                # zero-time outcome back to this node
@@ -317,7 +396,12 @@ class TPMDPLAO:
                 self.stats["folded"] += 1
                 folded = {k: p / (1 - q) for k, p in folded.items()}
             options.append((action.name, tuple((p, k) for k, p in folded.items())))
+            rows.append((len(folded), new, merged, int(type(action).__name__ == "InstantaneousAction"),
+                         int(q > 0)))
         node.options = options
+        if self.diag is not None:
+            q_values = [sum(p * self.nodes[k].value for p, k in branches) for _name, branches in options]
+            self.diag.expansion(node, legal, rejected, rows, q_values)
         node.stn = None                                  # expanded: the children hold their own STNs
         if not options:
             node.dead, node.value = True, 0.0
@@ -342,6 +426,7 @@ class TPMDPLAO:
     # -- search --------------------------------------------------------------
     def solve(self) -> float:
         started = time.perf_counter()
+        self._deadline_at = started + self.time_budget if self.time_budget else None
         while True:
             self.stats["passes"] += 1
             self._policy_changed = False
@@ -350,12 +435,14 @@ class TPMDPLAO:
                 self.on_pass(self, time.perf_counter() - started)
             if self.max_nodes and len(self.nodes) >= self.max_nodes:
                 break
-            if self.time_budget and time.perf_counter() - started > self.time_budget:
+            if self._deadline_at is not None and time.perf_counter() >= self._deadline_at:
                 break
             if expanded == 0 and residual < self.epsilon and not self._policy_changed:
                 self.stats["complete"] = True
                 break
         self.stats["seconds"] = time.perf_counter() - started
+        if self.diag is not None:
+            self.diag.record(self)                       # the final lower / upper bound
         return self.root.value
 
     def _pass(self) -> Tuple[int, float]:
@@ -379,8 +466,12 @@ class TPMDPLAO:
                 done.add(node.key)
                 continue
             if node.options is None:
+                if self._deadline_at is not None and time.perf_counter() >= self._deadline_at:
+                    break                                # out of time: values stay upper bounds
                 self._expand(node)
                 expanded += 1
+                if self.diag is not None and self.diag.due():
+                    self.diag.record(self)
                 if node.dead:
                     done.add(node.key)
                     continue
@@ -439,6 +530,108 @@ class TPMDPLAO:
                 frontier += [self.nodes[k] for _p, k in n.options[n.best][1]]
         counts["total"] = len(seen)
         return counts
+
+    def policy_lower_bound(self) -> float:
+        """V of the current best partial policy with every unsolved tip counted as 0: a policy that
+        can actually be followed, so a lower bound on V*(s0). Cycles count as 0 (conservative)."""
+        value: Dict[tuple, float] = {}
+        on_path = set()
+        stack = [(self.root.key, False)]
+        while stack:
+            k, ready = stack.pop()
+            if k in value:
+                continue
+            n = self.nodes[k]
+            if n.goal:
+                value[k] = 1.0
+                continue
+            if n.dead or n.options is None or n.best is None:
+                value[k] = 0.0
+                continue
+            branches = n.options[n.best][1]
+            if ready:
+                on_path.discard(k)
+                value[k] = sum(p * value.get(c, 0.0) for p, c in branches)
+                continue
+            on_path.add(k)
+            stack.append((k, True))
+            stack.extend((c, False) for _p, c in branches if c not in value and c not in on_path)
+        return value[self.root.key]
+
+    def diagnostics(self, walk: bool = True) -> Dict[str, object]:
+        """The diagnostics report (needs diagnostics=True). walk=False skips the passes over the
+        graph (h-pruning, tightness): only the counters and the lower-bound history."""
+        if self.diag is None:
+            return {}
+        rows = []
+        pruned_by_depth: Dict[int, List[int]] = defaultdict(lambda: [0, 0])
+        if walk:
+            for n in self.nodes.values():
+                if not n.options:
+                    continue
+                for i, (_name, branches) in enumerate(n.options):
+                    explored = i == n.best or any(self.nodes[k].options is not None for _p, k in branches)
+                    pruned_by_depth[n.depth][0] += 1
+                    pruned_by_depth[n.depth][1] += 0 if explored else 1
+        for depth in sorted(self.diag.by_depth):
+            d = self.diag.by_depth[depth]
+            e = max(1.0, d["expanded"])
+            opts = max(1.0, d["options"])
+            kids = max(1.0, d["new_children"] + d["merged_children"])
+            row = dict(depth=depth, expanded=int(d["expanded"]),
+                       legal_per_node=round(d["legal"] / e, 2),
+                       stn_rejected_pct=round(100 * d["stn_rejected"] / max(1.0, d["legal"]), 1),
+                       options_per_node=round(d["options"] / e, 2),
+                       outcomes_per_option=round(d["outcomes"] / opts, 2),
+                       merged_pct=round(100 * d["merged_children"] / kids, 1),
+                       q_spread_mean=round(d["spread_sum"] / e, 5), q_spread_max=round(d["spread_max"], 5),
+                       h0_mean=round(d["h0_sum"] / e, 5), time_left_mean=round(d["time_left_sum"] / e, 2),
+                       zero_time_options=int(d["zero_time_options"]), folded_loops=int(d["folded_loops"]),
+                       dead_ends=int(d["dead_ends"]))
+            row["ties_within_0.001"] = round(d["ties_0.001"] / e, 2)    # per node, besides the best
+            row["ties_within_0.01"] = round(d["ties_0.01"] / e, 2)
+            if walk:
+                total, pruned = pruned_by_depth.get(depth, [0, 0])
+                row["h_pruned_pct"] = round(100 * pruned / max(1, total), 1)
+            rows.append(row)
+        out: Dict[str, object] = dict(by_depth=rows, progress=list(self.diag.progress),
+                                      cycles=self.stats["cycles"], folded=self.stats["folded"],
+                                      dropped_noops=self.stats["dropped_noop"])
+        if walk:
+            total = sum(v[0] for v in pruned_by_depth.values())
+            pruned = sum(v[1] for v in pruned_by_depth.values())
+            out["h_pruned_options_pct"] = round(100 * pruned / max(1, total), 2)
+            out["tightness"] = self._tightness() if self.stats["complete"] else (
+                "run not finished: V* unknown below the root -- see progress (lower / upper bound)")
+        return out
+
+    def _tightness(self) -> Dict[str, object]:
+        """On a finished run every node of the optimal policy has V = V*: compare it with h0 there.
+        h0 < V* would be an admissibility violation (h must be an upper bound)."""
+        seen, frontier = set(), [self.root]
+        by_depth: Dict[int, List[float]] = defaultdict(list)
+        violations = []
+        while frontier:
+            n = frontier.pop()
+            if n.key in seen:
+                continue
+            seen.add(n.key)
+            if n.goal or n.dead or not n.options or n.best is None:
+                continue
+            gap = n.h0 - n.value
+            by_depth[n.depth].append(gap)
+            if gap < -1e-9:
+                violations.append(dict(depth=n.depth, h0=n.h0, v_star=n.value))
+            frontier.extend(self.nodes[k] for _p, k in n.options[n.best][1])
+        rows = []
+        for depth in sorted(by_depth):
+            g = by_depth[depth]
+            rows.append(dict(depth=depth, policy_nodes=len(g), gap_mean=round(sum(g) / len(g), 6),
+                             gap_max=round(max(g), 6), exact_pct=round(100 * sum(1 for x in g if abs(x) < 1e-6) / len(g), 1)))
+        allg = [x for g in by_depth.values() for x in g]
+        return dict(policy_decision_nodes=len(allg), gap_mean=round(sum(allg) / max(1, len(allg)), 6),
+                    gap_max=round(max(allg) if allg else 0.0, 6), admissibility_violations=violations[:20],
+                    violations=len(violations), by_depth=rows)
 
     def policy_size(self) -> int:
         return self.policy_counts()["total"]

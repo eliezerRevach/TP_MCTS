@@ -77,6 +77,11 @@ def main():
     ap.add_argument("--validate_exact", action="store_true",
                     help="after solving, execute the policy over EVERY outcome (exact probability)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--diagnostics", action="store_true",
+                    help="per-depth report: STN-rejected actions, ties, Q spread (gradient), h-pruned options,"
+                         " tightness h0 vs V* on finished runs, lower bound on V(s0) over time")
+    ap.add_argument("--diagnostics_interval", type=float, default=600.0,
+                    help="seconds between lower-bound samples (0 = only at the end)")
     args = ap.parse_args()
 
     for k, v in PDB_DEFAULTS.items():
@@ -111,7 +116,10 @@ def main():
         os._exit(3)
 
     if args.reject_after > 0:
-        timer = threading.Timer(args.reject_after, reject)
+        # the search stops itself at reject_after and reports in full; this timer is only a backstop
+        # (PDB build stuck past the limit, or the final report taking far too long)
+        grace = 900.0 if args.diagnostics else 60.0
+        timer = threading.Timer(args.reject_after + grace, reject)
         timer.daemon = True
         timer.start()
 
@@ -140,8 +148,13 @@ def main():
               f"  V(s0)={solver.root.value:.6f}", flush=True)
 
     run["phase"] = "search"
-    lao = TPMDPLAO(mdp, heuristic=h, max_nodes=args.max_nodes, time_budget=args.time_budget,
-                   on_pass=progress if args.progress else None)
+    budget = args.time_budget
+    if args.reject_after > 0:
+        left = max(1.0, args.reject_after - (time.perf_counter() - run["start"]))
+        budget = min(budget, left) if budget else left
+    lao = TPMDPLAO(mdp, heuristic=h, max_nodes=args.max_nodes, time_budget=budget,
+                   on_pass=progress if args.progress else None, diagnostics=args.diagnostics,
+                   diagnostics_interval=args.diagnostics_interval)
     run["lao"] = lao
 
     if args.progress:                              # counts every 30 s, also inside one long pass
@@ -172,6 +185,7 @@ def main():
     except MemoryError:
         # Over the memory limit: report what was reached, the same way as a run over the time limit.
         counts = (lao.stats["generated"], lao.stats["expanded"], lao.stats["passes"], lao.root.value)
+        diag = lao.diagnostics(walk=False) if args.diagnostics else None   # counters only: cheap
         lao.nodes.clear()
         run["lao"] = None
         import gc
@@ -181,14 +195,17 @@ def main():
                "seconds": round(time.perf_counter() - run["start"], 1), "V(s0) so far (upper bound)": counts[3],
                "pdb_build_seconds": round(t_pdb, 2), "pdb": pdb_report,
                "nodes_generated": counts[0], "nodes_expanded": counts[1], "passes": counts[2]}
-        print(json.dumps(out, indent=1), flush=True)
+        if diag is not None:
+            out["diagnostics"] = diag
+        print(json.dumps(out, indent=1, default=str), flush=True)
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
-                json.dump(out, fh, indent=1)
+                json.dump(out, fh, indent=1, default=str)
         os._exit(4)
     s = lao.stats
+    out_of_time = not s["complete"] and lao._deadline_at is not None and time.perf_counter() >= lao._deadline_at
     report = {
-        "rejected": False,
+        "rejected": out_of_time,
         "domain": args.domain, "object_amount": args.object_amount, "garbage_amount": args.garbage_amount,
         "deadline": args.deadline, "heuristic": args.heuristic,
         "V(s0)": round(value, 6), "h(s0)": round(h_root, 6), "optimal": s["complete"],
@@ -203,7 +220,13 @@ def main():
         "dropped_noops": s["dropped_noop"], "cycles": s["cycles"],
         "pdb": pdb_report,
     }
-    if args.validate_runs or args.validate_exact:
+    if out_of_time:
+        report["reason"] = f"not done after {args.reject_after:.0f} s"
+        report["V(s0) so far (upper bound)"] = report.pop("V(s0)")
+    if args.diagnostics:
+        run["phase"] = "diagnostics"
+        report["diagnostics"] = lao.diagnostics(walk=True)
+    if (args.validate_runs or args.validate_exact) and s["complete"]:
         run["phase"] = "policy execution"
         execution = PolicyExecution(lao)
         t2 = time.perf_counter()

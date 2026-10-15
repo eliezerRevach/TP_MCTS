@@ -120,3 +120,30 @@ def test_different_histories_with_the_same_future_merge():
     ab = step(step(lao.root, "start_one"), "start_two")
     ba = step(step(lao.root, "start_two"), "start_one")
     assert ab.key[0] == ba.key[0] and ab is not ba
+
+
+def test_diagnostics_on_a_finished_run(pdb_env):
+    """Counters add up, the PDB never under-estimates V* on the optimal policy (admissible), and the
+    lower bound meets V(s0) once the run is optimal."""
+    from comdp_plus_no_deadline.engines.lao_tp_mdp import TPMDPLAO, windows_pdb_heuristic
+
+    mdp = _mdp("stuck_car", 10, object_amount=1)
+    lao = TPMDPLAO(mdp, heuristic=windows_pdb_heuristic(mdp), diagnostics=True)
+    v = lao.solve()
+    report = lao.diagnostics()
+    assert sum(r["expanded"] for r in report["by_depth"]) == lao.stats["expanded"]
+    assert report["tightness"]["violations"] == 0
+    assert report["tightness"]["gap_mean"] >= 0
+    assert report["progress"][-1]["lower_bound"] == pytest.approx(v, abs=1e-6)
+    assert 0 <= report["h_pruned_options_pct"] <= 100
+
+
+def test_time_budget_stops_inside_a_pass():
+    """The limit is checked at every expansion: a run cut short stays an upper bound above a lower bound."""
+    from comdp_plus_no_deadline.engines.lao_tp_mdp import TPMDPLAO
+
+    mdp = _mdp("prob_conc", 10, garbage_amount=2)
+    lao = TPMDPLAO(mdp, heuristic=None, time_budget=1e-6, diagnostics=True)
+    upper = lao.solve()
+    assert not lao.stats["complete"]
+    assert lao.policy_lower_bound() <= upper + 1e-12
