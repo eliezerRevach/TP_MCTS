@@ -121,7 +121,7 @@ import pickle
 import time
 from fractions import Fraction
 from collections import Counter
-from typing import Dict, List, Optional
+from typing import Dict, FrozenSet, List, Optional
 
 from comdp_plus_no_deadline.engines.cegar_pattern import cegar_pattern
 from comdp_plus_no_deadline.engines.hand_patterns import HAND_PATTERNS, hand_patterns
@@ -601,11 +601,22 @@ class WindowsILAOPDBHeuristic:
         facts = frozenset(preds) if preds is not None else frozenset(state)
         r = max(0, int(fixed_depth))
         values = []
-        for pattern in self.patterns:
+        memo = self.__dict__.setdefault("_lookup_memo", {})
+        if len(memo) > 2_000_000:                       # a bound on memory, not a correctness matter
+            memo.clear()
+        exec_facts = self._exec_facts(facts)
+        for index, pattern in enumerate(self.patterns):
             solver = pattern["solver"]
             running = [(key, None if running_remaining is None else running_remaining.get(key))
-                       for key in self._running_keys(facts, solver.ops)]
+                       for key in self._running_keys_cached(exec_facts, index, solver.ops)]
             local = pattern["model"].project(facts) if pattern["facts"] is not None else facts
+            # A table lookup (and a miss under MISS=one) depends only on these inputs: memoize it.
+            mkey = (index, local, r, tuple(running))
+            hit = memo.get(mkey)
+            if hit is not None:
+                self.counts[hit[1]] += 1
+                values.append(hit[0])
+                continue
             value = None
             if pattern["table"] is not None:
                 value, kind = pattern["table"].lookup(local, r, running)
@@ -623,6 +634,8 @@ class WindowsILAOPDBHeuristic:
                                          max_expansions=self.query_expansions)
                     kind = "lazy_optimal" if solver.complete else "lazy_cut"
             self.counts[kind] += 1
+            if kind.startswith("table_") or kind == "miss_one":
+                memo[mkey] = (value, kind)
             values.append(value)
         self.query_seconds_total += time.perf_counter() - started
         if not values:
@@ -657,6 +670,26 @@ class WindowsILAOPDBHeuristic:
     def print_report(self) -> None:
         if self._built:
             print(f"[windows_ilao_pdb] {self.report()}", flush=True)
+
+    def _exec_facts(self, facts) -> FrozenSet:
+        """The running flags (inExecution facts) of a state; str() of each fact is cached."""
+        is_exec = self.__dict__.setdefault("_is_exec_fact", {})
+        out = []
+        for f in facts:
+            flag = is_exec.get(f)
+            if flag is None:
+                flag = is_exec[f] = "inExecution" in str(f)
+            if flag:
+                out.append(f)
+        return frozenset(out)
+
+    def _running_keys_cached(self, exec_facts, index, ops) -> List[str]:
+        cache = self.__dict__.setdefault("_running_cache", {})
+        key = (exec_facts, index)
+        hit = cache.get(key)
+        if hit is None:
+            hit = cache[key] = self._running_keys(exec_facts, ops)
+        return hit
 
     @staticmethod
     def _running_keys(facts, ops) -> List[str]:

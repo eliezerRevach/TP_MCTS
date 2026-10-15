@@ -1,0 +1,220 @@
+"""Solve TP-MCTS's MDP offline with ILAO* (comdp_plus_no_deadline/engines/lao_tp_mdp.py) and report
+the optimal value from the initial state, runtime and node counts.
+
+    python scripts/run_lao_tp_mdp.py --domain prob_conc --garbage_amount 7 --deadline 10
+    python scripts/run_lao_tp_mdp.py --domain nasa_rover --object_amount 2 --deadline 25
+    python scripts/run_lao_tp_mdp.py --domain stuck_car --object_amount 1 --deadline 10 --heuristic none
+
+--heuristic pdb  : the windows PDB, with the TP_MCTS_WILAO_* settings from the environment
+                   (defaults below = the experiment settings: pairs, min, grouping, blur 3)
+--heuristic none : h = 1 everywhere (blind control: same optimum, shows what the PDB saves)
+--reject_after   : a run not done after this many seconds in total (MDP + PDB build + search) is
+                   rejected and reported as such (default 600 = 10 min); the PDB has no budget of its own
+"""
+
+import argparse
+import json
+import os
+import sys
+import threading
+import time
+
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+PDB_DEFAULTS = dict(
+    TP_MCTS_WILAO_OFFLINE_SECONDS="0", TP_MCTS_WILAO_OFFLINE_EXTEND="1", TP_MCTS_WILAO_PATTERN_GOALS="1",
+    TP_MCTS_WILAO_PATTERN_FACTS="10", TP_MCTS_WILAO_MISS="one", TP_MCTS_WILAO_AGG="min",
+    TP_MCTS_WILAO_GROUPING="1", TP_MCTS_WILAO_PATTERN_GROWTH="pairs", TP_MCTS_WILAO_BLUR="3",
+    TP_MCTS_WILAO_EXACT_STATICS="1", TP_MCTS_WILAO_NO_STN_PASS="0", TP_MCTS_WILAO_REPORT="0",
+)
+
+
+def build_mdp(domain, object_amount, garbage_amount, deadline):
+    """The regular MDP exactly as unified_planning/run_domain.py run_regular builds it."""
+    import unified_planning as up
+    import unified_planning.domains  # noqa: F401
+    from unified_planning.engines.convert_problem import Convert_problem
+    from unified_planning.engines.mdp import MDP
+
+    # the table of unified_planning/run_domain.py (that module runs an experiment on import)
+    domains = dict(machine_shop=up.domains.Machine_Shop, nasa_rover=up.domains.Nasa_Rover,
+                   stuck_car_1o=up.domains.Stuck_Car_1o, stuck_car=up.domains.Stuck_Car, conc=up.domains.Conc,
+                   full_conc=up.domains.Full_Conc, prob_conc=up.domains.Prob_Conc,
+                   best_no_parallel=up.domains.Best_No_Parallel, simple=up.domains.Simple,
+                   hosting=up.domains.Hosting, prob_match_cellar=up.domains.Prob_MatchCellar,
+                   robot_lab=up.domains.Robot_Lab)
+    model = domains[domain](kind="regular", deadline=deadline, object_amount=object_amount,
+                            garbage_amount=garbage_amount)
+    if domain == "nasa_rover":
+        grounder = up.engines.compilers.Grounder(model.grounding_map())
+    else:
+        grounder = up.engines.compilers.Grounder()
+    ground = grounder._compile(model.problem).problem
+    return MDP(Convert_problem(ground)._converted_problem, discount_factor=1.0, reward_mode="terminal",
+               step_penalty=0.0)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--domain", required=True)
+    ap.add_argument("--object_amount", type=int, default=1)
+    ap.add_argument("--garbage_amount", type=int, default=0)
+    ap.add_argument("--deadline", type=int, required=True)
+    ap.add_argument("--heuristic", choices=("pdb", "none"), default="pdb")
+    ap.add_argument("--max_nodes", type=int, default=0, help="stop after this many nodes (0 = no limit)")
+    ap.add_argument("--time_budget", type=float, default=0.0, help="seconds (0 = no limit)")
+    ap.add_argument("--json", default="", help="also write the report to this file")
+    ap.add_argument("--progress", action="store_true", help="print one line per ILAO* pass")
+    ap.add_argument("--exhaustive", action="store_true",
+                    help="no search: expand every reachable node (the whole MDP) and report its size")
+    ap.add_argument("--reject_after", type=float, default=600.0,
+                    help="reject the run if it is not done after this many seconds in total (0 = never)")
+    ap.add_argument("--validate_runs", type=int, default=0,
+                    help="after solving, execute the policy this many times in CoMDP+ (mdp.step, times fixed"
+                         " at execution as TP-MCTS does) and check every step")
+    ap.add_argument("--validate_exact", action="store_true",
+                    help="after solving, execute the policy over EVERY outcome (exact probability)")
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args()
+
+    for k, v in PDB_DEFAULTS.items():
+        os.environ.setdefault(k, v)
+    sys.argv = [sys.argv[0]]                       # unified_planning parses sys.argv on import
+    sys.path.insert(0, REPO)
+    os.chdir(REPO)
+
+    from comdp_plus_no_deadline.engines.lao_tp_mdp import PolicyExecution, TPMDPLAO, windows_pdb_heuristic
+
+    run = {"phase": "mdp", "lao": None, "start": time.perf_counter()}
+
+    def reject():
+        """Over the limit: report what was reached and stop (no partial answer is passed off as one)."""
+        lao = run["lao"]
+        out = {"domain": args.domain, "object_amount": args.object_amount, "garbage_amount": args.garbage_amount,
+               "deadline": args.deadline, "heuristic": args.heuristic, "rejected": True,
+               "reason": f"not done after {args.reject_after:.0f} s", "phase": run["phase"],
+               "seconds": round(time.perf_counter() - run["start"], 1)}
+        if run.get("h_root") is not None:
+            out["h(s0)"] = run["h_root"]
+        if run.get("pdb") is not None:
+            out.update({"pdb_build_seconds": run.get("pdb_seconds"), "pdb": run["pdb"]})
+        if lao is not None:
+            out.update({"V(s0) so far (upper bound)": round(lao.root.value, 6),
+                        "nodes_generated": lao.stats["generated"], "nodes_expanded": lao.stats["expanded"],
+                        "passes": lao.stats["passes"]})
+        print(json.dumps(out, indent=1, default=str), flush=True)
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(out, fh, indent=1, default=str)
+        os._exit(3)
+
+    if args.reject_after > 0:
+        timer = threading.Timer(args.reject_after, reject)
+        timer.daemon = True
+        timer.start()
+
+    t0 = time.perf_counter()
+    mdp = build_mdp(args.domain, args.object_amount, args.garbage_amount, args.deadline)
+    t_mdp = time.perf_counter() - t0
+
+    h, t_pdb, pdb_report = None, 0.0, None
+    if args.heuristic == "pdb":
+        h = windows_pdb_heuristic(mdp)
+        run["phase"] = "pdb build"
+        t1 = time.perf_counter()
+        if args.progress:
+            print(f"[mdp built] {t_mdp:.1f}s  actions={len(mdp.problem.actions)}  -- building the PDB ...", flush=True)
+        h.pdb.build()
+        t_pdb = time.perf_counter() - t1
+        if args.progress:
+            print(f"[pdb built] {t_pdb:.1f}s  table_states={h.pdb.offline_report.get('table_states')}", flush=True)
+        rep = h.pdb.offline_report
+        pdb_report = {k: rep.get(k) for k in ("patterns", "pattern_facts", "growth", "table_states", "values")}
+        run["pdb_seconds"], run["pdb"] = round(t_pdb, 2), pdb_report
+
+    def progress(solver, seconds):
+        st = solver.stats
+        print(f"[pass {st['passes']}] {seconds:8.1f}s  generated={st['generated']}  expanded={st['expanded']}"
+              f"  V(s0)={solver.root.value:.6f}", flush=True)
+
+    run["phase"] = "search"
+    lao = TPMDPLAO(mdp, heuristic=h, max_nodes=args.max_nodes, time_budget=args.time_budget,
+                   on_pass=progress if args.progress else None)
+    run["lao"] = lao
+
+    if args.progress:                              # counts every 30 s, also inside one long pass
+        def ticker():
+            while True:
+                time.sleep(30)
+                st = lao.stats
+                print(f"[{time.perf_counter() - run['start']:7.0f}s] generated={st['generated']}"
+                      f"  expanded={st['expanded']}  passes={st['passes']}", flush=True)
+        threading.Thread(target=ticker, daemon=True).start()
+    h_root = lao.root.value
+    run["h_root"] = round(h_root, 6)
+    if args.exhaustive:
+        lao.expand_all()
+        report = {"rejected": False, "domain": args.domain, "object_amount": args.object_amount,
+                  "garbage_amount": args.garbage_amount, "deadline": args.deadline, "mode": "exhaustive",
+                  "reachable_nodes": len(lao.nodes), "expanded": lao.stats["expanded"],
+                  "goal_nodes": sum(1 for n in lao.nodes.values() if n.goal),
+                  "dead_ends": sum(1 for n in lao.nodes.values() if n.dead),
+                  "seconds": round(lao.stats["seconds"], 2)}
+        print(json.dumps(report, indent=1), flush=True)
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(report, fh, indent=1)
+        return
+    try:
+        value = lao.solve()
+    except MemoryError:
+        # Over the memory limit: report what was reached, the same way as a run over the time limit.
+        counts = (lao.stats["generated"], lao.stats["expanded"], lao.stats["passes"], lao.root.value)
+        lao.nodes.clear()
+        run["lao"] = None
+        import gc
+        gc.collect()
+        out = {"domain": args.domain, "object_amount": args.object_amount, "deadline": args.deadline,
+               "heuristic": args.heuristic, "rejected": True, "reason": "out of memory", "phase": "search",
+               "seconds": round(time.perf_counter() - run["start"], 1), "V(s0) so far (upper bound)": counts[3],
+               "pdb_build_seconds": round(t_pdb, 2), "pdb": pdb_report,
+               "nodes_generated": counts[0], "nodes_expanded": counts[1], "passes": counts[2]}
+        print(json.dumps(out, indent=1), flush=True)
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(out, fh, indent=1)
+        os._exit(4)
+    s = lao.stats
+    report = {
+        "rejected": False,
+        "domain": args.domain, "object_amount": args.object_amount, "garbage_amount": args.garbage_amount,
+        "deadline": args.deadline, "heuristic": args.heuristic,
+        "V(s0)": round(value, 6), "h(s0)": round(h_root, 6), "optimal": s["complete"],
+        "first_action": lao.best_action(),
+        "nodes_generated": s["generated"], "nodes_expanded": s["expanded"], "policy": lao.policy_counts(),
+        "passes": s["passes"], "backups": s["backups"],
+        "search_seconds": round(s["seconds"], 2), "pdb_build_seconds": round(t_pdb, 2),
+        "mdp_build_seconds": round(t_mdp, 2),
+        "heuristic_calls": s["h_calls"], "heuristic_seconds": round(s["h_seconds"], 2),
+        "key_seconds": round(s["key_seconds"], 2), "expand_seconds": round(s["expand_seconds"], 2),
+        "inconsistent_actions": s["inconsistent"], "folded_zero_time_loops": s["folded"],
+        "dropped_noops": s["dropped_noop"], "cycles": s["cycles"],
+        "pdb": pdb_report,
+    }
+    if args.validate_runs or args.validate_exact:
+        run["phase"] = "policy execution"
+        execution = PolicyExecution(lao)
+        t2 = time.perf_counter()
+        if args.validate_exact:
+            report["execution_exact"] = execution.exact()
+        if args.validate_runs:
+            report["execution_sampled"] = execution.run(args.validate_runs, seed=args.seed)
+        report["execution_seconds"] = round(time.perf_counter() - t2, 2)
+    print(json.dumps(report, indent=1, default=str), flush=True)
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(report, fh, indent=1, default=str)
+
+
+if __name__ == "__main__":
+    main()

@@ -605,6 +605,47 @@ def returned_action_name(mcts: C_MCTS, final_selection: str) -> str:
     return action.name
 
 
+def print_depth_profile(root: Any) -> None:
+    """The tree's shape, one row per depth: how many state nodes, how the visits split, and how far
+    apart the values of the visited actions are. Wide and shallow with near-equal values = the
+    search spreads like BFS (the heuristic barely tells actions apart); narrow and deep with
+    concentrated visits = DFS-like (it commits to a line)."""
+    rows: dict[int, dict[str, Any]] = {}
+    frontier = [root]
+    while frontier:
+        snode = frontier.pop()
+        d = int(snode.depth) - int(root.depth)
+        row = rows.setdefault(d, {"states": 0, "actions": 0, "visited": 0, "visits": 0, "values": [],
+                                  "top_visits": 0})
+        row["states"] += 1
+        for anode in snode.children.values():
+            row["actions"] += 1
+            if anode.count > 0:
+                row["visited"] += 1
+                row["visits"] += int(anode.count)
+                row["values"].append(float(anode.value))
+                row["top_visits"] = max(row["top_visits"], int(anode.count))
+            frontier.extend(anode.children.values())
+    print()
+    print("depth profile (d = steps below the root)")
+    print(f"{'d':>3} {'states':>7} {'actions':>8} {'visited':>8} {'visits':>8} {'top%':>6}"
+          f" {'v_min':>8} {'v_mean':>8} {'v_max':>8} {'v_std':>8} {'distinct':>8}")
+    for d in sorted(rows):
+        r = rows[d]
+        vals = r["values"]
+        if vals:
+            mean = sum(vals) / len(vals)
+            std = (sum((v - mean) ** 2 for v in vals) / len(vals)) ** 0.5
+            stats = f"{min(vals):8.4f} {mean:8.4f} {max(vals):8.4f} {std:8.4f} {len({round(v, 4) for v in vals}):>8}"
+        else:
+            stats = f"{'-':>8} {'-':>8} {'-':>8} {'-':>8} {'-':>8}"
+        top = 100.0 * r["top_visits"] / r["visits"] if r["visits"] else 0.0
+        print(f"{d:>3} {r['states']:>7} {r['actions']:>8} {r['visited']:>8} {r['visits']:>8} {top:>5.0f}%"
+              f" {stats}")
+    print("top% = share of the depth's visits taken by its single most visited action;"
+          " distinct = different values (4 decimals) among the visited actions")
+
+
 def print_snapshot(
     mcts: C_MCTS,
     args: argparse.Namespace,
@@ -670,6 +711,9 @@ def print_snapshot(
             f"{row['subtree_states']:>6} {row['max_depth']:>5} "
             f"{row['terminal_prob']:>7.3f} {flag}"
         )
+
+    if root.count > 0:
+        print_depth_profile(root)
 
     best_row = next((row for row in root_rows(mcts, args) if row["name"] == best), None)
     if best_row and best_row["heuristic_only"]:

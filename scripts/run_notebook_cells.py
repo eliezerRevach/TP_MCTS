@@ -5,8 +5,9 @@ those boxes one after the other in Jupyter, but from a shell (e.g. over ssh on t
     python scripts/run_notebook_cells.py experiments.ipynb --cells 1 3 19 20 --set WORKERS=12
 
 --list           print every cell's number and first line, then stop
---set NAME=VALUE after the cells before the first Script cell have run (setup + config), override a
-                 config variable (VALUE is a Python literal); the notebook file is never changed
+--set NAME=VALUE override a config variable after every cell, so it wins over the config box (a value
+                 the config derives from it must be overridden too). VALUE is a Python literal; the
+                 notebook file is never changed
 
 display() falls back to print when IPython is not installed.
 """
@@ -58,15 +59,13 @@ def main():
             print(f"[cell {i}] is {cell['cell_type']}, skipped", flush=True)
             continue
         src = "".join(cell["source"])
-        if overrides and "_overrides_applied" not in namespace and "Shared config" not in src \
-                and "Runtime:" not in src:
-            namespace.update(overrides)                  # config has run: apply the overrides once
-            namespace["_overrides_applied"] = True
-            print(f"[overrides] {overrides}", flush=True)
         first = src.strip().splitlines()[0][:90] if src.strip() else ""
         print(f"\n===== [cell {i}] {first}", flush=True)
         started = time.perf_counter()
         exec(compile(src, f"<cell {i}>", "exec"), namespace)
+        if overrides:                                    # after every cell, so a config cell never wins
+            namespace.update(overrides)
+            print(f"[overrides] {overrides}", flush=True)
         print(f"===== [cell {i}] done in {time.perf_counter() - started:.1f}s", flush=True)
 
 
