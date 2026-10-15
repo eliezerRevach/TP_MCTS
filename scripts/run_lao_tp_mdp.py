@@ -56,6 +56,16 @@ def build_mdp(domain, object_amount, garbage_amount, deadline):
                step_penalty=0.0)
 
 
+def _peak_rss_gb():
+    """Peak resident memory of this process in GB (Linux / macOS), None elsewhere."""
+    try:
+        import resource
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return round(peak / (1024 ** 3 if sys.platform == "darwin" else 1024 ** 2), 2)
+    except Exception:
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--domain", required=True)
@@ -80,6 +90,8 @@ def main():
     ap.add_argument("--diagnostics", action="store_true",
                     help="per-depth report: STN-rejected actions, ties, Q spread (gradient), h-pruned options,"
                          " tightness h0 vs V* on finished runs, lower bound on V(s0) over time")
+    ap.add_argument("--build_only", action="store_true",
+                    help="build (and cache) the PDB tables, report their size and time, and stop")
     ap.add_argument("--canonical_starts", action="store_true",
                     help="two independent starts in a row only in name order (fewer orderings; check V* on/off)")
     ap.add_argument("--diagnostics_tips", type=int, default=0,
@@ -146,6 +158,15 @@ def main():
         rep = h.pdb.offline_report
         pdb_report = {k: rep.get(k) for k in ("patterns", "pattern_facts", "growth", "table_states", "values")}
         run["pdb_seconds"], run["pdb"] = round(t_pdb, 2), pdb_report
+    if args.build_only:
+        out = {"domain": args.domain, "object_amount": args.object_amount, "deadline": args.deadline,
+               "build_only": True, "pdb_build_seconds": round(t_pdb, 2), "pdb": pdb_report,
+               "peak_rss_gb": _peak_rss_gb()}
+        print(json.dumps(out, indent=1, default=str), flush=True)
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(out, fh, indent=1, default=str)
+        os._exit(0)
 
     def progress(solver, seconds):
         st = solver.stats
@@ -230,6 +251,7 @@ def main():
         "canonical_starts": args.canonical_starts, "canonical_skipped": s["canonical_skipped"],
         "pdb": pdb_report,
     }
+    report["peak_rss_gb"] = _peak_rss_gb()
     if out_of_time:
         report["reason"] = f"not done after {args.reject_after:.0f} s"
         report["V(s0) so far (upper bound)"] = report.pop("V(s0)")

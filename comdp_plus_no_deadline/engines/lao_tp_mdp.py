@@ -221,7 +221,7 @@ def compact_stn(stn, bounds):
 
 class Node:
     __slots__ = ("key", "state", "stn", "prev", "value", "best", "options", "goal", "dead",
-                 "current_time", "h0", "depth", "last", "parent", "via", "branch")
+                 "current_time", "h0", "depth", "last", "parent", "via", "branch", "weak")
 
     def __init__(self, key, state, stn, prev):
         self.key = key
@@ -240,6 +240,28 @@ class Node:
         self.parent = None             # diagnostics: the node it was first created from,
         self.via = None                # by this action,
         self.branch = None             # under this root option
+        self.weak = None               # diagnostics: the PDB goal group with the lowest value at h0
+
+
+_GAP_EDGES = (1e-4, 1e-3, 1e-2, 5e-2)
+
+
+def _gap_bucket(gap: float) -> str:
+    for edge in _GAP_EDGES:
+        if gap < edge:
+            return f"<{edge:g}"
+    return f">={_GAP_EDGES[-1]:g}"
+
+
+def _schema(action_name) -> str:
+    """The lifted action name: a grounded name with its object arguments (letter + digits) dropped,
+    e.g. start_sample_rock_good_r0_s0_x0_h0 -> start_sample_rock_good."""
+    if not action_name:
+        return "(root)"
+    parts = action_name.split("_")
+    while len(parts) > 1 and len(parts[-1]) >= 2 and parts[-1][0].isalpha() and parts[-1][1:].isdigit():
+        parts.pop()
+    return "_".join(parts)
 
 
 def _commute_table(mdp) -> Dict[str, frozenset]:
@@ -276,8 +298,16 @@ class LAODiagnostics:
 
     TIES = (1e-3, 1e-2)
 
-    def __init__(self, deadline: float, interval: float = 600.0, tips: int = 0):
+    def __init__(self, deadline: float, interval: float = 600.0, tips: int = 0, goals=()):
         self.deadline = float(deadline)
+        self.goals = frozenset(goals)
+        self._is_exec: Dict[object, bool] = {}
+        self._seen_facts: set = set()
+        self.by_time_left: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self.by_running: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self.by_goals_done: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self.by_schema: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self.gap_hist: Dict[str, int] = defaultdict(int)
         self.interval = float(interval)
         self.tips = int(tips)           # per sample: the k tips carrying most of V(s0), expanded and shown
         self.by_depth: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -287,8 +317,29 @@ class LAODiagnostics:
         self.started = time.perf_counter()
         self._last = self.started
 
+    def _running(self, facts) -> int:
+        is_exec = self._is_exec
+        n = 0
+        for f in facts:
+            flag = is_exec.get(f)
+            if flag is None:
+                flag = is_exec[f] = "inExecution" in str(f)
+            n += flag
+        return n
+
     def expansion(self, node, legal: int, rejected: int, option_rows, q_values) -> None:
         self.by_branch[node.branch]["expanded"] += 1
+        self.by_time_left[int(round(self.deadline - node.current_time))]["expanded"] += 1
+        self.by_running[self._running(node.key[0])]["expanded"] += 1
+        self.by_schema[_schema(node.via)]["expanded"] += 1
+        if q_values:
+            best = max(q_values)
+            first = True
+            for q in q_values:                     # how far each alternative sits below the best
+                if first and q == best:
+                    first = False
+                    continue
+                self.gap_hist[_gap_bucket(best - q)] += 1
         d = self.by_depth[node.depth]
         d["expanded"] += 1
         d["legal"] += legal
@@ -320,6 +371,16 @@ class LAODiagnostics:
         b = self.by_branch[node.branch]
         b["created"] += 1
         b["max_depth"] = max(b["max_depth"], node.depth)
+        facts = node.key[0]
+        self.by_time_left[int(round(self.deadline - node.current_time))]["created"] += 1
+        self.by_running[self._running(facts)]["created"] += 1
+        self.by_goals_done[len(self.goals & facts)]["created"] += 1
+        sch = self.by_schema[_schema(node.via)]
+        sch["created"] += 1
+        fh = hash(facts)
+        if fh not in self._seen_facts:             # a fact set nobody reached before
+            self._seen_facts.add(fh)
+            sch["new_fact_sets"] += 1
         d = self.by_depth[node.depth]
         d["created"] += 1
         groups = self._groups.setdefault(node.depth, set())
@@ -367,7 +428,8 @@ class TPMDPLAO:
         self.on_pass = on_pass          # called after every pass with (solver, seconds so far)
         self.compact = compact          # store each node's STN reduced to its kept points
         self.nodes: Dict[tuple, Node] = {}
-        self.diag = (LAODiagnostics(float(mdp.deadline()), diagnostics_interval, diagnostics_tips)
+        self.diag = (LAODiagnostics(float(mdp.deadline()), diagnostics_interval, diagnostics_tips,
+                                    goals=getattr(mdp.problem, "goals", ()))
                      if diagnostics else None)
         # canonical_starts: two independent starts in a row (no event between them) are only taken in
         # name order -- the other order reaches the same facts. Not exact in general: the STN keeps
@@ -425,6 +487,13 @@ class TPMDPLAO:
             self.stats["h_calls"] += 1
         node.h0 = node.value
         if self.diag is not None:
+            pdb = getattr(self.heuristic, "pdb", None)
+            values = getattr(pdb, "last_values", None) if pdb is not None else None
+            if values and getattr(pdb, "groups", None) and not node.goal:
+                group_mins = [min(values[i] for i in m if i < len(values)) for m in pdb.groups
+                              if any(i < len(values) for i in m)]
+                if group_mins:
+                    node.weak = min(range(len(group_mins)), key=group_mins.__getitem__)
             self.diag.created(node)
         return node
 
@@ -756,7 +825,22 @@ class TPMDPLAO:
                                       canonical_skipped=self.stats["canonical_skipped"],
                                       dropped_noops=self.stats["dropped_noop"])
         out["by_root_option"] = self._by_root_option()
+        dg = self.diag
+
+        def table(store, key_name, sort_key=None):
+            rows = [dict({key_name: k}, **{n: int(v) for n, v in row.items()}) for k, row in store.items()]
+            return sorted(rows, key=sort_key or (lambda r: r[key_name]))
+
+        out["by_time_left"] = table(dg.by_time_left, "time_left")
+        out["by_running_actions"] = table(dg.by_running, "running")
+        out["by_goals_done"] = table(dg.by_goals_done, "goals_done")
+        out["by_creating_action"] = table(dg.by_schema, "action", sort_key=lambda r: -r.get("created", 0))[:30]
+        total_gaps = max(1, sum(dg.gap_hist.values()))
+        out["alternative_gap_to_best"] = {k: dict(count=v, pct=round(100 * v / total_gaps, 2))
+                                          for k, v in sorted(dg.gap_hist.items())}
         if walk:
+            out["h_drop_by_depth"] = self._h_drop_by_depth()
+            out["work_outside_best_policy"] = self._waste()
             out["dominance"] = self.dominance_summary()
             out["same_facts_groups"] = self._same_facts_groups()
             out["main_path"] = self._main_path()
@@ -794,6 +878,38 @@ class TPMDPLAO:
             steps.append(dict(action=n.via, time=round(n.current_time, 2), depth=n.depth))
             n = self.nodes.get(n.parent)
         return list(reversed(steps))
+
+    def _h_drop_by_depth(self) -> List[Dict[str, object]]:
+        """For expanded nodes: h0 - current value (how far the first estimate has come down so far; on a
+        finished run it is h0 - V* wherever the node is solved). A lower bound on the overestimate."""
+        rows: Dict[int, List[float]] = defaultdict(list)
+        for n in self.nodes.values():
+            if n.options is not None and not n.goal:
+                rows[n.depth].append(n.h0 - n.value)
+        out = []
+        for depth in sorted(rows):
+            g = rows[depth]
+            out.append(dict(depth=depth, expanded=len(g), drop_mean=round(sum(g) / len(g), 6),
+                            drop_max=round(max(g), 6),
+                            dropped_gt_0_001_pct=round(100 * sum(1 for x in g if x > 1e-3) / len(g), 1),
+                            dropped_gt_0_01_pct=round(100 * sum(1 for x in g if x > 1e-2) / len(g), 1)))
+        return out
+
+    def _waste(self) -> Dict[str, object]:
+        """Nodes of the current best (partial) policy vs everything generated: the rest is the cost of
+        refuting alternatives."""
+        seen, stack = set(), [self.root.key]
+        while stack:
+            k = stack.pop()
+            if k in seen:
+                continue
+            seen.add(k)
+            n = self.nodes[k]
+            if n.options and n.best is not None and not n.goal:
+                stack.extend(c for _p, c in n.options[n.best][1])
+        total = len(self.nodes)
+        return dict(best_policy_nodes=len(seen), generated=total,
+                    outside_best_policy_pct=round(100 * (total - len(seen)) / max(1, total), 2))
 
     @staticmethod
     def _bound_map(signature) -> Dict[tuple, object]:
@@ -927,6 +1043,8 @@ class TPMDPLAO:
         seen, frontier = set(), [self.root]
         by_depth: Dict[int, List[float]] = defaultdict(list)
         violations = []
+        weak_counts: Dict[object, int] = defaultdict(int)
+        weak_gap: Dict[object, float] = defaultdict(float)
         while frontier:
             n = frontier.pop()
             if n.key in seen:
@@ -936,6 +1054,9 @@ class TPMDPLAO:
                 continue
             gap = n.h0 - n.value
             by_depth[n.depth].append(gap)
+            if gap > 1e-2:
+                weak_counts[n.weak] += 1
+                weak_gap[n.weak] += gap
             if gap < -1e-9:
                 violations.append(dict(depth=n.depth, h0=n.h0, v_star=n.value))
             frontier.extend(self.nodes[k] for _p, k in n.options[n.best][1])
@@ -945,9 +1066,18 @@ class TPMDPLAO:
             rows.append(dict(depth=depth, policy_nodes=len(g), gap_mean=round(sum(g) / len(g), 6),
                              gap_max=round(max(g), 6), exact_pct=round(100 * sum(1 for x in g if abs(x) < 1e-6) / len(g), 1)))
         allg = [x for g in by_depth.values() for x in g]
+        pdb = getattr(self.heuristic, "pdb", None)
+        groups = getattr(pdb, "groups", None) or []
+
+        def group_goals(gi):
+            if gi is None or gi >= len(groups) or pdb is None:
+                return str(gi)
+            return str(sorted({g for i in groups[gi] for g in (pdb.patterns[i].get("goals") or [])}))
+        loose = [dict(weakest_group=group_goals(gi), nodes=c, gap_mean=round(weak_gap[gi] / c, 6))
+                 for gi, c in sorted(weak_counts.items(), key=lambda kv: -kv[1])]
         return dict(policy_decision_nodes=len(allg), gap_mean=round(sum(allg) / max(1, len(allg)), 6),
                     gap_max=round(max(allg) if allg else 0.0, 6), admissibility_violations=violations[:20],
-                    violations=len(violations), by_depth=rows)
+                    violations=len(violations), by_depth=rows, loose_nodes_by_weakest_group=loose)
 
     def policy_size(self) -> int:
         return self.policy_counts()["total"]
