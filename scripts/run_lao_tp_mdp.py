@@ -80,6 +80,8 @@ def main():
     ap.add_argument("--diagnostics", action="store_true",
                     help="per-depth report: STN-rejected actions, ties, Q spread (gradient), h-pruned options,"
                          " tightness h0 vs V* on finished runs, lower bound on V(s0) over time")
+    ap.add_argument("--canonical_starts", action="store_true",
+                    help="two independent starts in a row only in name order (fewer orderings; check V* on/off)")
     ap.add_argument("--diagnostics_interval", type=float, default=600.0,
                     help="seconds between lower-bound samples (0 = only at the end)")
     args = ap.parse_args()
@@ -154,7 +156,7 @@ def main():
         budget = min(budget, left) if budget else left
     lao = TPMDPLAO(mdp, heuristic=h, max_nodes=args.max_nodes, time_budget=budget,
                    on_pass=progress if args.progress else None, diagnostics=args.diagnostics,
-                   diagnostics_interval=args.diagnostics_interval)
+                   diagnostics_interval=args.diagnostics_interval, canonical_starts=args.canonical_starts)
     run["lao"] = lao
 
     if args.progress:                              # counts every 30 s, also inside one long pass
@@ -185,11 +187,14 @@ def main():
     except MemoryError:
         # Over the memory limit: report what was reached, the same way as a run over the time limit.
         counts = (lao.stats["generated"], lao.stats["expanded"], lao.stats["passes"], lao.root.value)
-        diag = lao.diagnostics(walk=False) if args.diagnostics else None   # counters only: cheap
-        lao.nodes.clear()
+        lao.nodes.clear()                          # free the graph first: the report itself needs memory
         run["lao"] = None
         import gc
         gc.collect()
+        try:
+            diag = lao.diagnostics(walk=False) if args.diagnostics else None   # counters only
+        except MemoryError:
+            diag = {"error": "no memory left even for the counters"}
         out = {"domain": args.domain, "object_amount": args.object_amount, "deadline": args.deadline,
                "heuristic": args.heuristic, "rejected": True, "reason": "out of memory", "phase": "search",
                "seconds": round(time.perf_counter() - run["start"], 1), "V(s0) so far (upper bound)": counts[3],
@@ -218,6 +223,7 @@ def main():
         "key_seconds": round(s["key_seconds"], 2), "expand_seconds": round(s["expand_seconds"], 2),
         "inconsistent_actions": s["inconsistent"], "folded_zero_time_loops": s["folded"],
         "dropped_noops": s["dropped_noop"], "cycles": s["cycles"],
+        "canonical_starts": args.canonical_starts, "canonical_skipped": s["canonical_skipped"],
         "pdb": pdb_report,
     }
     if out_of_time:

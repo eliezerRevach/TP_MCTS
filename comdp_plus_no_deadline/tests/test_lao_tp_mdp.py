@@ -147,3 +147,19 @@ def test_time_budget_stops_inside_a_pass():
     upper = lao.solve()
     assert not lao.stats["complete"]
     assert lao.policy_lower_bound() <= upper + 1e-12
+
+
+def test_canonical_starts_keep_the_optimum(pdb_env):
+    """Independent starts taken only in name order: same V* on these domains, fewer nodes, and the
+    policy still executes as planned (the executor rebuilds the same node keys)."""
+    from comdp_plus_no_deadline.engines.lao_tp_mdp import PolicyExecution, TPMDPLAO, windows_pdb_heuristic
+
+    for domain, kwargs in (("prob_conc", dict(garbage_amount=2)), ("stuck_car", dict(object_amount=1))):
+        mdp = _mdp(domain, 10, **kwargs)
+        h = windows_pdb_heuristic(mdp)
+        full = TPMDPLAO(mdp, heuristic=h)
+        canon = TPMDPLAO(mdp, heuristic=h, canonical_starts=True)
+        assert canon.solve() == pytest.approx(full.solve(), abs=1e-9)
+        assert canon.stats["canonical_skipped"] > 0
+        assert canon.stats["generated"] <= full.stats["generated"]
+        assert PolicyExecution(canon).exact()["executed_value"] == pytest.approx(canon.root.value, abs=1e-6)

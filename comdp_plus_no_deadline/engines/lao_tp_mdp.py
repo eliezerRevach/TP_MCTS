@@ -221,7 +221,7 @@ def compact_stn(stn, bounds):
 
 class Node:
     __slots__ = ("key", "state", "stn", "prev", "value", "best", "options", "goal", "dead",
-                 "current_time", "h0", "depth")
+                 "current_time", "h0", "depth", "last")
 
     def __init__(self, key, state, stn, prev):
         self.key = key
@@ -236,6 +236,25 @@ class Node:
         self.current_time = 0.0
         self.h0 = 0.0                  # the heuristic's value when the node was created
         self.depth = 0                 # fewest steps from the root seen so far
+        self.last = None               # canonical_starts: the last start, if it may be reordered
+
+
+def _commute_table(mdp) -> Dict[str, frozenset]:
+    """For every deterministic start: the deterministic starts it commutes with -- neither one's
+    effects touch the other's preconditions or effects (so both orders are legal and reach the same
+    facts). Ends, instantaneous and probabilistic actions are never reordered."""
+    info = {}
+    for a in mdp.problem.actions:
+        if type(a).__name__ != "InstantaneousStartAction" or getattr(a, "probabilistic_effects", None):
+            continue
+        reads = frozenset(a.pos_preconditions) | frozenset(a.neg_preconditions)
+        writes = frozenset(a.add_effects) | frozenset(a.del_effects)
+        info[a.name] = (reads, writes)
+    table = {}
+    for x, (rx, wx) in info.items():
+        table[x] = frozenset(y for y, (ry, wy) in info.items()
+                             if y != x and not (wx & (ry | wy)) and not (wy & rx))
+    return table
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +328,8 @@ class TPMDPLAO:
 
     def __init__(self, mdp, heuristic: Optional[Callable] = None, epsilon: float = 1e-9,
                  max_nodes: int = 0, time_budget: float = 0.0, on_pass: Optional[Callable] = None,
-                 compact: bool = True, diagnostics: bool = False, diagnostics_interval: float = 600.0):
+                 compact: bool = True, diagnostics: bool = False, diagnostics_interval: float = 600.0,
+                 canonical_starts: bool = False):
         from unified_planning.engines.utils import create_init_stn
 
         self.mdp = mdp
@@ -321,18 +341,34 @@ class TPMDPLAO:
         self.compact = compact          # store each node's STN reduced to its kept points
         self.nodes: Dict[tuple, Node] = {}
         self.diag = LAODiagnostics(float(mdp.deadline()), diagnostics_interval) if diagnostics else None
+        # canonical_starts: two independent starts in a row (no event between them) are only taken in
+        # name order -- the other order reaches the same facts. Not exact in general: the STN keeps
+        # "a before b" vs "b before a", and a later end order can need one of them.
+        self.canonical = bool(canonical_starts)
+        self._commute = _commute_table(mdp) if self.canonical else {}
         self._deadline_at = None        # perf_counter() time at which solve() stops (time_budget)
         self.stats = dict(generated=0, expanded=0, passes=0, backups=0, h_calls=0, h_seconds=0.0,
                           key_seconds=0.0, expand_seconds=0.0, inconsistent=0, folded=0, dropped_noop=0,
-                          cycles=0, seconds=0.0, complete=False)
+                          cycles=0, seconds=0.0, complete=False, canonical_skipped=0)
         stn = exact_stn(create_init_stn(mdp))           # exact consistency (Floyd-Warshall)
         self.root = self._node(mdp.initial_state(), stn, None)
 
     # -- nodes ---------------------------------------------------------------
-    def _node(self, state, stn, prev, depth: int = 0) -> Node:
+    def node_key(self, state, signature, last=None) -> tuple:
+        """Facts + the STN's bounds on the future; in canonical mode also the reorderable last start
+        (which starts may follow depends on it)."""
+        if self.canonical:
+            return (frozenset(state.predicates), signature, last)
+        return (frozenset(state.predicates), signature)
+
+    def last_of(self, action):
+        """The name a node remembers after `action` (canonical mode): a start that may be reordered."""
+        return action.name if self.canonical and action.name in self._commute else None
+
+    def _node(self, state, stn, prev, depth: int = 0, last=None) -> Node:
         t0 = time.perf_counter()
         signature, _points, bounds = stn_minimal_network(stn, prev)
-        key = (frozenset(state.predicates), signature)
+        key = self.node_key(state, signature, last)
         self.stats["key_seconds"] += time.perf_counter() - t0
         node = self.nodes.get(key)
         if node is not None:
@@ -343,6 +379,7 @@ class TPMDPLAO:
             stn = compact_stn(stn, bounds)
         node = Node(key, state, stn, prev)
         node.depth = depth
+        node.last = last
         node.current_time = float(stn.get_current_end_time())
         self.nodes[key] = node
         self.stats["generated"] += 1
@@ -365,8 +402,12 @@ class TPMDPLAO:
         options = []
         legal = rejected = 0
         rows = []                                        # per option, for the diagnostics
+        commute_with_last = self._commute.get(node.last, ()) if node.last else ()
         for action in self.mdp.legal_actions(node.state):
             legal += 1
+            if commute_with_last and action.name in commute_with_last and action.name < node.last:
+                self.stats["canonical_skipped"] += 1     # the same two starts in name order exist
+                continue
             child_stn = node.stn.clone()
             new_prev = update_stn(child_stn, action, node.prev)
             if not child_stn.is_consistent():
@@ -381,7 +422,7 @@ class TPMDPLAO:
                 if p <= _EPS:
                     continue
                 before = self.stats["generated"]
-                child = self._node(next_state, child_stn, new_prev, node.depth + 1)
+                child = self._node(next_state, child_stn, new_prev, node.depth + 1, self.last_of(action))
                 if self.stats["generated"] > before:
                     new += 1
                 else:
@@ -594,8 +635,18 @@ class TPMDPLAO:
                 total, pruned = pruned_by_depth.get(depth, [0, 0])
                 row["h_pruned_pct"] = round(100 * pruned / max(1, total), 1)
             rows.append(row)
+        if walk:
+            groups: Dict[int, set] = defaultdict(set)
+            counts: Dict[int, int] = defaultdict(int)
+            for n in self.nodes.values():
+                groups[n.depth].add((n.key[0], n.current_time))
+                counts[n.depth] += 1
+            for row in rows:
+                g = len(groups.get(row["depth"], ())) or 1
+                row["nodes_per_facts_time"] = round(counts.get(row["depth"], 0) / g, 2)
         out: Dict[str, object] = dict(by_depth=rows, progress=list(self.diag.progress),
                                       cycles=self.stats["cycles"], folded=self.stats["folded"],
+                                      canonical_skipped=self.stats["canonical_skipped"],
                                       dropped_noops=self.stats["dropped_noop"])
         if walk:
             total = sum(v[0] for v in pruned_by_depth.values())
@@ -683,7 +734,7 @@ class PolicyExecution:
         child = stn.clone()
         new_prev = update_stn(child, action, prev)
         sig, _points, bounds = stn_minimal_network(child, new_prev)
-        key = (frozenset(next_state.predicates), sig)
+        key = self.lao.node_key(next_state, sig, self.lao.last_of(action))
         if self.lao.compact and new_prev is not None:
             child = compact_stn(child, bounds)
         return key, child, new_prev
