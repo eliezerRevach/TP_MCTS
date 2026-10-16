@@ -232,6 +232,11 @@ def main():
                "nodes_generated": counts[0], "nodes_expanded": counts[1], "passes": counts[2]}
         if diag is not None:
             out["diagnostics"] = diag
+        if h is not None:
+            try:
+                out["pdb_lookups"] = h.pdb.lookup_report()
+            except MemoryError:
+                pass
         print(json.dumps(out, indent=1, default=str), flush=True)
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
@@ -260,6 +265,8 @@ def main():
         "pdb": pdb_report,
     }
     report["peak_rss_gb"] = _peak_rss_gb()
+    if h is not None:
+        report["pdb_lookups"] = h.pdb.lookup_report()
     if out_of_time:
         report["reason"] = f"not done after {args.reject_after:.0f} s"
         report["V(s0) so far (upper bound)"] = report.pop("V(s0)")

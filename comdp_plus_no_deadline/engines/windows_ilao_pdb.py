@@ -239,6 +239,7 @@ class WindowsILAOPDBHeuristic:
         self.patterns: List[dict] = []
         self.groups: List[List[int]] = []
         self.counts: Counter = Counter()
+        self.counts_by_pattern: Dict[int, Counter] = {}   # per pattern: how each lookup was answered
         self.query_seconds_total = 0.0
         self.offline_report: Dict[str, object] = {}
         self._built = False
@@ -613,8 +614,12 @@ class WindowsILAOPDBHeuristic:
             # A table lookup (and a miss under MISS=one) depends only on these inputs: memoize it.
             mkey = (index, local, r, tuple(running))
             hit = memo.get(mkey)
+            per = self.counts_by_pattern.get(index)
+            if per is None:
+                per = self.counts_by_pattern[index] = Counter()
             if hit is not None:
                 self.counts[hit[1]] += 1
+                per[hit[1]] += 1
                 values.append(hit[0])
                 continue
             value = None
@@ -624,6 +629,7 @@ class WindowsILAOPDBHeuristic:
                     kind = "table_" + kind
                 else:
                     self.counts["table_miss"] += 1
+                    per["table_miss"] += 1
             if value is None:
                 value, kind = solver.lookup(local, r, running)
             if value is None:
@@ -634,6 +640,7 @@ class WindowsILAOPDBHeuristic:
                                          max_expansions=self.query_expansions)
                     kind = "lazy_optimal" if solver.complete else "lazy_cut"
             self.counts[kind] += 1
+            per[kind] += 1
             if kind.startswith("table_") or kind == "miss_one":
                 memo[mkey] = (value, kind)
             values.append(value)
@@ -646,6 +653,21 @@ class WindowsILAOPDBHeuristic:
         out = 1.0
         for members in self.groups:
             out *= _combine([values[i] for i in members], self.agg)
+        return out
+
+    def lookup_report(self) -> Dict[str, object]:
+        """How the lookups were answered, in total and per pattern: exact table hits, cover hits (a
+        fitting table state), and misses (no fitting state; under MISS=one the pattern counts as 1)."""
+        def row(c: Counter) -> Dict[str, object]:
+            exact, cover, miss_one = c["table_exact"], c["table_cover"], c["miss_one"]
+            total = max(1, exact + cover + c["table_miss"])
+            return dict(lookups=exact + cover + c["table_miss"], exact=exact, cover=cover, miss=c["table_miss"],
+                        miss_counted_as_one=miss_one, miss_pct=round(100 * c["table_miss"] / total, 2),
+                        cover_pct=round(100 * cover / total, 2))
+        out = dict(queries=self.counts["queries"], total=row(self.counts), patterns=[])
+        for index, c in sorted(self.counts_by_pattern.items()):
+            p = self.patterns[index] if index < len(self.patterns) else {}
+            out["patterns"].append(dict(pattern=index, goals=p.get("goals"), facts=len(p.get("facts") or []), **row(c)))
         return out
 
     def report(self) -> Dict[str, object]:
