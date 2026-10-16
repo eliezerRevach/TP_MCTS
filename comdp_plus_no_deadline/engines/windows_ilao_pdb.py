@@ -665,9 +665,18 @@ class WindowsILAOPDBHeuristic:
                         miss_counted_as_one=miss_one, miss_pct=round(100 * c["table_miss"] / total, 2),
                         cover_pct=round(100 * cover / total, 2))
         out = dict(queries=self.counts["queries"], total=row(self.counts), patterns=[])
+        fit_total: Counter = Counter()
         for index, c in sorted(self.counts_by_pattern.items()):
             p = self.patterns[index] if index < len(self.patterns) else {}
-            out["patterns"].append(dict(pattern=index, goals=p.get("goals"), facts=len(p.get("facts") or []), **row(c)))
+            entry = dict(pattern=index, goals=p.get("goals"), facts=len(p.get("facts") or []), **row(c))
+            table = p.get("table")
+            if table is not None and getattr(table, "fit_stats", None) is not None:
+                # per DISTINCT lookup (repeats are memoized) and per tie-order root
+                entry["fit"] = dict(sorted(table.fit_stats.items()))
+                entry["shift_examples"] = list(table.fit_examples)
+                fit_total.update(table.fit_stats)
+            out["patterns"].append(entry)
+        out["fit_total"] = dict(sorted(fit_total.items()))
         return out
 
     def report(self) -> Dict[str, object]:

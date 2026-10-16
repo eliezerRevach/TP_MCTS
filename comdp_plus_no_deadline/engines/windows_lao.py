@@ -54,6 +54,7 @@ backing up in post-order, until no tip is left and the residual is < epsilon.
 
 from __future__ import annotations
 
+import collections
 import heapq
 import itertools
 import math
@@ -680,6 +681,8 @@ class WindowsTable:
         self.complete = False
         self._by_fq: Dict[tuple, List[Tuple[tuple, int]]] = {}
         self.stats: Dict[str, object] = {}
+        self.fit_stats: Dict[str, int] = collections.Counter()   # how lookups fit (diagnostics)
+        self.fit_examples: List[dict] = []
 
     # -- forward -------------------------------------------------------------
     def build(self, root_facts, time_budget: Optional[float] = None) -> bool:
@@ -928,13 +931,37 @@ class WindowsTable:
             i = self.index.get((f, q, w))
             if i is not None:
                 value = self.value(i, r)
+                self.fit_stats["exact"] += 1
             else:
-                value = self._shifted_cover(f, q, w, r)
-                if value is None:
+                detail: list = []
+                values = self.fitting_values(f, q, w, r, detail)
+                if not values:
+                    self.fit_stats["miss"] += 1
                     return None, "miss"
+                value = min(values)
+                self._record_fit(q, w, r, values, detail)
                 kind = "cover"
             best = value if best is None else max(best, value)
         return (0.0 if best is None else best), kind
+
+    def _record_fit(self, queue, windows, r, values, detail) -> None:
+        """Diagnostics only (values unchanged): did the leaf fit a table state as it is (d = 0, its
+        point inside the windows) or only after moving the clock back by d > 0, and which bound
+        forced the move (lo: time left below the window = time passed since the event; e: below
+        the charged-time guarantee)."""
+        st = self.fit_stats
+        k = min(range(len(values)), key=values.__getitem__)
+        d_used, bind, w2 = detail[k]
+        st["fit_d0" if any(d == 0 for d, _b, _w in detail) else "shift_only"] += 1
+        st["d_used=" + str(d_used)] += 1
+        if d_used:
+            st["bind_" + bind] += 1
+            if len(self.fit_examples) < 8:
+                self.fit_examples.append(dict(
+                    queue=list(queue), query_time_left=[str(rem) for _lo, rem, _e in windows], r=str(r),
+                    table_windows_lo_hi_e=[[str(x) for x in win] for win in w2],
+                    d=str(d_used), bind=bind, value=round(values[k], 6),
+                    fits=len(values), fits_d0=sum(1 for d, _b, _w in detail if d == 0)))
 
     def value(self, i: int, r) -> float:
         return float(self.V[int(min(Fraction(r), self.horizon) / self.grid), i])
@@ -955,20 +982,29 @@ class WindowsTable:
                 best, best_q = option, q
         return best
 
-    def fitting_values(self, facts, queue, windows, r) -> List[float]:
+    def fitting_values(self, facts, queue, windows, r, detail: Optional[list] = None) -> List[float]:
         """V(s, r + d) for every table state s with this F and Q that fits the leaf
-        some d >= 0 after its event, d the smallest that fits (see the class doc)."""
+        some d >= 0 after its event, d the smallest that fits (see the class doc).
+        ``detail`` (diagnostics) gets (d, the bound that set d, s's windows) per value."""
         out = []
         for w2, j in self._by_fq.get((facts, queue), ()):
             d_lo, d_hi = Fraction(0), self.horizon - self.tmin[j] - r
+            bind = "none"
             for (lo2, hi2, e2), (lo, hi, e) in zip(w2, windows):
-                d_lo = max(d_lo, lo2 - lo, e2 - e)
+                # table windows have e2 >= lo2 (normalise) and a leaf has e = lo: e sets d,
+                # lo only ties it ("e=lo")
+                dl, de = lo2 - lo, e2 - e
+                m = max(d_lo, dl, de)
+                if m > d_lo:
+                    d_lo, bind = m, ("e=lo" if dl == de == m else "e" if de == m else "lo")
                 d_hi = min(d_hi, hi2 - hi)
                 if d_lo > d_hi:
                     break
             else:
                 if d_lo <= d_hi:
                     out.append(self.value(j, r + d_lo))
+                    if detail is not None:
+                        detail.append((d_lo, bind, w2))
         return out
 
     def _shifted_cover(self, facts, queue, windows, r) -> Optional[float]:
