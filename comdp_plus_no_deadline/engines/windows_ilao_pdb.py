@@ -74,8 +74,8 @@ Knobs (environment, set from experiments.ipynb):
                                     pairs (a COLLECTION per goal group: the group's goals
                                     + one shared resource each, fact_pattern.
                                     resource_patterns; min inside a group) |
-                                    llm_by_hand_nasa_two (facts picked by hand for
-                                    nasa_rover obj 2, hand_patterns.py)      (cegar)
+                                    llm_by_hand_nasa_two | _one (facts picked by hand for
+                                    nasa_rover obj 2 | 1, hand_patterns.py)  (cegar)
     TP_MCTS_WILAO_LOGIC_SOURCES     logic only: rollouts random | greedy     (random)
     TP_MCTS_WILAO_LOGIC_ROLLOUTS    logic only: rollouts per round           (20)
     TP_MCTS_WILAO_LOGIC_DEPTH       logic only: steps per rollout            (60)

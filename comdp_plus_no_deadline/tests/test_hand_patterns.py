@@ -1,4 +1,4 @@
-"""TP_MCTS_WILAO_PATTERN_GROWTH = llm_by_hand_nasa_two: hand-picked facts for nasa_rover obj 2."""
+"""TP_MCTS_WILAO_PATTERN_GROWTH = llm_by_hand_nasa_two / _one: hand-picked facts for nasa_rover obj 2 / obj 1."""
 
 import os
 import sys
@@ -44,3 +44,13 @@ def test_nasa_two_refuses_another_problem():
     mdp, facts = _nasa(1)
     with pytest.raises(ValueError, match="does not fit this problem"):
         hand_patterns("llm_by_hand_nasa_two", facts, mdp.problem.goals)
+
+
+def test_nasa_one_is_rover_r0_of_nasa_two():
+    """llm_by_hand_nasa_one: the same picks for the single rover of nasa_rover obj 1."""
+    mdp, facts = _nasa(1)
+    entries = hand_patterns("llm_by_hand_nasa_one", facts, mdp.problem.goals)
+    labels = sorted(label for _g, _phi, label in entries)
+    assert labels == ["hands_r0", "image_o0", "stores_r0"]
+    covered = {str(g) for goals, _phi, _l in entries for g in goals}
+    assert covered == {str(g) for g in mdp.problem.goals}

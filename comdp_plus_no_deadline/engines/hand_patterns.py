@@ -14,6 +14,9 @@ rovers and images, as for every collection):
              Store blocking: a full store stops the next sample until a drop.
     image  : communicated_image_data, have_image, calibrated                         (3 facts)
 
+llm_by_hand_nasa_one -- nasa_rover, object_amount = 1 (rover r0; rocks x0, x1; image o0): the same
+picks for the one rover.
+
 The goals of a pattern are its communicated_* facts. Every listed fact must exist in the problem.
 """
 
@@ -41,6 +44,9 @@ HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
     "llm_by_hand_nasa_two": (_image("r0", "o0", "c0") + _image("r1", "o1", "c1")
                              + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))
                              + _rover("r1", ("x2", "x3"), ("h2", "h3"), ("s2", "s3"))),
+    # nasa_rover object_amount = 1 is rover r0 of the problem above: the same picks for one rover.
+    "llm_by_hand_nasa_one": (_image("r0", "o0", "c0")
+                             + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))),
 }
 
 
