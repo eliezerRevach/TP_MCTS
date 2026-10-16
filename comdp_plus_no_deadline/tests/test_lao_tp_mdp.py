@@ -201,3 +201,21 @@ def test_bounded_search_matches_ilao(pdb_env):
         assert v == pytest.approx(exact, abs=1e-9)
         assert bounded.stats["complete"] and bounded.root.value - bounded.root.lower <= 1e-9
         assert PolicyExecution(bounded).exact()["executed_value"] == pytest.approx(v, abs=1e-6)
+
+
+def test_earliest_time_model_executes_as_planned(pdb_env):
+    """time_model="earliest": every action fixed at its earliest time when chosen (TP-MCTS's SetTime), so
+    the policy executes at exactly V*; on stuck_car / prob_conc it is the same V* as the flexible model."""
+    from comdp_plus_no_deadline.engines.lao_tp_mdp import PolicyExecution, TPMDPLAO, windows_pdb_heuristic
+
+    for domain, kwargs in (("stuck_car", dict(object_amount=1)), ("prob_conc", dict(garbage_amount=2))):
+        mdp = _mdp(domain, 10, **kwargs)
+        h = windows_pdb_heuristic(mdp)
+        flexible = TPMDPLAO(mdp, heuristic=h).solve()
+        for alg in ("ilao", "bounded"):
+            lao = TPMDPLAO(mdp, heuristic=h, algorithm=alg, time_model="earliest")
+            v = lao.solve()
+            assert v == pytest.approx(flexible, abs=1e-9)
+            result = PolicyExecution(lao).exact()
+            assert result["violation_mass"] == {}
+            assert result["executed_value"] == pytest.approx(v, abs=1e-6)

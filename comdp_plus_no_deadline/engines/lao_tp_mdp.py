@@ -419,7 +419,7 @@ class TPMDPLAO:
                  max_nodes: int = 0, time_budget: float = 0.0, on_pass: Optional[Callable] = None,
                  compact: bool = True, diagnostics: bool = False, diagnostics_interval: float = 600.0,
                  canonical_starts: bool = False, diagnostics_tips: int = 0, algorithm: str = "ilao",
-                 gap_epsilon: float = 0.0):
+                 gap_epsilon: float = 0.0, time_model: str = "flexible"):
         from unified_planning.engines.utils import create_init_stn
 
         self.mdp = mdp
@@ -442,6 +442,15 @@ class TPMDPLAO:
         # p * (upper - lower), back both bounds up; an option whose upper bound is <= the node's lower
         # bound can never win and is never followed. Stops when upper(s0) - lower(s0) <= gap_epsilon
         # (0 = exact; > 0 = the returned policy is provably within gap_epsilon of optimal).
+        # time_model: "flexible" = TP-MCTS's search model -- an event is placed only by its constraints and a
+        # later choice may still move an earlier start (V* is an upper bound on what a real schedule
+        # achieves); "earliest" = every action is fixed at its earliest time when it is chosen, the rule
+        # TP-MCTS's execution applies (update_stn type='SetTime'): V* is exactly what Earliest execution
+        # achieves and every policy executes as planned (plans that need a deliberate delay are lost).
+        if time_model not in ("flexible", "earliest"):
+            raise ValueError(f"time_model={time_model!r}: use flexible | earliest")
+        self.time_model = time_model
+        self._stn_type = "SetTime" if time_model == "earliest" else None
         if algorithm not in ("ilao", "bounded"):
             raise ValueError(f"algorithm={algorithm!r}: use ilao | bounded")
         self.algorithm = algorithm
@@ -525,7 +534,7 @@ class TPMDPLAO:
                 self.stats["canonical_skipped"] += 1     # the same two starts in name order exist
                 continue
             child_stn = node.stn.clone()
-            new_prev = update_stn(child_stn, action, node.prev)
+            new_prev = update_stn(child_stn, action, node.prev, type=self._stn_type)
             if not child_stn.is_consistent():
                 self.stats["inconsistent"] += 1
                 rejected += 1
@@ -1233,7 +1242,7 @@ class PolicyExecution:
         from unified_planning.engines.utils import update_stn
 
         child = stn.clone()
-        new_prev = update_stn(child, action, prev)
+        new_prev = update_stn(child, action, prev, type=self.lao._stn_type)
         sig, _points, bounds = stn_minimal_network(child, new_prev)
         key = self.lao.node_key(next_state, sig, self.lao.last_of(action))
         if self.lao.compact and new_prev is not None:

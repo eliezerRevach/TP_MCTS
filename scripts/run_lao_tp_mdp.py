@@ -92,6 +92,9 @@ def main():
                          " tightness h0 vs V* on finished runs, lower bound on V(s0) over time")
     ap.add_argument("--algorithm", choices=("ilao", "bounded"), default="ilao",
                     help="ilao = ILAO* (upper bounds); bounded = upper + lower bounds, FRTDP-style trials")
+    ap.add_argument("--time_model", choices=("flexible", "earliest"), default="flexible",
+                    help="flexible = TP-MCTS's search model (times placed by constraints only); earliest = each "
+                         "action fixed at its earliest time when chosen, as TP-MCTS executes (always executable)")
     ap.add_argument("--gap_epsilon", type=float, default=0.0,
                     help="bounded only: stop when upper(s0) - lower(s0) <= this (0 = exact)")
     ap.add_argument("--build_only", action="store_true",
@@ -186,7 +189,7 @@ def main():
                    on_pass=progress if args.progress else None, diagnostics=args.diagnostics,
                    diagnostics_interval=args.diagnostics_interval, canonical_starts=args.canonical_starts,
                    diagnostics_tips=args.diagnostics_tips, algorithm=args.algorithm,
-                   gap_epsilon=args.gap_epsilon)
+                   gap_epsilon=args.gap_epsilon, time_model=args.time_model)
     run["lao"] = lao
 
     if args.progress:                              # counts every 30 s, also inside one long pass
@@ -259,7 +262,7 @@ def main():
         "inconsistent_actions": s["inconsistent"], "folded_zero_time_loops": s["folded"],
         "dropped_noops": s["dropped_noop"], "cycles": s["cycles"],
         "canonical_starts": args.canonical_starts, "canonical_skipped": s["canonical_skipped"],
-        "algorithm": args.algorithm, "gap_epsilon": args.gap_epsilon,
+        "algorithm": args.algorithm, "gap_epsilon": args.gap_epsilon, "time_model": args.time_model,
         "upper_bound(s0)": round(lao.root.value, 6), "lower_bound(s0)": round(getattr(lao.root, "lower", 0.0), 6),
         "trials": s["trials"], "cut_options": s["cut_options"],
         "pdb": pdb_report,
