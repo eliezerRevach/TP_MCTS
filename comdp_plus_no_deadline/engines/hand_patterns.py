@@ -25,6 +25,17 @@ pattern over both cars (any robot can push any car, so the cars share both robot
     Hands are what every push / search / rest needs; legs are left out (counted free). The bad
     rock is left out: a hidden rock fact is read by push's probability, so VI takes its best value.
 
+llm_by_hand_stuck_car_one -- stuck_car, object_amount = 1: one pattern with the robot's state too
+    car_out(c0), tired(r0), free(r0, hands), free(r0, legs), got_rock(r0, good|bad),
+    rock_under_car(c0, good|bad)                                                     (8 facts)
+    The automatic pattern (5 facts) leaves out tired / free: resting after a push is invisible.
+
+llm_by_hand_conc -- conc (deterministic; one5 needs b, h, f and DELETES b, so b is redone after i):
+    b_i   : got(b), got(i), got(f), got(h)          the delete interaction         (4 facts)
+    chain : got(c), got(d), got(e), got(f), got(g), got(h)   the precondition chain   (6 facts)
+    a     : got(a)                                                                   (1 fact)
+    The automatic collection (a + one 8-goal joint) did not build in 30 min.
+
 llm_by_hand_machine_shop_two | _three | _four -- machine_shop, object_amount = 2 | 3 | 4. Pieces
 come in pairs (x_2k shaped + smooth on m_2k; x_2k+1 starts at m_2k, painted + polished on m_2k+1),
 and every machine must end free. Two chain patterns per pair:
@@ -80,6 +91,20 @@ def _machine_pair(k: int):
                                     f"odd_{xo}")]
 
 
+def _stuck_car_one():
+    goal = ["car_out(c0)"]
+    facts = goal + ["tired(r0)", "free(r0, hands)", "free(r0, legs)", "got_rock(r0, good)", "got_rock(r0, bad)",
+                    "rock_under_car(c0, good)", "rock_under_car(c0, bad)"]
+    return [(goal, facts, "robot_car")]
+
+
+def _conc():
+    got = lambda *xs: [f"got({x})" for x in xs]
+    return [(got("b", "i"), got("b", "i", "f", "h"), "b_i"),
+            (got("c", "d", "e", "f", "g", "h"), got("c", "d", "e", "f", "g", "h"), "chain"),
+            (got("a"), got("a"), "a")]
+
+
 HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
     "llm_by_hand_nasa_two": (_image("r0", "o0", "c0") + _image("r1", "o1", "c1")
                              + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))
@@ -91,7 +116,9 @@ HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
                                + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))
                                + _rover("r1", ("x2", "x3"), ("h2", "h3"), ("s2", "s3"))
                                + _rover("r2", ("x4", "x5"), ("h4", "h5"), ("s4", "s5"))),
+    "llm_by_hand_stuck_car_one": _stuck_car_one(),
     "llm_by_hand_stuck_car_two": _stuck_car_two(),
+    "llm_by_hand_conc": _conc(),
     "llm_by_hand_machine_shop_two": _machine_pair(0),
     "llm_by_hand_machine_shop_three": _machine_pair(0) + _machine_even(2),
     "llm_by_hand_machine_shop_four": _machine_pair(0) + _machine_pair(1),

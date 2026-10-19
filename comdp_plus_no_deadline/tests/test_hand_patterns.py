@@ -60,7 +60,9 @@ def test_nasa_one_is_rover_r0_of_nasa_two():
     ("nasa_rover", 1, "llm_by_hand_nasa_one"),
     ("nasa_rover", 2, "llm_by_hand_nasa_two"),
     ("nasa_rover", 3, "llm_by_hand_nasa_three"),
+    ("stuck_car", 1, "llm_by_hand_stuck_car_one"),
     ("stuck_car", 2, "llm_by_hand_stuck_car_two"),
+    ("conc", 1, "llm_by_hand_conc"),
     ("machine_shop", 2, "llm_by_hand_machine_shop_two"),
     ("machine_shop", 3, "llm_by_hand_machine_shop_three"),
     ("machine_shop", 4, "llm_by_hand_machine_shop_four"),
@@ -75,7 +77,7 @@ def test_llm_by_hand_picks_the_collection_that_fits(domain, obj, expected):
     from comdp_plus_no_deadline.engines.windows_ilao_pdb import WindowsILAOPDBHeuristic
 
     cls = {"nasa_rover": up.domains.Nasa_Rover, "stuck_car": up.domains.Stuck_Car,
-           "machine_shop": up.domains.Machine_Shop}[domain]
+           "machine_shop": up.domains.Machine_Shop, "conc": up.domains.Conc}[domain]
     model = cls(kind="regular", deadline=20, object_amount=obj)
     grounder = up.engines.Grounder(model.grounding_map()) if domain == "nasa_rover" else up.engines.Grounder()
     mdp = MDP(Convert_problem(grounder._compile(model.problem).problem)._converted_problem,
