@@ -27,11 +27,13 @@ pattern over both cars (any robot can push any car, so the cars share both robot
 
 llm_by_hand_machine_shop_two | _three | _four -- machine_shop, object_amount = 2 | 3 | 4. Pieces
 come in pairs (x_2k shaped + smooth on m_2k; x_2k+1 starts at m_2k, painted + polished on m_2k+1),
-and every machine must end free. One joint pattern per pair (both chains run at once, so a joint
-pattern sees the product a min of two chain patterns would miss):
-    shaped, smooth (x_2k), painted, polished (x_2k+1), free(m_2k), free(m_2k+1),
-    on(x_2k, m_2k), on(x_2k+1, m_2k+1), at(x_2k+1, m_2k+1), hasimmersion(m_2k+1)   (10 facts)
-A lone even piece (object_amount 3: x2 on m2): shaped, smooth, free(m2), on(x2, m2)    (4 facts)
+and every machine must end free. Two chain patterns per pair:
+    even : shaped, smooth (x_2k), free(m_2k), on(x_2k, m_2k)                          (4 facts)
+    odd  : painted, polished (x_2k+1), free(m_2k+1), on(x_2k+1, m_2k+1),
+           at(x_2k+1, m_2k+1), hasimmersion(m_2k+1)                                   (6 facts)
+A lone even piece (object_amount 3: x2 on m2) gets the even pattern.
+(One 10-fact joint pattern per pair -- both chains together -- did not build in 30 min at D = 17;
+the split builds in ~100 s: 1.5k + 536k table states, h(s0) 0.8019 = the odd chain.)
 
 llm_by_hand -- picks the collection above whose goals are exactly the problem's goals and whose
 facts all exist (one name for every table row).
@@ -66,16 +68,16 @@ def _stuck_car_two():
     return [(goals, facts, "robots_joint")]
 
 
-def _machine_pair(k: int):
-    xe, xo, me, mo = f"x{2 * k}", f"x{2 * k + 1}", f"m{2 * k}", f"m{2 * k + 1}"
-    goals = [f"free({me})", f"free({mo})", f"shaped({xe})", f"smooth({xe})", f"painted({xo})", f"polished({xo})"]
-    facts = goals + [f"on({xe}, {me})", f"on({xo}, {mo})", f"at({xo}, {mo})", f"hasimmersion({mo})"]
-    return [(goals, facts, f"pair_{xe}_{xo}")]
-
-
-def _machine_alone(i: int):
+def _machine_even(i: int):
     goals = [f"free(m{i})", f"shaped(x{i})", f"smooth(x{i})"]
-    return [(goals, goals + [f"on(x{i}, m{i})"], f"alone_x{i}")]
+    return [(goals, goals + [f"on(x{i}, m{i})"], f"even_x{i}")]
+
+
+def _machine_pair(k: int):
+    xo, mo = f"x{2 * k + 1}", f"m{2 * k + 1}"
+    odd = [f"free({mo})", f"painted({xo})", f"polished({xo})"]
+    return _machine_even(2 * k) + [(odd, odd + [f"on({xo}, {mo})", f"at({xo}, {mo})", f"hasimmersion({mo})"],
+                                    f"odd_{xo}")]
 
 
 HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
@@ -91,7 +93,7 @@ HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
                                + _rover("r2", ("x4", "x5"), ("h4", "h5"), ("s4", "s5"))),
     "llm_by_hand_stuck_car_two": _stuck_car_two(),
     "llm_by_hand_machine_shop_two": _machine_pair(0),
-    "llm_by_hand_machine_shop_three": _machine_pair(0) + _machine_alone(2),
+    "llm_by_hand_machine_shop_three": _machine_pair(0) + _machine_even(2),
     "llm_by_hand_machine_shop_four": _machine_pair(0) + _machine_pair(1),
 }
 AUTO = "llm_by_hand"          # picks the collection that fits the problem
