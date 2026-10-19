@@ -16,6 +16,25 @@ rovers and images, as for every collection):
 
 llm_by_hand_nasa_one -- nasa_rover, object_amount = 1 (rover r0; rocks x0, x1; image o0): the same
 picks for the one rover.
+llm_by_hand_nasa_three -- nasa_rover, object_amount = 3: the same picks for rovers r0, r1, r2.
+
+llm_by_hand_stuck_car_two -- stuck_car, object_amount = 2 (robots r0, r1; cars c0, c1). ONE joint
+pattern over both cars (any robot can push any car, so the cars share both robots):
+    car_out x2, tired x2, free(r, hands) x2, rock_under_car(c, good) x2, got_rock(r, good) x2
+                                                                                    (10 facts)
+    Hands are what every push / search / rest needs; legs are left out (counted free). The bad
+    rock is left out: a hidden rock fact is read by push's probability, so VI takes its best value.
+
+llm_by_hand_machine_shop_two | _three | _four -- machine_shop, object_amount = 2 | 3 | 4. Pieces
+come in pairs (x_2k shaped + smooth on m_2k; x_2k+1 starts at m_2k, painted + polished on m_2k+1),
+and every machine must end free. One joint pattern per pair (both chains run at once, so a joint
+pattern sees the product a min of two chain patterns would miss):
+    shaped, smooth (x_2k), painted, polished (x_2k+1), free(m_2k), free(m_2k+1),
+    on(x_2k, m_2k), on(x_2k+1, m_2k+1), at(x_2k+1, m_2k+1), hasimmersion(m_2k+1)   (10 facts)
+A lone even piece (object_amount 3: x2 on m2): shaped, smooth, free(m2), on(x2, m2)    (4 facts)
+
+llm_by_hand -- picks the collection above whose goals are exactly the problem's goals and whose
+facts all exist (one name for every table row).
 
 The goals of a pattern are its communicated_* facts. Every listed fact must exist in the problem.
 """
@@ -40,6 +59,25 @@ def _image(rover: str, objective: str, camera: str):
              f"image_{objective}")]
 
 
+def _stuck_car_two():
+    goals = ["car_out(c0)", "car_out(c1)"]
+    facts = goals + [f"{name}({r}{arg})" for name, arg in (("tired", ""), ("free", ", hands"), ("got_rock", ", good"))
+                     for r in ("r0", "r1")] + ["rock_under_car(c0, good)", "rock_under_car(c1, good)"]
+    return [(goals, facts, "robots_joint")]
+
+
+def _machine_pair(k: int):
+    xe, xo, me, mo = f"x{2 * k}", f"x{2 * k + 1}", f"m{2 * k}", f"m{2 * k + 1}"
+    goals = [f"free({me})", f"free({mo})", f"shaped({xe})", f"smooth({xe})", f"painted({xo})", f"polished({xo})"]
+    facts = goals + [f"on({xe}, {me})", f"on({xo}, {mo})", f"at({xo}, {mo})", f"hasimmersion({mo})"]
+    return [(goals, facts, f"pair_{xe}_{xo}")]
+
+
+def _machine_alone(i: int):
+    goals = [f"free(m{i})", f"shaped(x{i})", f"smooth(x{i})"]
+    return [(goals, goals + [f"on(x{i}, m{i})"], f"alone_x{i}")]
+
+
 HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
     "llm_by_hand_nasa_two": (_image("r0", "o0", "c0") + _image("r1", "o1", "c1")
                              + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))
@@ -47,12 +85,37 @@ HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
     # nasa_rover object_amount = 1 is rover r0 of the problem above: the same picks for one rover.
     "llm_by_hand_nasa_one": (_image("r0", "o0", "c0")
                              + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))),
+    "llm_by_hand_nasa_three": (_image("r0", "o0", "c0") + _image("r1", "o1", "c1") + _image("r2", "o2", "c2")
+                               + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))
+                               + _rover("r1", ("x2", "x3"), ("h2", "h3"), ("s2", "s3"))
+                               + _rover("r2", ("x4", "x5"), ("h4", "h5"), ("s4", "s5"))),
+    "llm_by_hand_stuck_car_two": _stuck_car_two(),
+    "llm_by_hand_machine_shop_two": _machine_pair(0),
+    "llm_by_hand_machine_shop_three": _machine_pair(0) + _machine_alone(2),
+    "llm_by_hand_machine_shop_four": _machine_pair(0) + _machine_pair(1),
 }
+AUTO = "llm_by_hand"          # picks the collection that fits the problem
+HAND_GROWTHS = (AUTO,) + tuple(HAND_PATTERNS)
+
+
+def pick_hand_collection(fact_by_name: Dict[str, object], goals) -> str:
+    """The collection whose goals are exactly ``goals`` and whose facts all exist."""
+    goal_names = {str(g) for g in goals}
+    fits = [name for name, spec in HAND_PATTERNS.items()
+            if {x for g, _f, _l in spec for x in g} == goal_names
+            and all(x in fact_by_name for _g, facts, _l in spec for x in facts)]
+    if len(fits) != 1:
+        raise ValueError(f"TP_MCTS_WILAO_PATTERN_GROWTH={AUTO!r}: {len(fits)} hand collections fit this problem "
+                         f"{sorted(fits)}; goals {sorted(goal_names)[:6]}")
+    return fits[0]
 
 
 def hand_patterns(name: str, fact_by_name: Dict[str, object], goals) -> List[Tuple[list, list, str]]:
     """``[(goals, facts, label)]`` with the problem's own fact objects. Raises if the problem does
-    not have every listed fact or goal (a collection is written for one problem)."""
+    not have every listed fact or goal (a collection is written for one problem). ``llm_by_hand``
+    picks the collection that fits."""
+    if name == AUTO:
+        name = pick_hand_collection(fact_by_name, goals)
     spec = HAND_PATTERNS[name]
     goal_names = {str(g) for g in goals}
     out = []

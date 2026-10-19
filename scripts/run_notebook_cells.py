@@ -8,6 +8,8 @@ those boxes one after the other in Jupyter, but from a shell (e.g. over ssh on t
 --set NAME=VALUE override a config variable after every cell, so it wins over the config box (a value
                  the config derives from it must be overridden too). VALUE is a Python literal; the
                  notebook file is never changed
+--env NAME=VALUE set an environment variable after every cell (VALUE as text), so it wins over the
+                 config box's os.environ lines, e.g. --env TP_MCTS_WILAO_PATTERN_GROWTH=llm_by_hand
 
 display() falls back to print when IPython is not installed.
 """
@@ -15,6 +17,7 @@ display() falls back to print when IPython is not installed.
 import argparse
 import ast
 import json
+import os
 import sys
 import time
 
@@ -25,6 +28,7 @@ def main():
     ap.add_argument("--cells", type=int, nargs="*", default=[])
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
+    ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
     args = ap.parse_args()
     for stream in (sys.stdout, sys.stderr):              # box-drawing / arrows on any console
         try:
@@ -44,6 +48,11 @@ def main():
     for item in args.set:
         name, _, value = item.partition("=")
         overrides[name.strip()] = ast.literal_eval(value.strip())
+
+    env = {}
+    for item in args.env:
+        name, _, value = item.partition("=")
+        env[name.strip()] = value.strip()
 
     try:
         from IPython.display import display
@@ -66,6 +75,9 @@ def main():
         if overrides:                                    # after every cell, so a config cell never wins
             namespace.update(overrides)
             print(f"[overrides] {overrides}", flush=True)
+        if env:
+            os.environ.update(env)
+            print(f"[env] {env}", flush=True)
         print(f"===== [cell {i}] done in {time.perf_counter() - started:.1f}s", flush=True)
 
 

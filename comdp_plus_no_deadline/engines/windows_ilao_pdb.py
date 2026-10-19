@@ -74,8 +74,9 @@ Knobs (environment, set from experiments.ipynb):
                                     pairs (a COLLECTION per goal group: the group's goals
                                     + one shared resource each, fact_pattern.
                                     resource_patterns; min inside a group) |
-                                    llm_by_hand_nasa_two | _one (facts picked by hand for
-                                    nasa_rover obj 2 | 1, hand_patterns.py)  (cegar)
+                                    llm_by_hand_nasa_two | _one | ... (facts picked by hand
+                                    for one problem, hand_patterns.py) | llm_by_hand (the
+                                    hand collection that fits the problem)   (cegar)
     TP_MCTS_WILAO_LOGIC_SOURCES     logic only: rollouts random | greedy     (random)
     TP_MCTS_WILAO_LOGIC_ROLLOUTS    logic only: rollouts per round           (20)
     TP_MCTS_WILAO_LOGIC_DEPTH       logic only: steps per rollout            (60)
@@ -124,7 +125,7 @@ from collections import Counter
 from typing import Dict, FrozenSet, List, Optional
 
 from comdp_plus_no_deadline.engines.cegar_pattern import cegar_pattern
-from comdp_plus_no_deadline.engines.hand_patterns import HAND_PATTERNS, hand_patterns
+from comdp_plus_no_deadline.engines.hand_patterns import AUTO, HAND_GROWTHS, hand_patterns, pick_hand_collection
 from comdp_plus_no_deadline.engines.logic_cegar import logic_cegar_patterns
 from comdp_plus_no_deadline.engines.fact_pattern import (OPAQUE_EVENTS, FactPatternModel, exact_statics_default,
                                                          grow_pattern, independent_goal_groups, resource_patterns,
@@ -223,9 +224,9 @@ class WindowsILAOPDBHeuristic:
         self.extend_offline = bool(_env_int("TP_MCTS_WILAO_OFFLINE_EXTEND", 1))
         self.full_table = bool(_env_int("TP_MCTS_WILAO_FULL_TABLE", 1))
         self.growth = (os.environ.get("TP_MCTS_WILAO_PATTERN_GROWTH") or "cegar").strip().lower()
-        if self.growth not in ("cegar", "static", "logic", "pairs") and self.growth not in HAND_PATTERNS:
+        if self.growth not in ("cegar", "static", "logic", "pairs") and self.growth not in HAND_GROWTHS:
             raise ValueError(f"TP_MCTS_WILAO_PATTERN_GROWTH={self.growth!r}: use cegar | static | logic | pairs | "
-                             + " | ".join(HAND_PATTERNS))
+                             + " | ".join(HAND_GROWTHS))
         self.logic_sources = (os.environ.get("TP_MCTS_WILAO_LOGIC_SOURCES") or "random").strip().lower()
         if self.logic_sources not in ("random", "greedy"):
             raise ValueError(f"TP_MCTS_WILAO_LOGIC_SOURCES={self.logic_sources!r}: use random | greedy")
@@ -329,8 +330,11 @@ class WindowsILAOPDBHeuristic:
                                          depth=self.logic_depth, rank=self.logic_rank)
             self.logic_seconds = round(time.perf_counter() - t0, 2)
         # pairs: several patterns per group (one per shared resource); otherwise one per group
-        if self.growth in HAND_PATTERNS:
-            entries = hand_patterns(self.growth, self._facts_by_name(base), goals)
+        hand_name = None
+        if self.growth in HAND_GROWTHS:
+            by_name = self._facts_by_name(base)
+            hand_name = pick_hand_collection(by_name, goals) if self.growth == AUTO else self.growth
+            entries = hand_patterns(hand_name, by_name, goals)
         elif self.growth == "pairs":
             entries = [(g, f, r) for g, f, r in resource_patterns(base.ops(), groups, facts)]
         else:
@@ -422,7 +426,7 @@ class WindowsILAOPDBHeuristic:
         self.offline_report = {
             "patterns": len(self.patterns),
             "pattern_facts": [len(p["facts"]) if p["facts"] is not None else "all" for p in self.patterns],
-            "growth": self.growth if self.growth in HAND_PATTERNS else (
+            "growth": hand_name if hand_name is not None else (
                 "cegar" if cegar else ("logic" if logic is not None else
                                        ("pairs" if self.growth == "pairs" else "static"))),
             "resources": [p["resource"] for p in self.patterns],

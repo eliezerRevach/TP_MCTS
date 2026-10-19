@@ -54,3 +54,34 @@ def test_nasa_one_is_rover_r0_of_nasa_two():
     assert labels == ["hands_r0", "image_o0", "stores_r0"]
     covered = {str(g) for goals, _phi, _l in entries for g in goals}
     assert covered == {str(g) for g in mdp.problem.goals}
+
+
+@pytest.mark.parametrize("domain, obj, expected", [
+    ("nasa_rover", 1, "llm_by_hand_nasa_one"),
+    ("nasa_rover", 2, "llm_by_hand_nasa_two"),
+    ("nasa_rover", 3, "llm_by_hand_nasa_three"),
+    ("stuck_car", 2, "llm_by_hand_stuck_car_two"),
+    ("machine_shop", 2, "llm_by_hand_machine_shop_two"),
+    ("machine_shop", 3, "llm_by_hand_machine_shop_three"),
+    ("machine_shop", 4, "llm_by_hand_machine_shop_four"),
+])
+def test_llm_by_hand_picks_the_collection_that_fits(domain, obj, expected):
+    import unified_planning as up
+    import unified_planning.domains  # noqa: F401
+    from unified_planning.engines.convert_problem import Convert_problem
+    from unified_planning.engines.mdp import MDP
+    from comdp_plus_no_deadline.engines.hand_patterns import HAND_PATTERNS, pick_hand_collection
+    from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel
+    from comdp_plus_no_deadline.engines.windows_ilao_pdb import WindowsILAOPDBHeuristic
+
+    cls = {"nasa_rover": up.domains.Nasa_Rover, "stuck_car": up.domains.Stuck_Car,
+           "machine_shop": up.domains.Machine_Shop}[domain]
+    model = cls(kind="regular", deadline=20, object_amount=obj)
+    grounder = up.engines.Grounder(model.grounding_map()) if domain == "nasa_rover" else up.engines.Grounder()
+    mdp = MDP(Convert_problem(grounder._compile(model.problem).problem)._converted_problem,
+              discount_factor=1.0, reward_mode="terminal", step_penalty=0.0)
+    facts = WindowsILAOPDBHeuristic(mdp)._facts_by_name(EngineModel(mdp))
+    assert pick_hand_collection(facts, mdp.problem.goals) == expected
+    entries = hand_patterns("llm_by_hand", facts, mdp.problem.goals)
+    assert len(entries) == len(HAND_PATTERNS[expected])
+    assert {str(g) for goals, _phi, _l in entries for g in goals} == {str(g) for g in mdp.problem.goals}
