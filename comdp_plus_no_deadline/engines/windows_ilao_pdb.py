@@ -102,6 +102,17 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_BLUR              window grid eps: lo down / hi up to eps, e exact
                                     (fewer states, still an upper bound;
                                     windows_lao.py "Blur"); 0 = off          (0)
+    TP_MCTS_WILAO_RULES             window rules: windows | fixed_stn (the STN never moves,
+                                    only LB goes up; windows_lao.py "Rules") (windows)
+    TP_MCTS_WILAO_FIT               cover lookup: shift (closed form) | stn (the same
+                                    fit by Floyd-Warshall)                   (shift)
+    TP_MCTS_WILAO_UB                1 = each table state keeps T(s), the least time to a
+                                    goal (luckiest outcomes, one Dijkstra from the
+                                    goals); r < T answers 0 at once          (0)
+    TP_MCTS_WILAO_MISS_UB           1 = on a table miss, Dijkstra forward from the leaf
+                                    (luckiest outcomes): no goal within r -> 0, exact
+                                    in the relaxation; cap hit -> the normal miss path (0)
+    TP_MCTS_WILAO_MISS_UB_STATES    that search's cap, states per root       (5000)
     TP_MCTS_WILAO_TABLE_CACHE       folder for built tables; empty = off     ('')
                                     The first process with these settings builds
                                     and saves; every other one waits for the file
@@ -132,7 +143,8 @@ from comdp_plus_no_deadline.engines.fact_pattern import (OPAQUE_EVENTS, FactPatt
                                                          transition_reads_default)
 from comdp_plus_no_deadline.engines.survivor_sweep import relaxed_actions_from_engine
 from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel, goal_relevance_closure
-from comdp_plus_no_deadline.engines.windows_lao import WindowsLAO, WindowsTable, blur_default
+from comdp_plus_no_deadline.engines.windows_lao import (WindowsLAO, WindowsTable, blur_default, fit_default,
+                                                        rules_default, ub_default)
 
 
 # Legacy single setting -> (AGG, GROUPING).
@@ -237,6 +249,8 @@ class WindowsILAOPDBHeuristic:
             raise ValueError(f"TP_MCTS_WILAO_LOGIC_RANK={self.logic_rank!r}: use frequency | restrict")
         self.pattern_facts = _env_int("TP_MCTS_WILAO_PATTERN_FACTS", 8)
         self.no_stn_pass = bool(_env_int("TP_MCTS_WILAO_NO_STN_PASS", 0))
+        self.miss_ub = bool(_env_int("TP_MCTS_WILAO_MISS_UB", 0))
+        self.miss_ub_states = _env_int("TP_MCTS_WILAO_MISS_UB_STATES", 5000)
         self.patterns: List[dict] = []
         self.groups: List[List[int]] = []
         self.counts: Counter = Counter()
@@ -448,6 +462,7 @@ class WindowsILAOPDBHeuristic:
                                    else [] for p in self.patterns],
             "opaque_events": sorted(OPAQUE_EVENTS),
             "blur": str(blur_default()),
+            "rules": rules_default(), "fit": fit_default(), "ub": ub_default(), "miss_ub": self.miss_ub,
             "groups": [[self.patterns[i]["goals"][0] for i in members] for members in self.groups],
             "values": [None if p["offline_value"] is None else round(p["offline_value"], 6)
                        for p in self.patterns],
@@ -488,6 +503,8 @@ class WindowsILAOPDBHeuristic:
                     exact_statics_default(), transition_reads_default(), str(blur_default()),
                     self.logic_sources, self.logic_rollouts,
                     self.logic_depth, self.logic_rank)
+        if rules_default() != "windows" or ub_default():  # old keys (and files) stay valid
+            settings += (rules_default(), ub_default())
         h.update(repr(settings).encode())
         return h.hexdigest()[:16]
 
@@ -518,6 +535,7 @@ class WindowsILAOPDBHeuristic:
                     "cegar_log": p.get("cegar_log"), "cegar_seconds": p.get("cegar_seconds"),
                     "index": {(name_of(f), q, _compact(w)): i for (f, q, w), i in t.index.items()},
                     "V": t.V, "tmin": [_compact_number(x) for x in t.tmin], "grid": t.grid,
+                    "T": None if t.T is None else [None if x is None else _compact_number(x) for x in t.T],
                     "horizon": t.horizon, "stats": t.stats}, fh, protocol=pickle.HIGHEST_PROTOCOL)
         os.replace(tmp, path)                       # atomic: a reader never sees half a file
         return True
@@ -572,6 +590,7 @@ class WindowsILAOPDBHeuristic:
                     f2 = facts_of[fs] = frozenset(fact[x] for x in fs)
                 index[(f2, shared.setdefault(q, q), shared.setdefault(w, w))] = i
             table.index, table.V, table.tmin = index, rec["V"], rec["tmin"]
+            table.T = rec.get("T") if table.ub else None
             table.grid, table.horizon, table.stats = rec["grid"], rec["horizon"], rec["stats"]
             for (f2, q, w), k in index.items():
                 table._by_fq.setdefault((f2, q), []).append((w, k))
@@ -636,6 +655,11 @@ class WindowsILAOPDBHeuristic:
                     per["table_miss"] += 1
             if value is None:
                 value, kind = solver.lookup(local, r, running)
+            if value is None and self.miss_ub:
+                out = solver.goal_out_of_reach(local, r, running, self.miss_ub_states)
+                self.counts["miss_ub_" + {True: "zero", False: "reachable", None: "cap"}[out]] += 1
+                if out:
+                    value, kind = 0.0, "miss_ub_zero"
             if value is None:
                 if self.miss_mode == "one":
                     value, kind = 1.0, "miss_one"
@@ -643,9 +667,10 @@ class WindowsILAOPDBHeuristic:
                     value = solver.solve(local, r, running, lazy=True, time_budget=self.query_seconds,
                                          max_expansions=self.query_expansions)
                     kind = "lazy_optimal" if solver.complete else "lazy_cut"
-            self.counts[kind] += 1
+            if kind != "miss_ub_zero":                  # counted above
+                self.counts[kind] += 1
             per[kind] += 1
-            if kind.startswith("table_") or kind == "miss_one":
+            if kind.startswith("table_") or kind in ("miss_one", "miss_ub_zero"):
                 memo[mkey] = (value, kind)
             values.append(value)
         self.query_seconds_total += time.perf_counter() - started
@@ -685,7 +710,7 @@ class WindowsILAOPDBHeuristic:
 
     def report(self) -> Dict[str, object]:
         lookups = sum(self.counts[k] for k in ("table_exact", "table_cover", "exact", "cover",
-                                                "miss_one", "lazy_optimal", "lazy_cut"))
+                                                "miss_one", "miss_ub_zero", "lazy_optimal", "lazy_cut"))
         return {
             "offline": self.offline_report,
             "offline_seconds": self.offline_report.get("seconds"),
@@ -699,6 +724,7 @@ class WindowsILAOPDBHeuristic:
             "miss_one": self.counts["miss_one"],
             "lazy_optimal": self.counts["lazy_optimal"],
             "lazy_cut": self.counts["lazy_cut"],
+            "miss_ub": {k: self.counts["miss_ub_" + k] for k in ("zero", "reachable", "cap")} if self.miss_ub else None,
             "ms_per_query": round(1000 * self.query_seconds_total / max(1, self.counts["queries"]), 2),
             "solved_states_now": [len(p["solver"].solved) for p in self.patterns],
         }

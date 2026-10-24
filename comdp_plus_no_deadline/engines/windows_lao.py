@@ -32,6 +32,17 @@ least as much -- the value stays an upper bound. e is NOT rounded: rounding it
 down charges less than the real time (eps = 3 gave V = 1.0 everywhere on nasa).
 Only the window variants shrink (facts and end orders are untouched).
 
+Rules (``rules`` / TP_MCTS_WILAO_RULES): ``windows`` (default, the rules above) or
+``fixed_stn`` -- the STN of the running actions never moves, only LB (the time
+charged so far) goes up. Windows are kept relative to LB, so one situation reached at
+different times is one state (no clock in the key) and e = lo always:
+    start x in a gap : as above (e = lo)
+    first end x fires: r -= lo_x
+                       others lo = lo - lo_x,  hi = min(hi - lo_x, hi_x - lo_x + d)
+                       (the same absolute window seen from the new LB; everyone left
+                       started before x ended, so it ends by E_x + d)
+Blur rounds only hi up there (lo is the charge).
+
 Hidden reads: an outcome probability may read a fact outside a fact-capped pattern
 (push reads rock_under_car). Each value of those facts gives its own option of the
 same event, so the max over options picks the best one -- an upper bound
@@ -131,6 +142,42 @@ def end_windows(windows: Sequence[Window], durations: Sequence[Fraction]
     return normalise(rest), e_x
 
 
+def end_windows_fixed(windows: Sequence[Window], durations: Sequence[Fraction]
+                      ) -> Tuple[Optional[Tuple[Window, ...]], Fraction]:
+    """fixed_stn: the first end fires, LB goes up by lo_x and nothing else moves
+    (module doc, "Rules"); returns (windows of the rest relative to the new LB, lo_x)."""
+    lo_x, hi_x, _e = windows[0]
+    rest = []
+    for (lo, hi, _e), d in zip(windows[1:], durations):
+        new_lo = lo - lo_x
+        rest.append((new_lo, min(hi - lo_x, hi_x - lo_x + d), new_lo))
+    return normalise(rest), lo_x
+
+
+def rules_default() -> str:
+    """TP_MCTS_WILAO_RULES: windows (default) | fixed_stn."""
+    text = (os.environ.get("TP_MCTS_WILAO_RULES") or "windows").strip().lower()
+    if text not in ("windows", "fixed_stn"):
+        raise ValueError(f"TP_MCTS_WILAO_RULES={text!r}: use windows | fixed_stn")
+    return text
+
+
+def fit_default() -> str:
+    """TP_MCTS_WILAO_FIT: shift (default, the closed form) | stn (Floyd-Warshall)."""
+    text = (os.environ.get("TP_MCTS_WILAO_FIT") or "shift").strip().lower()
+    if text not in ("shift", "stn"):
+        raise ValueError(f"TP_MCTS_WILAO_FIT={text!r}: use shift | stn")
+    return text
+
+
+def ub_default() -> bool:
+    """TP_MCTS_WILAO_UB: 1 = the table computes T (UB) and answers r < T with 0; 0 = off (default)."""
+    text = (os.environ.get("TP_MCTS_WILAO_UB") or "0").strip().lower()
+    if text not in ("0", "1"):
+        raise ValueError(f"TP_MCTS_WILAO_UB={text!r}: use 0 | 1")
+    return text == "1"
+
+
 def blur_default() -> Fraction:
     """TP_MCTS_WILAO_BLUR: the window grid eps; 0 (default) = no blur."""
     text = (os.environ.get("TP_MCTS_WILAO_BLUR") or "0").strip()
@@ -143,12 +190,13 @@ def blur_default() -> Fraction:
     return eps
 
 
-def blur_windows(windows: Optional[Tuple[Window, ...]], eps: Fraction) -> Optional[Tuple[Window, ...]]:
-    """lo down and hi up to the grid eps, e exact (module doc)."""
+def blur_windows(windows: Optional[Tuple[Window, ...]], eps: Fraction,
+                 hi_only: bool = False) -> Optional[Tuple[Window, ...]]:
+    """lo down and hi up to the grid eps, e exact (module doc); ``hi_only`` for fixed_stn."""
     if windows is None or not eps:
         return windows
-    return normalise(tuple((Fraction(math.floor(lo / eps)) * eps, Fraction(math.ceil(hi / eps)) * eps, e)
-                           for lo, hi, e in windows))
+    return normalise(tuple((lo if hi_only else Fraction(math.floor(lo / eps)) * eps,
+                            Fraction(math.ceil(hi / eps)) * eps, e) for lo, hi, e in windows))
 
 
 def fold_zero_time_loop(branches, s):
@@ -180,10 +228,13 @@ class WindowsLAO:
     def __init__(self, model, *, heuristic: str = "sweep", epsilon: float = 1e-6,
                  max_expansions: int = 2_000_000, prune_inert: bool = True,
                  time_budget: Optional[float] = None, sweep_horizon=None,
-                 relaxed_actions: Optional[list] = None, blur=None):
+                 relaxed_actions: Optional[list] = None, blur=None, rules: Optional[str] = None):
         self.model = model
         # Window grid eps (module doc, "Blur"); None = TP_MCTS_WILAO_BLUR, 0 = off.
         self.blur = blur_default() if blur is None else Fraction(blur)
+        # Window rules (module doc, "Rules"); None = TP_MCTS_WILAO_RULES.
+        self.rules = rules_default() if rules is None else rules
+        self._fixed = self.rules == "fixed_stn"
         self.heuristic = heuristic
         self.epsilon = float(epsilon)
         self.max_expansions = int(max_expansions)
@@ -315,6 +366,43 @@ class WindowsLAO:
                 kind = "cover"
             best = value if best is None else max(best, value)
         return (0.0 if best is None else best), kind
+
+    def goal_out_of_reach(self, facts, r, running: Sequence[Tuple[str, object]] = (),
+                          max_states: int = 5000) -> Optional[bool]:
+        """The miss-path UB (TP_MCTS_WILAO_MISS_UB): Dijkstra forward from the leaf over
+        (F, Q, W), every outcome a possible branch (the luckiest one), charges as time.
+        True: no root reaches a goal within r -- even the relaxed problem cannot, so the
+        value is 0. False: some root can. None: ``max_states`` ran out first, no answer."""
+        facts, r = frozenset(facts), Fraction(r)
+        if self.model.goals <= facts:
+            return False
+        for root in self._roots(facts, r, running):
+            start = root[:3]
+            best = {start: Fraction(0)}
+            heap = [(Fraction(0), 0, start)]
+            count, popped = 1, 0
+            while heap:
+                t, _n, s = heapq.heappop(heap)
+                if t > best.get(s, t):
+                    continue
+                if self.model.goals <= s[0]:
+                    return False
+                popped += 1
+                if popped > max_states:
+                    return None
+                for _label, charge, inert_e, q2, w2, outs in self._rest_options(*s):
+                    arrive = t + charge
+                    if arrive > r or (inert_e is not None and inert_e > r - t):
+                        continue
+                    for f2, p in outs:
+                        if p <= _EPS:
+                            continue
+                        child = (frozenset(f2), q2, w2)
+                        if arrive < best.get(child, r + 1):
+                            best[child] = arrive
+                            count += 1
+                            heapq.heappush(heap, (arrive, count, child))
+        return True
 
     def _cover_value(self, s: State) -> Optional[float]:
         facts, queue, windows, r = s
@@ -499,7 +587,7 @@ class WindowsLAO:
             d = self.durations[name]
             inert = self.prune_inert and self._inert(name)
             for gap in range(len(queue) + 1):
-                new = blur_windows(start_windows(windows, d, gap), self.blur)
+                new = blur_windows(start_windows(windows, d, gap), self.blur, self._fixed)
                 if new is None:
                     self.stats["pruned_gap"] += 1
                     continue
@@ -510,8 +598,9 @@ class WindowsLAO:
             x = queue[0]
             op = self.ops[x]
             if self._end_legal(op, facts):
-                rest, charge = end_windows(windows, [self.durations[k] for k in queue[1:]])
-                rest = blur_windows(rest, self.blur)
+                end_rule = end_windows_fixed if self._fixed else end_windows
+                rest, charge = end_rule(windows, [self.durations[k] for k in queue[1:]])
+                rest = blur_windows(rest, self.blur, self._fixed)
                 if rest is None:
                     self.stats["pruned_gap"] += 1
                 else:
@@ -652,27 +741,39 @@ class WindowsTable:
               A state is only ever at r <= horizon - tmin; cells beyond that are set
               to 1 (never read by a reachable cell, and a sound answer if a lookup
               lands there).
-    lookup  : the leaf's state itself, else the table states with the same F and Q that
-              fit it some time d >= 0 after their event: a table state holds the windows
-              at an event, a leaf sits d after it, so it needs
-                  lo - d <= rem <= hi - d   and   e - d <= rem     for every running end
-              and r + d <= horizon - tmin(s) (the event cannot come before tmin).
-              EVERY fitting state is an upper bound on its own, so the smallest value
-              over them is returned. Why V(s, r + d) >= V(leaf, r):
-                1. the leaf dated back by d, windows rem + d at r + d, is worth at
-                   least the leaf: after an end the two are the same state; after a
-                   start the dated one is looser; every prune passes for it whenever
-                   it passes for the leaf;
-                2. the windows MDP is monotone in the order "same F and Q, lo <=,
-                   hi >=, r >=, r - e >=": every start, end and instant maps a looser
-                   state to a looser successor, and every prune is monotone. The
-                   fitting condition says exactly s >= the dated leaf.
-              The smallest fitting d gives the tightest value. None fits: a miss.
+    lookup  : the leaf's state itself, else SHIFT IT BACK: a table state holds the
+              windows at an event, a leaf usually sits some d after one. Moving the
+              leaf back by d gives every running end d more time left and r + d.
+              It fits table state j (same F and Q) when, per running action,
+                  lo_j <= lo + d,   e_j <= e + d,   hi + d <= hi_j
+              and r + d <= horizon - tmin_j (j is never reached before tmin_j):
+                  d in [max(0, lo_j - lo, e_j - e),  min(hi_j - hi, horizon - tmin_j - r)]
+              Take the smallest d (least extra time = tightest) and read V(j, r + d).
+              Every fitting j is an upper bound on its own, so the smallest value
+              over them is returned; none fits: a miss. Why V(j, r + d) >= V(leaf, r):
+                1. the leaf moved back by d is worth at least the leaf (d more time;
+                   after an end the two are the same state, after a start the moved
+                   one is looser; every prune passes for it whenever it does for the leaf);
+                2. the windows MDP is monotone in "same F and Q, lo <=, hi >=, r >=,
+                   r - e >=", and the fit says exactly j >= the moved leaf.
+              ``fit`` / TP_MCTS_WILAO_FIT: shift (that closed form) or stn -- the same
+              question asked of an STN and answered by Floyd-Warshall (``stn_shift``).
+    UB      : (``ub`` / TP_MCTS_WILAO_UB = 1, off by default)
+              T(s), the least time from s to a goal when every outcome is a possible
+              branch (the luckiest one): one Dijkstra pass from the goals over the
+              reversed graph, an option costing max(its inert need, charge + T(next)).
+              No policy is faster, so V(s, r) = 0 for r < T(s) (UB(s) = D - T(s) in
+              time-since-0 terms); lookups answer those with 0 at once. The curves are
+              already 0 there, so only the placeholder cells beyond horizon - tmin can
+              change (counted as ub_zero_curve_nonzero).
     """
 
-    def __init__(self, lao: WindowsLAO, horizon):
+    def __init__(self, lao: WindowsLAO, horizon, fit: Optional[str] = None, ub: Optional[bool] = None):
         self.lao = lao
         self.horizon = Fraction(horizon)
+        self.fit = fit_default() if fit is None else fit
+        self.ub = ub_default() if ub is None else bool(ub)
+        self.T: Optional[list] = None                     # T[i] = least time to a goal, None = never
         self.states: List[Tuple[FrozenSet, Tuple[str, ...], Tuple[Window, ...]]] = []
         self.index: Dict[tuple, int] = {}
         self.options: List[Optional[list]] = []
@@ -740,13 +841,17 @@ class WindowsTable:
                             heapq.heappush(heap, (arrive, j))
             options[i] = row
         cut = 0
+        self._cut = []
         for i, row in enumerate(options):
             if row is pending:                            # first reached after the deadline
                 options[i] = []
                 cut += 1
+                self._cut.append(i)
         self.states, self.index, self.options = states, index, options
         self.tmin = [self.horizon + 1 if x is None else x for x in tmin]
         forward_seconds = time.perf_counter() - started
+        self.T = self._time_to_goal() if self.ub else None
+        ub_seconds = time.perf_counter() - started - forward_seconds
         method = self._backward()
         for k, (facts, queue, windows) in enumerate(states):
             self._by_fq.setdefault((facts, queue), []).append((windows, k))
@@ -755,10 +860,39 @@ class WindowsTable:
             states=len(states), cut_after_deadline=cut,
             edges=sum(len(b) for row in options if row for _c, _e, b, _l in row),
             instant_noops_dropped=noops, instant_loops_folded=folded, backward=method, grid=str(self.grid),
-            forward_seconds=round(forward_seconds, 2),
-            backward_seconds=round(time.perf_counter() - started - forward_seconds, 2),
-            seconds=round(time.perf_counter() - started, 2))
+            forward_seconds=round(forward_seconds, 2), ub_seconds=round(ub_seconds, 2),
+            backward_seconds=round(time.perf_counter() - started - forward_seconds - ub_seconds, 2),
+            seconds=round(time.perf_counter() - started, 2), rules=lao.rules, ub=self.ub,
+            never_reach_goal=None if self.T is None else sum(1 for t in self.T if t is None))
         return True
+
+    # -- UB --------------------------------------------------------------------
+    def _time_to_goal(self) -> List[Optional[Fraction]]:
+        """T(s) by Dijkstra from the goals over the reversed graph (class doc, UB). The
+        first child of an option to be settled is its luckiest one, so the option's cost
+        max(need, charge + T(child)) is final then; it is >= T(child), so label-setting holds.
+        A state never expanded (first reached after the deadline) is unknown, not dead:
+        it starts at 0 like a goal, so T stays a lower bound everywhere."""
+        n = len(self.states)
+        into: List[List[Tuple[int, Fraction, Fraction]]] = [[] for _ in range(n)]
+        for i, row in enumerate(self.options):
+            for charge, inert_e, branches, _label in row or ():
+                need = Fraction(0) if inert_e is None else Fraction(inert_e)
+                for _p, j in branches:
+                    into[j].append((i, Fraction(charge), need))
+        T: List[Optional[Fraction]] = [None] * n
+        heap = [(Fraction(0), i) for i, row in enumerate(self.options) if row is None]
+        heap += [(Fraction(0), i) for i in self._cut]
+        heapq.heapify(heap)
+        while heap:
+            t, j = heapq.heappop(heap)
+            if T[j] is not None:
+                continue
+            T[j] = t
+            for i, charge, need in into[j]:
+                if T[i] is None:
+                    heapq.heappush(heap, (max(need, charge + t), i))
+        return T
 
     # -- backward ------------------------------------------------------------
     def _backward(self) -> str:
@@ -930,41 +1064,45 @@ class WindowsTable:
         for f, q, w, _r in self.lao._roots(facts, r, running):
             i = self.index.get((f, q, w))
             if i is not None:
-                value = self.value(i, r)
+                value = self._read(i, r)
                 self.fit_stats["exact"] += 1
             else:
-                detail: list = []
-                values = self.fitting_values(f, q, w, r, detail)
-                if not values:
+                fits = self._fits(f, q, w, r)
+                if not fits:
                     self.fit_stats["miss"] += 1
                     return None, "miss"
-                value = min(values)
-                self._record_fit(q, w, r, values, detail)
+                value, d, w_j = min(((self._read(j, r + d), d, w_j) for d, j, w_j in fits),
+                                    key=lambda x: (x[0], x[1]))
+                self._record_fit(q, w, r, fits, value, d, w_j)
                 kind = "cover"
             best = value if best is None else max(best, value)
         return (0.0 if best is None else best), kind
 
-    def _record_fit(self, queue, windows, r, values, detail) -> None:
-        """Diagnostics only (values unchanged): did the leaf fit a table state as it is (d = 0, its
-        point inside the windows) or only after moving the clock back by d > 0, and which bound
-        forced the move (lo: time left below the window = time passed since the event; e: below
-        the charged-time guarantee)."""
+    def _record_fit(self, queue, windows, r, fits, value, d, w_j) -> None:
+        """Diagnostics only (values unchanged): did the leaf fit a table state as it is (d = 0)
+        or only after the shift back by d > 0; a few shifted examples."""
         st = self.fit_stats
-        k = min(range(len(values)), key=values.__getitem__)
-        d_used, bind, w2 = detail[k]
-        st["fit_d0" if any(d == 0 for d, _b, _w in detail) else "shift_only"] += 1
-        st["d_used=" + str(d_used)] += 1
-        if d_used:
-            st["bind_" + bind] += 1
-            if len(self.fit_examples) < 8:
-                self.fit_examples.append(dict(
-                    queue=list(queue), query_time_left=[str(rem) for _lo, rem, _e in windows], r=str(r),
-                    table_windows_lo_hi_e=[[str(x) for x in win] for win in w2],
-                    d=str(d_used), bind=bind, value=round(values[k], 6),
-                    fits=len(values), fits_d0=sum(1 for d, _b, _w in detail if d == 0)))
+        st["fit_d0" if any(dd == 0 for dd, _j, _w in fits) else "shift_only"] += 1
+        st["d_used=" + str(d)] += 1
+        if d and len(self.fit_examples) < 8:
+            self.fit_examples.append(dict(
+                queue=list(queue), query_time_left=[str(hi) for _lo, hi, _e in windows], r=str(r),
+                table_windows_lo_hi_e=[[str(x) for x in win] for win in w_j],
+                d=str(d), value=round(value, 6), fits=len(fits)))
 
     def value(self, i: int, r) -> float:
         return float(self.V[int(min(Fraction(r), self.horizon) / self.grid), i])
+
+    def _read(self, i: int, r) -> float:
+        """V(i, r); with UB on, 0 at once when r < T(i) (class doc, UB)."""
+        if self.T is not None:
+            t = self.T[i]
+            if t is None or r < t:
+                self.fit_stats["ub_zero"] += 1
+                if self.value(i, r) > 0:
+                    self.fit_stats["ub_zero_curve_nonzero"] += 1
+                return 0.0
+        return self.value(i, r)
 
     def policy(self, i: int, r):
         """The best option of state i at r, ``(charge, inert_e, branches, label)``,
@@ -982,31 +1120,65 @@ class WindowsTable:
                 best, best_q = option, q
         return best
 
-    def fitting_values(self, facts, queue, windows, r, detail: Optional[list] = None) -> List[float]:
-        """V(s, r + d) for every table state s with this F and Q that fits the leaf
-        some d >= 0 after its event, d the smallest that fits (see the class doc).
-        ``detail`` (diagnostics) gets (d, the bound that set d, s's windows) per value."""
+    def shift(self, j: int, w_j, windows, r) -> Optional[Fraction]:
+        """The smallest d >= 0 that moves the leaf back into table state j (windows w_j), or None
+        (class doc: d in [max(0, lo_j - lo, e_j - e), min(hi_j - hi, horizon - tmin_j - r)])."""
+        d_lo, d_hi = Fraction(0), self.horizon - self.tmin[j] - r
+        for (lo_j, hi_j, e_j), (lo, hi, e) in zip(w_j, windows):
+            d_lo = max(d_lo, lo_j - lo, e_j - e)
+            d_hi = min(d_hi, hi_j - hi)
+        return d_lo if d_lo <= d_hi else None
+
+    def stn_shift(self, j: int, w_j, windows, r) -> Optional[Fraction]:
+        """``shift`` asked of an STN (TP_MCTS_WILAO_FIT = stn). Nodes: O, table state j's event;
+        N, the leaf's now (x = N - O is the shift); per running action the leaf's lo, hi and e
+        end points, each placed from N and bounded from O by j's window:
+            P - N = lo, P - O >= lo_j;   H - N = hi, H - O <= hi_j;   E - N = e, E - O >= e_j
+            0 <= N - O <= horizon - tmin_j - r
+        Every point of the leaf's window lands in j's (inclusion, not just overlap). Consistent
+        (Floyd-Warshall, no negative cycle) iff the leaf fits; the smallest x is -dist[N][O]."""
+        inf = None
+        n = 2 + 3 * len(windows)
+        dist = [[Fraction(0) if a == b else inf for b in range(n)] for a in range(n)]
+
+        def edge(a, b, w):                              # b - a <= w
+            if dist[a][b] is None or w < dist[a][b]:
+                dist[a][b] = w
+
+        edge(0, 1, self.horizon - self.tmin[j] - r)
+        edge(1, 0, Fraction(0))
+        for k, ((lo_j, hi_j, e_j), (lo, hi, e)) in enumerate(zip(w_j, windows)):
+            p, h, q = 2 + 3 * k, 3 + 3 * k, 4 + 3 * k
+            for node, at in ((p, lo), (h, hi), (q, e)):
+                edge(1, node, at)
+                edge(node, 1, -at)
+            edge(p, 0, -lo_j)
+            edge(0, h, hi_j)
+            edge(q, 0, -e_j)
+        for k in range(n):
+            row_k = dist[k]
+            for a in range(n):
+                via = dist[a][k]
+                if via is None:
+                    continue
+                row_a = dist[a]
+                for b in range(n):
+                    if row_k[b] is not None and (row_a[b] is None or via + row_k[b] < row_a[b]):
+                        row_a[b] = via + row_k[b]
+        if any(dist[a][a] < 0 for a in range(n)):
+            return None
+        return -dist[1][0]
+
+    def _fits(self, facts, queue, windows, r) -> List[Tuple[Fraction, int, tuple]]:
+        """(d, j, w_j) for every table state j with this F and Q that the leaf fits after shift d."""
+        fit = self.stn_shift if self.fit == "stn" else self.shift
         out = []
-        for w2, j in self._by_fq.get((facts, queue), ()):
-            d_lo, d_hi = Fraction(0), self.horizon - self.tmin[j] - r
-            bind = "none"
-            for (lo2, hi2, e2), (lo, hi, e) in zip(w2, windows):
-                # table windows have e2 >= lo2 (normalise) and a leaf has e = lo: e sets d,
-                # lo only ties it ("e=lo")
-                dl, de = lo2 - lo, e2 - e
-                m = max(d_lo, dl, de)
-                if m > d_lo:
-                    d_lo, bind = m, ("e=lo" if dl == de == m else "e" if de == m else "lo")
-                d_hi = min(d_hi, hi2 - hi)
-                if d_lo > d_hi:
-                    break
-            else:
-                if d_lo <= d_hi:
-                    out.append(self.value(j, r + d_lo))
-                    if detail is not None:
-                        detail.append((d_lo, bind, w2))
+        for w_j, j in self._by_fq.get((facts, queue), ()):
+            d = fit(j, w_j, windows, r)
+            if d is not None:
+                out.append((d, j, w_j))
         return out
 
-    def _shifted_cover(self, facts, queue, windows, r) -> Optional[float]:
-        values = self.fitting_values(facts, queue, windows, r)
-        return min(values) if values else None
+    def fitting_values(self, facts, queue, windows, r) -> List[float]:
+        """V(j, r + d) for every fitting table state j."""
+        return [self._read(j, r + d) for d, j, _w in self._fits(facts, queue, windows, r)]

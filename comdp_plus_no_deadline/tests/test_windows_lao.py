@@ -14,6 +14,7 @@ from comdp_plus_no_deadline.engines.windows_lao import (  # noqa: E402
     WindowsTable,
     blur_windows,
     end_windows,
+    end_windows_fixed,
     start_windows,
 )
 
@@ -399,3 +400,158 @@ def test_blur_keeps_the_deadline_exact():
     assert blurred.build(set())
     for r in range(10):
         assert blurred.lookup(set(), r)[0] == pytest.approx(1 - 0.4 ** (r // 2), abs=1e-12)
+
+
+# ---------------------------------------------------------------- fixed STN rules (only LB moves)
+ABC = [{"name": "a", "duration": 3, "end": [(("pa",), (), 0.7), ((), (), 0.3)]},
+       {"name": "b", "duration": 2, "pre": ("pa",), "end": [(("g",), (), 0.6), ((), (), 0.4)]},
+       {"name": "c", "duration": 1, "end": [(("q",), (), 0.5), ((), (), 0.5)]}]
+DOOR = [{"name": "a1", "duration": 3, "pre": ("fresh",), "start": [(("door",), ("fresh",), 1.0)],
+         "end": [((), ("door",), 1.0)]},
+        {"name": "a2", "duration": 1, "pre": ("door",), "end_pre": ("door",),
+         "end": [(("through",), (), 0.5), ((), (), 0.5)]}]
+DOC = [{"name": "a1", "duration": 3, "end": [(("f1",), (), 0.7), ((), (), 0.3)]},           # the Word doc's domain
+       {"name": "a2", "duration": 2, "end": [(("f2",), (), 0.5), ((), (), 0.5)]},
+       {"name": "a3", "duration": 1, "pre": ("f1", "f2"), "end": [(("G",), (), 0.9), ((), (), 0.1)]}]
+DOMAINS = [
+    (TWO, {"g"}, 3, ()),
+    (A_B + [UNRELATED_C], {"g"}, 8, ()),
+    (_required_concurrency_ops(), {"goal"}, 5, {"a2_fresh"}),
+    (LIGHT, {"goal"}, 5, {"dark"}),
+    (ABC, {"g"}, 7, ()),
+    (DOOR, {"through"}, 10, {"fresh"}),
+    (DOC, {"G"}, 7, ()),
+]
+
+
+def test_fixed_stn_end_keeps_the_window_and_raises_lb():
+    """The doc's trace: a1 (3) running, a2 (2) started before it ends in [2, 3]. a2 ends:
+    LB goes up by 2 and a1 is [1, 1] from the new LB -- still [3, 3] from time 0."""
+    w = start_windows(((F(3), F(3), F(3)),), F(2), 0)
+    assert w == ((F(2), F(3), F(2)), (F(3), F(3), F(3)))
+    assert end_windows_fixed(w, [F(3)]) == (((F(1), F(1), F(1)),), F(2))
+
+
+def test_fixed_stn_end_caps_hi_by_the_action_that_ended():
+    """b started before x ended, so E_b <= E_x + d_b <= LB + hi_x + d_b: hi = min(9 - 1, 5 - 1 + 3)."""
+    w = ((F(1), F(5), F(1)), (F(2), F(9), F(2)))
+    assert end_windows_fixed(w, [F(3)]) == (((F(1), F(7), F(1)),), F(1))
+
+
+@pytest.mark.parametrize("ops,goals,r,facts,running,want", [
+    (TWO, {"g"}, 3, (), (), 0.8),
+    (A_B + [UNRELATED_C], {"g"}, 8, (), (), 0.84),
+    (_required_concurrency_ops(), {"goal"}, 4, {"a2_fresh"}, (), 1.0),
+    (_required_concurrency_ops(), {"goal"}, 3, {"a2_fresh"}, (), 0.0),
+    (LIGHT, {"goal"}, 3, {"dark"}, (), 8 / 9),
+    (DOOR, {"through"}, 10, {"fresh"}, (), 0.875),
+    ([{"name": "try", "duration": 2, "end": [(("g",), (), 1.0)]}], {"g"}, F(1, 2), {in_execution("try")},
+     [("try", 1)], 0.0),
+])
+def test_fixed_stn_gives_the_known_values(ops, goals, r, facts, running, want):
+    assert solve(ops, goals, r, facts=facts, running=running, rules="fixed_stn")[0] == pytest.approx(want, abs=1e-9)
+
+
+@pytest.mark.parametrize("ops,goals,D,facts", DOMAINS)
+def test_fixed_stn_has_the_same_values_as_windows(ops, goals, D, facts):
+    """UB off: only the representation differs. Same table value at the root for every r, and
+    the same exact value from realistic leaves (remaining time <= duration) at several r."""
+    t = {rules: WindowsTable(WindowsLAO(ToyModel(ops, goals, D), heuristic="none", rules=rules), D, ub=False)
+         for rules in ("windows", "fixed_stn")}
+    for rules in t:
+        assert t[rules].build(set(facts))
+    for r in range(D + 1):
+        assert t["fixed_stn"].lookup(set(facts), r)[0] == pytest.approx(t["windows"].lookup(set(facts), r)[0], abs=1e-9)
+    duration = {op["name"]: F(op["duration"]) for op in ops}
+    solver = {rules: WindowsLAO(ToyModel(ops, goals, D), heuristic="none", rules=rules) for rules in t}
+    for f, q, w in t["windows"].states[:30]:
+        if not q or goals <= f:
+            continue
+        running = [(k, min(hi, duration[k])) for k, (_lo, hi, _e) in zip(q, w)]
+        if any(rem <= 0 for _k, rem in running):
+            continue
+        for r in sorted({1, D // 2, D}):
+            assert solver["fixed_stn"].solve(f, r, running) == pytest.approx(solver["windows"].solve(f, r, running),
+                                                                             abs=1e-9)
+
+
+# ---------------------------------------------------------------- UB = D - T(s)
+def ub_table(ops, goals, D, facts=(), **kwargs):
+    t = WindowsTable(WindowsLAO(ToyModel(ops, goals, D), heuristic="none", **kwargs), D, ub=True)
+    assert t.build(set(facts))
+    return t
+
+
+def test_ub_is_the_least_time_to_the_goal():
+    """The doc's domain: a1 and a2 side by side (3), then a3 (1): T(root) = 4, so UB = 7 - 4 = 3."""
+    t = ub_table(DOC, {"G"}, 7)
+    assert t.T[t.index[(frozenset(), (), ())]] == 4
+    for r in range(4):
+        assert t.lookup(set(), r)[0] == 0.0
+    assert t.lookup(set(), 4)[0] > 0
+
+
+@pytest.mark.parametrize("rules", ["windows", "fixed_stn"])
+@pytest.mark.parametrize("ops,goals,D,facts", DOMAINS)
+def test_ub_only_zeroes_what_is_really_zero(ops, goals, D, facts, rules):
+    """The curves are already 0 below T, so UB changes a lookup only where some root of the
+    leaf (one tie order) read a placeholder cell (r beyond horizon - tmin, set to 1): there it
+    gives 0, and the exact value is 0 too."""
+    plain = WindowsTable(WindowsLAO(ToyModel(ops, goals, D), heuristic="none", rules=rules), D, ub=False)
+    assert plain.build(set(facts))
+    with_ub = ub_table(ops, goals, D, facts, rules=rules)
+    exact = WindowsLAO(ToyModel(ops, goals, D), heuristic="none", rules=rules)
+    for f, q, w in plain.states[:120]:
+        if goals <= f:
+            continue
+        running = list(zip(q, [hi for _lo, hi, _e in w]))
+        for r in range(D + 1):
+            a, b = with_ub.lookup(f, r, running), plain.lookup(f, r, running)
+            if a != b:
+                assert a == (0.0, b[1]), (f, q, w, r, a, b)
+                assert exact.solve(f, r, running) == 0.0
+
+
+# ---------------------------------------------------------------- fit: shift vs STN
+@pytest.mark.parametrize("ops,goals,D,facts", DOMAINS)
+def test_stn_fit_is_the_shift(ops, goals, D, facts):
+    """Floyd-Warshall on the fit's STN gives the same yes/no and the same smallest shift as the
+    closed form, for exact remaining times and for unknown ones ([0, d]: inclusion)."""
+    t = table(ops, goals, D, facts)
+    checked = 0
+    for f, q, w in t.states[:40]:
+        if not q:
+            continue
+        for running in (list(zip(q, [hi for _lo, hi, _e in w])), [(k, None) for k in q],
+                        list(zip(q, [hi / 2 for _lo, hi, _e in w]))):
+            for r in (F(0), F(D, 3), F(D)):
+                for rf, rq, rw, _r in t.lao._roots(f, r, running):
+                    for w_j, j in t._by_fq.get((rf, rq), ())[:30]:
+                        assert t.stn_shift(j, w_j, rw, r) == t.shift(j, w_j, rw, r)
+                        checked += 1
+    assert checked > 0
+
+
+# ---------------------------------------------------------------- miss UB
+def test_miss_ub_answers_zero_only_without_a_path():
+    ops = [{"name": "try", "duration": 2, "end": [(("g",), (), 1.0)]}]
+    lao = WindowsLAO(ToyModel(ops, {"g"}, 3), heuristic="none")
+    facts = {in_execution("try")}
+    assert lao.goal_out_of_reach(facts, F(1, 2), [("try", 1)]) is True
+    assert lao.goal_out_of_reach(facts, 1, [("try", 1)]) is False
+    assert lao.goal_out_of_reach(set(), 1) is True                 # a fresh try needs 2
+    assert lao.goal_out_of_reach(set(), 5, max_states=0) is None   # cap: no answer
+
+
+@pytest.mark.parametrize("rules", ["windows", "fixed_stn"])
+@pytest.mark.parametrize("ops,goals,D,facts", DOMAINS)
+def test_miss_ub_zero_means_value_zero(ops, goals, D, facts, rules):
+    """Sound and complete on the same MDP: out of reach <=> the exact value is 0."""
+    t = table(ops, goals, D, facts)
+    lao = WindowsLAO(ToyModel(ops, goals, D), heuristic="none", rules=rules)
+    exact = WindowsLAO(ToyModel(ops, goals, D), heuristic="none", rules=rules)
+    for f, q, w in t.states[:25]:
+        running = list(zip(q, [hi for _lo, hi, _e in w]))
+        for r in sorted({0, 1, D // 2, D}):
+            out = lao.goal_out_of_reach(f, r, running)
+            assert out == (exact.solve(f, r, running) <= 1e-12), (f, q, w, r)
