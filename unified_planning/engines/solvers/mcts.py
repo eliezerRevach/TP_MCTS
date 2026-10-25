@@ -2,6 +2,7 @@ import numpy as np
 from unified_planning.shortcuts import *
 import unified_planning as up
 import math
+import os
 import time
 import random
 import warnings
@@ -49,6 +50,11 @@ _STN_PDB = frozenset({"temporal_stn_pdb"})
 # (comdp_plus_no_deadline.engines.windows_ilao_pdb). Same dispatch shape as
 # temporal_stn_pdb: drives the real MDP, needs the running actions' remaining times.
 _WINDOWS_ILAO = frozenset({"windows_ilao_pdb"})
+
+# Value backed up from a dead end (no legal action left, or past the deadline). With probability
+# semantics a dead end is a failure: 0, like a missed deadline. TP_MCTS_DEAD_END_VALUE (default 0);
+# -100 = the original repo's penalty.
+_DEAD_END_VALUE = float(os.environ.get("TP_MCTS_DEAD_END_VALUE", "0"))
 
 
 def _stn_running_remaining(stn, current_time):
@@ -939,7 +945,7 @@ class MCTS(Base_MCTS):
         """
         if len(snode.possible_actions) == 0 or snode.state.current_time > self.mdp.deadline():
             # Stop when there are no possible actions to take so the plan remains consistent
-            return -100
+            return _DEAD_END_VALUE
 
         if snode.depth > self.search_depth:
             return self.heuristic(snode.state)
@@ -973,7 +979,7 @@ class MCTS(Base_MCTS):
         """
         if len(snode.possible_actions) == 0 or snode.state.current_time > self.mdp.deadline():
             # Stop when there are no possible actions to take so the plan remains consistent
-            return -100
+            return _DEAD_END_VALUE
 
         if snode.depth > self.search_depth:
             # Stop if the search depth is reached
@@ -2282,7 +2288,7 @@ class C_MCTS(Base_MCTS):
         if len(snode.possible_actions) == 0:
             if self._uses_fixed_tail_value_mode():
                 return 0.0
-            return -100
+            return _DEAD_END_VALUE
 
         if snode.depth > self.search_depth:
             return self._depth_cutoff_value(snode)
@@ -2363,7 +2369,7 @@ class C_MCTS(Base_MCTS):
         if len(snode.possible_actions) == 0:
             if self._uses_fixed_tail_value_mode():
                 return 0.0
-            return -100
+            return _DEAD_END_VALUE
 
         if snode.depth > self.search_depth:
             return self._depth_cutoff_value(snode)
@@ -2534,7 +2540,7 @@ class C_MCTS(Base_MCTS):
     def selection_root_interval_max(self, snode: "up.engines.C_Snode", root_STNnode: "up.plans.stn.STNPlanNode" = None):
         if len(snode.possible_actions) == 0:
             if root_STNnode is None:
-                return -100
+                return _DEAD_END_VALUE
             # Stop when there are no possible actions to take so the plan remains consistent
             return LinkedListNode(*snode.parent.stn.get_legal_interval(root_STNnode), - 100)
 
