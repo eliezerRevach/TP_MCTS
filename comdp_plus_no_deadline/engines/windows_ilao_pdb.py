@@ -109,7 +109,10 @@ Knobs (environment, set from experiments.ipynb):
     TP_MCTS_WILAO_UB                1 = each table state keeps T(s), the least time to a
                                     goal (luckiest outcomes, one Dijkstra from the
                                     goals); r < T answers 0 at once          (0)
-    TP_MCTS_WILAO_MISS_UB           1 = on a table miss, Dijkstra forward from the leaf
+    TP_MCTS_WILAO_VI                table values: layers (one per state and time step) |
+                                    intervals (PTA backward: computed and kept only where
+                                    a curve changes; same values)            (layers)
+    TP_MCTS_WILAO_MISS_UB         1 = on a table miss, Dijkstra forward from the leaf
                                     (luckiest outcomes): no goal within r -> 0, exact
                                     in the relaxation; cap hit -> the normal miss path (0)
     TP_MCTS_WILAO_MISS_UB_STATES    that search's cap, states per root       (5000)
@@ -144,7 +147,7 @@ from comdp_plus_no_deadline.engines.fact_pattern import (OPAQUE_EVENTS, FactPatt
 from comdp_plus_no_deadline.engines.survivor_sweep import relaxed_actions_from_engine
 from comdp_plus_no_deadline.engines.temporal_stn_pdb import EngineModel, goal_relevance_closure
 from comdp_plus_no_deadline.engines.windows_lao import (WindowsLAO, WindowsTable, blur_default, fit_default,
-                                                        rules_default, ub_default)
+                                                        rules_default, ub_default, vi_default)
 
 
 # Legacy single setting -> (AGG, GROUPING).
@@ -505,6 +508,8 @@ class WindowsILAOPDBHeuristic:
                     self.logic_depth, self.logic_rank)
         if rules_default() != "windows" or ub_default():  # old keys (and files) stay valid
             settings += (rules_default(), ub_default())
+        if vi_default() != "layers":                      # the values are stored differently
+            settings += ("vi", vi_default())
         h.update(repr(settings).encode())
         return h.hexdigest()[:16]
 

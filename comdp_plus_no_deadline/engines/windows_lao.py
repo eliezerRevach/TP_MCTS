@@ -178,6 +178,15 @@ def ub_default() -> bool:
     return text == "1"
 
 
+def vi_default() -> str:
+    """TP_MCTS_WILAO_VI: layers (default: one value per state and time step) | intervals (the PTA
+    backward pass: a state's curve is computed and kept only where it changes; same values)."""
+    text = (os.environ.get("TP_MCTS_WILAO_VI") or "layers").strip().lower()
+    if text not in ("layers", "intervals"):
+        raise ValueError(f"TP_MCTS_WILAO_VI={text!r}: use layers | intervals")
+    return text
+
+
 def blur_default() -> Fraction:
     """TP_MCTS_WILAO_BLUR: the window grid eps; 0 (default) = no blur."""
     text = (os.environ.get("TP_MCTS_WILAO_BLUR") or "0").strip()
@@ -711,6 +720,54 @@ def _frac_gcd(a: Fraction, b: Fraction) -> Fraction:
     return Fraction(math.gcd(int(a * den), int(b * den)), den)
 
 
+def _concat_ranges(starts, ends):
+    """np.concatenate([np.arange(a, b) for a, b in zip(starts, ends)]), without the loop."""
+    import numpy as np
+    lens = ends - starts
+    total = int(lens.sum())
+    if total == 0:
+        return np.zeros(0, dtype=np.int64)
+    offsets = np.repeat(starts - np.concatenate(([0], np.cumsum(lens)[:-1])), lens)
+    return offsets + np.arange(total)
+
+
+class IntervalValues:
+    """V(state i, r = k * grid) of ``WindowsTable`` with ``vi = intervals``: only the layers where
+    a curve changes are kept. State i's curve is ``vals[ptr[i]:ptr[i+1]]``, each value holding from
+    its layer in ``ks`` up to the next one, 0 before the first. Layers k >= first[i] (r beyond
+    horizon - tmin_i, never reached) read 1, as ``_mark_unreachable_cells`` sets them on the array.
+    ``V[k, i]`` reads like the dense array."""
+
+    def __init__(self, ptr, ks, vals, first, shape):
+        self.ptr, self.ks, self.vals, self.first, self.shape = ptr, ks, vals, first, shape
+
+    def __getitem__(self, key):
+        import numpy as np
+        k, i = key
+        if k >= self.first[i]:
+            return 1.0
+        lo, hi = int(self.ptr[i]), int(self.ptr[i + 1])
+        j = lo + int(np.searchsorted(self.ks[lo:hi], k, side="right")) - 1
+        return float(self.vals[j]) if j >= lo else 0.0
+
+    @property
+    def nbytes(self) -> int:
+        return self.ptr.nbytes + self.ks.nbytes + self.vals.nbytes + self.first.nbytes
+
+    def dense(self):
+        """The (layers, states) array the layered pass would hold (checks only)."""
+        import numpy as np
+        R, n = self.shape
+        out = np.zeros((R, n))
+        for i in range(n):
+            lo, hi = int(self.ptr[i]), int(self.ptr[i + 1])
+            for j in range(lo, hi):
+                end = int(self.ks[j + 1]) if j + 1 < hi else R
+                out[int(self.ks[j]):end, i] = self.vals[j]
+            out[int(self.first[i]):, i] = 1.0
+        return out
+
+
 class WindowsTable:
     """Every state of the pattern at every r: a forward graph over (F, Q, W) and
     backward curves V(s, r). No heuristic, no ILAO*.
@@ -741,6 +798,12 @@ class WindowsTable:
               A state is only ever at r <= horizon - tmin; cells beyond that are set
               to 1 (never read by a reachable cell, and a sound answer if a lookup
               lands there).
+              ``vi`` / TP_MCTS_WILAO_VI = intervals: the same values, PTA-style -- a
+              curve is a step function kept only where it changes (IntervalValues).
+              Layer k recomputes only the states an input changed for: a successor
+              that changed at layer k - c, an option whose charge or inert need is
+              k, or a charge-0 successor that changed in this layer (levels, sinks
+              first). Only the last max(c) + 1 layers are kept while solving.
     lookup  : the leaf's state itself, else SHIFT IT BACK: a table state holds the
               windows at an event, a leaf usually sits some d after one. Moving the
               leaf back by d gives every running end d more time left and r + d.
@@ -768,11 +831,13 @@ class WindowsTable:
               change (counted as ub_zero_curve_nonzero).
     """
 
-    def __init__(self, lao: WindowsLAO, horizon, fit: Optional[str] = None, ub: Optional[bool] = None):
+    def __init__(self, lao: WindowsLAO, horizon, fit: Optional[str] = None, ub: Optional[bool] = None,
+                 vi: Optional[str] = None):
         self.lao = lao
         self.horizon = Fraction(horizon)
         self.fit = fit_default() if fit is None else fit
         self.ub = ub_default() if ub is None else bool(ub)
+        self.vi = vi_default() if vi is None else vi
         self.T: Optional[list] = None                     # T[i] = least time to a goal, None = never
         self.states: List[Tuple[FrozenSet, Tuple[str, ...], Tuple[Window, ...]]] = []
         self.index: Dict[tuple, int] = {}
@@ -860,6 +925,7 @@ class WindowsTable:
             states=len(states), cut_after_deadline=cut,
             edges=sum(len(b) for row in options if row for _c, _e, b, _l in row),
             instant_noops_dropped=noops, instant_loops_folded=folded, backward=method, grid=str(self.grid),
+            vi=self.vi, values_bytes=int(self.V.nbytes),
             forward_seconds=round(forward_seconds, 2), ub_seconds=round(ub_seconds, 2),
             backward_seconds=round(time.perf_counter() - started - forward_seconds - ub_seconds, 2),
             seconds=round(time.perf_counter() - started, 2), rules=lao.rules, ub=self.ub,
@@ -899,7 +965,52 @@ class WindowsTable:
         """Backward curves on compact arrays (array / numpy, 4-8 bytes per entry; the same
         computation as keeping every edge in Python lists, at a fraction of the memory).
         Zero-charge levels: Kahn in rounds over the distinct (state, successor) pairs --
-        round = longest charge-0 path to a sink."""
+        round = longest charge-0 path to a sink. ``vi = intervals``: ``_backward_intervals``."""
+        import numpy as np
+
+        if self.vi == "intervals":
+            return self._backward_intervals()
+        n = len(self.states)
+        R, owner, shift, need, P = self._option_arrays()
+        m = len(owner)
+        V = np.zeros((R, n))
+        V[:, [i for i, row in enumerate(self.options) if row is None]] = 1.0
+        zero = shift == 0
+        level, seen, _pred_of, _pred_ptr = self._zero_levels(n, owner, zero, P)
+        del _pred_of, _pred_ptr
+        if seen < n:                                      # a zero-time cycle over several states
+            self.V = self._worklist(V, P, owner, shift, need)
+            self._mark_unreachable_cells()
+            return "worklist"
+
+        groups = {int(c): np.nonzero(shift == c)[0] for c in np.unique(shift) if c > 0}
+        P_pos = {c: P[idx] for c, idx in groups.items()}
+        opt_level = level[owner] if m else np.zeros(0, dtype=int)
+        levels = []
+        for L in range(int(level.max()) + 1 if n else 0):
+            mine = np.nonzero(opt_level == L)[0]
+            z = mine[zero[mine]]
+            levels.append((z, P[z], mine))
+        for k in range(R):
+            q = np.zeros(m)
+            for c, idx in groups.items():
+                if c <= k:
+                    q[idx] = P_pos[c] @ V[k - c]
+            Vk = V[k]
+            for z, Pz, mine in levels:
+                if len(z):
+                    q[z] = Pz @ Vk
+                if len(mine):
+                    vals = np.where(need[mine] > k, 0.0, q[mine])
+                    np.maximum.at(Vk, owner[mine], vals)
+        self.V = V
+        self._mark_unreachable_cells()
+        return "layers"
+
+    def _option_arrays(self):
+        """The options as arrays: the layer count R (sets ``self.grid``, the gcd of every charge,
+        inert need and the horizon) and per option its owner, charge and inert need in grid
+        steps, with P[option, successor] = p."""
         import numpy as np
         from array import array
         from scipy.sparse import csr_matrix
@@ -939,17 +1050,22 @@ class WindowsTable:
         need = np.frombuffer(need, dtype=np.int32).astype(int)
         rows_a = np.frombuffer(rows, dtype=np.int32)
         cols_a = np.frombuffer(cols, dtype=np.int32)
-        m = len(owner)
-        P = csr_matrix((np.frombuffer(probs, dtype=np.float64), (rows_a, cols_a)), shape=(m, n))
-        V = np.zeros((R, n))
-        V[:, [i for i, row in enumerate(self.options) if row is None]] = 1.0
+        P = csr_matrix((np.frombuffer(probs, dtype=np.float64), (rows_a, cols_a)), shape=(len(owner), n))
+        return R, owner, shift, need, P
 
-        # levels over the charge-0 edges, sinks first
-        zero = shift == 0
+    @staticmethod
+    def _zero_levels(n, owner, zero, P):
+        """Levels over the charge-0 edges, sinks first: (level, states levelled, pred_of, pred_ptr),
+        pred_of[pred_ptr[j]:pred_ptr[j + 1]] = the states with a charge-0 option into j.
+        Fewer states levelled than n means a zero-time cycle."""
+        import numpy as np
+
+        coo = P.tocoo()
+        rows_a, cols_a = coo.row, coo.col
         edge_zero = zero[rows_a] if len(rows_a) else np.zeros(0, dtype=bool)
         key = np.unique(owner[rows_a[edge_zero]].astype(np.int64) * n + cols_a[edge_zero].astype(np.int64))
         pa, pb = key // n, key % n
-        del key, edge_zero
+        del key, edge_zero, coo
         pending = np.bincount(pa, minlength=n).astype(np.int64)
         pred_of = pa[np.argsort(pb, kind="stable")]
         indptr = np.zeros(n + 1, dtype=np.int64)
@@ -971,35 +1087,123 @@ class WindowsTable:
             cand = np.unique(preds)
             frontier = cand[pending[cand] == 0]
             rnd += 1
-        del pred_of, indptr
-        if seen < n:                                      # a zero-time cycle over several states
-            self.V = self._worklist(V, P, owner, shift, need)
-            self._mark_unreachable_cells()
-            return "worklist"
+        return level, seen, pred_of, indptr
 
-        groups = {int(c): np.nonzero(shift == c)[0] for c in np.unique(shift) if c > 0}
-        P_pos = {c: P[idx] for c, idx in groups.items()}
-        opt_level = level[owner] if m else np.zeros(0, dtype=int)
-        levels = []
-        for L in range(int(level.max()) + 1 if n else 0):
-            mine = np.nonzero(opt_level == L)[0]
-            z = mine[zero[mine]]
-            levels.append((z, P[z], mine))
+    def _backward_intervals(self) -> str:
+        """The PTA backward pass (class doc, ``vi = intervals``): the values of ``_backward``'s
+        layers, computed only where a curve changes and kept as IntervalValues."""
+        import numpy as np
+
+        n = len(self.states)
+        R, owner, shift, need, P = self._option_arrays()
+        m = len(owner)
+        zero = shift == 0
+        level, seen, pred_of, pred_ptr = self._zero_levels(n, owner, zero, P)
+        if seen < n:                                      # zero-time cycle: the layered pass's worklist
+            self.stats["vi_fallback"] = "zero-time cycle: dense worklist"
+            self.vi = "layers"
+            method = self._backward()
+            self.vi = "intervals"
+            return method
+
+        opt_ptr = np.zeros(n + 1, dtype=np.int64)         # options of state i: opt_ptr[i]:opt_ptr[i+1]
+        np.cumsum(np.bincount(owner, minlength=n), out=opt_ptr[1:])
+        has_options = opt_ptr[1:] > opt_ptr[:-1]
+        goal = np.array([row is None for row in self.options], dtype=bool)
+        coo = P.tocoo()                                   # who reads state j through a charge-c option
+        into = {}
+        for c in np.unique(shift[shift > 0]):
+            sel = shift[coo.row] == c
+            succ, opt = coo.col[sel].astype(np.int64), coo.row[sel].astype(np.int64)
+            order = np.argsort(succ, kind="stable")
+            ptr = np.zeros(n + 1, dtype=np.int64)
+            np.cumsum(np.bincount(succ, minlength=n), out=ptr[1:])
+            into[int(c)] = (ptr, owner[opt[order]])
+        del coo
+        gate = {}                                         # the layer where an option starts to count
+        for arr in (shift, need):
+            for k in np.unique(arr[arr > 0]):
+                gate.setdefault(int(k), []).append(np.unique(owner[arr == k]))
+        W = int(shift.max()) + 1 if m else 1
+        ring = np.zeros((W, n))                           # the last W layers only
+        self.stats["ring_W"] = W
+        changed_at = [np.zeros(0, dtype=np.int64)] * W
+        rec_i, rec_k, rec_v = [], [], []
+        max_level = int(level.max()) if n else 0
+        entry_opt = np.repeat(np.arange(m), np.diff(P.indptr))   # the option of each entry of P
+        opt_len = np.diff(P.indptr)
+
+        def best_of(states, Vk, k):
+            """For states with options: max over them of sum p * V(succ, k - c), 0 if none counts."""
+            opts = _concat_ranges(opt_ptr[states], opt_ptr[states + 1])
+            ents = _concat_ranges(P.indptr[opts], P.indptr[opts + 1])
+            local = np.repeat(np.arange(len(opts)), opt_len[opts])
+            c = shift[entry_opt[ents]]
+            succ = P.indices[ents]
+            vals = np.where(c == 0, Vk[succ], ring[(k - c) % W, succ])
+            q = np.bincount(local, weights=P.data[ents] * vals, minlength=len(opts))
+            q[(shift[opts] > k) | (need[opts] > k)] = 0.0
+            per_state = opt_ptr[states + 1] - opt_ptr[states]
+            starts = np.concatenate(([0], np.cumsum(per_state)[:-1]))
+            return np.maximum(np.maximum.reduceat(q, starts), 0.0)
+
         for k in range(R):
-            q = np.zeros(m)
-            for c, idx in groups.items():
-                if c <= k:
-                    q[idx] = P_pos[c] @ V[k - c]
-            Vk = V[k]
-            for z, Pz, mine in levels:
-                if len(z):
-                    q[z] = Pz @ Vk
-                if len(mine):
-                    vals = np.where(need[mine] > k, 0.0, q[mine])
-                    np.maximum.at(Vk, owner[mine], vals)
-        self.V = V
-        self._mark_unreachable_cells()
-        return "layers"
+            if k == 0:
+                Vk = np.where(goal, 1.0, 0.0)
+                flagged = [np.nonzero(has_options)[0]]
+                changed = [np.nonzero(goal)[0]]
+            else:
+                Vk = ring[(k - 1) % W].copy()
+                flagged, changed = [], []
+                for c, (ptr, who) in into.items():
+                    J = changed_at[(k - c) % W]
+                    if c <= k and len(J):
+                        flagged.append(who[_concat_ranges(ptr[J], ptr[J + 1])])
+                flagged += gate.get(k, [])
+            pending = [[] for _ in range(max_level + 1)]
+            cand = np.unique(np.concatenate(flagged)) if flagged else np.zeros(0, dtype=np.int64)
+            cand = cand[has_options[cand]]
+            if len(cand):
+                lv = level[cand]
+                for L in np.unique(lv):
+                    pending[int(L)].append(cand[lv == L])
+            for L in range(max_level + 1):
+                if not pending[L]:
+                    continue
+                S = np.unique(np.concatenate(pending[L]))
+                new = best_of(S, Vk, k)
+                moved = np.abs(new - Vk[S]) > 1e-15
+                S, new = S[moved], new[moved]
+                if not len(S):
+                    continue
+                Vk[S] = new
+                changed.append(S)
+                preds = pred_of[_concat_ranges(pred_ptr[S], pred_ptr[S + 1])]
+                preds = np.unique(preds[has_options[preds]])
+                for L2 in np.unique(level[preds]):
+                    pending[int(L2)].append(preds[level[preds] == L2])
+            ch = np.concatenate(changed) if changed else np.zeros(0, dtype=np.int64)
+            ring[k % W] = Vk
+            changed_at[k % W] = ch
+            if len(ch):
+                rec_i.append(ch.astype(np.int64))
+                rec_k.append(np.full(len(ch), k, dtype=np.int32))
+                rec_v.append(Vk[ch])
+        del ring, changed_at
+
+        first = np.array([0 if t > self.horizon else int((self.horizon - t) / self.grid) + 1
+                          for t in self.tmin], dtype=np.int32)
+        ri = np.concatenate(rec_i) if rec_i else np.zeros(0, dtype=np.int64)
+        rk = np.concatenate(rec_k) if rec_k else np.zeros(0, dtype=np.int32)
+        rv = np.concatenate(rec_v) if rec_v else np.zeros(0)
+        keep = rk < first[ri]                             # layers past horizon - tmin read 1 anyway
+        ri, rk, rv = ri[keep], rk[keep], rv[keep]
+        order = np.lexsort((rk, ri))
+        ri, rk, rv = ri[order], rk[order], rv[order]
+        ptr = np.zeros(n + 1, dtype=np.int64)
+        np.cumsum(np.bincount(ri, minlength=n), out=ptr[1:])
+        self.V = IntervalValues(ptr, rk.astype(np.int32), rv, first, (R, n))
+        return "intervals"
 
     def _mark_unreachable_cells(self) -> None:
         """A state is only ever at r <= horizon - tmin: later cells may read children

@@ -265,6 +265,35 @@ def test_table_is_the_exact_windows_mdp_at_every_r(ops, goals, D, facts):
         assert t.lookup(set(facts), r) == (pytest.approx(exact, abs=1e-9), "exact")
 
 
+PAPER = [{"name": "a1", "duration": 3, "end": [(("f1",), (), 0.7), ((), (), 0.3)]},
+         {"name": "a2", "duration": 2, "end": [(("f2",), (), 0.5), ((), (), 0.5)]},
+         {"name": "a3", "duration": 1, "pre": ("f1", "f2"), "end": [(("G",), (), 0.9), ((), (), 0.1)]}]
+DOOR = [{"name": "door", "duration": 3, "start": [(("open",), (), 1.0)], "end": [((), ("open",), 1.0)]},
+        {"name": "pass", "duration": 1, "pre": ("open",), "end": [(("g",), (), 0.5), ((), (), 0.5)]},
+        {"name": "wait", "duration": 2},
+        {"name": "flip", "duration": 0, "end": [(("x",), (), 1.0)]}]
+
+
+@pytest.mark.parametrize("ops,goals,D,facts", [
+    (PAPER, {"G"}, 7, ()),
+    (PAPER, {"G"}, 12, ()),
+    (A_B + [UNRELATED_C], {"g"}, 8, ()),
+    (DOOR, {"g"}, 10, ()),
+    (LIGHT, {"goal"}, 5, {"dark"}),
+])
+def test_table_intervals_equal_layers_in_every_cell(ops, goals, D, facts):
+    """vi = intervals (PTA backward, kept only where a curve changes) holds the layered values."""
+    import numpy as np
+
+    t = WindowsTable(WindowsLAO(ToyModel(ops, goals, D), heuristic="none"), D, vi="layers")
+    assert t.build(set(facts))
+    layers = t.V.copy()
+    t.vi = "intervals"
+    assert t._backward() == "intervals"
+    assert np.abs(t.V.dense() - layers).max() == 0.0
+    assert t.V.nbytes < layers.nbytes or t.V.shape[1] < 10
+
+
 def test_table_retry_curve():
     ops = [{"name": "try", "duration": 2, "end": [(("g",), (), 0.6), ((), (), 0.4)]}]
     t = table(ops, {"g"}, 9)
