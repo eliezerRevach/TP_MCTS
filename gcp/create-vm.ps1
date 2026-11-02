@@ -33,6 +33,7 @@ gcloud compute instances create $VM_NAME `
     --image-project=debian-cloud `
     --boot-disk-size="${DISK_SIZE_GB}GB" `
     --boot-disk-type=pd-balanced `
+    --scopes=cloud-platform `
     --metadata-from-file=startup-script=$startupFile
 
 Write-Host "Done. Check: gcloud compute ssh $VM_NAME --zone=$ZONE --command='test -f /opt/tp_mcts/.tp_mcts_gce && echo ready'"

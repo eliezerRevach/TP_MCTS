@@ -42,6 +42,7 @@ gcloud compute instances create "${VM_NAME}" \
   --image-project=debian-cloud \
   --boot-disk-size="${DISK_SIZE_GB:-100}GB" \
   --boot-disk-type=pd-balanced \
+  --scopes=cloud-platform \
   --metadata=startup-script="$(cat "${STARTUP}")"
 
 echo ""
