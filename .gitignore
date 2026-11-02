@@ -28,3 +28,4 @@ log/
 
 # GCP local settings (project id)
 gcp/config.env
+gcp/.startup-rendered.sh

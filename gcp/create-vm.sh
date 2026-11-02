@@ -25,7 +25,7 @@ if gcloud compute instances describe "${VM_NAME}" --zone="${ZONE}" &>/dev/null; 
   exit 1
 fi
 
-STARTUP=$(mktemp)
+STARTUP="${SCRIPT_DIR}/.startup-rendered.sh"  # local file: gcloud on Windows cannot read /tmp
 trap 'rm -f "${STARTUP}"' EXIT
 {
   echo "export REPO_URL='${REPO_URL:-https://github.com/eliezerRevach/tp_mcts.git}'"
@@ -43,7 +43,7 @@ gcloud compute instances create "${VM_NAME}" \
   --boot-disk-size="${DISK_SIZE_GB:-100}GB" \
   --boot-disk-type=pd-balanced \
   --scopes=cloud-platform \
-  --metadata=startup-script="$(cat "${STARTUP}")"
+  --metadata-from-file=startup-script=.startup-rendered.sh
 
 echo ""
 echo "Wait 2–5 minutes, then check:"
