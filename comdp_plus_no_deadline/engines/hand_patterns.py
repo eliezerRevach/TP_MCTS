@@ -18,6 +18,22 @@ llm_by_hand_nasa_one -- nasa_rover, object_amount = 1 (rover r0; rocks x0, x1; i
 picks for the one rover.
 llm_by_hand_nasa_three -- nasa_rover, object_amount = 3: the same picks for rovers r0, r1, r2.
 
+Smaller nasa_rover object_amount = 1 picks, for the STN rules (windows_lao.py "rules = stn"), whose
+table grows much faster with pattern size than the windows table; name them explicitly (llm_by_hand
+would see several fitting collections):
+llm_by_hand_nasa_one_rock -- one rock per pattern:
+    hand  : communicated_rock_data(x), have_rock_analysis(r0, x), free_h(h), ready(h, x)    (4 facts)
+    store : communicated_rock_data(x), have_rock_analysis(r0, x), free_s / full / ready_to_drop(s)
+                                                                                         (5 facts)
+    for each rock x0, x1 and each hand / store, plus the image pattern. The two rocks share a group,
+    so their values meet in a min (single-rock values: "both rocks by the deadline" is not seen).
+llm_by_hand_nasa_one_joint -- both rocks in every pattern, fewer resource facts:
+    store : communicated_rock_data x2, have_rock_analysis x2, full(s)                       (5 facts)
+            a full store needs a drop before the next sample (ready_to_drop counted free)
+    hand  : communicated_rock_data x2, have_rock_analysis x2, ready(h, x0), ready(h, x1)    (6 facts)
+            the turn-on before a sample is seen (free_h counted free: no hand lock)
+    for each store s0, s1 and hand h0, h1, plus the image pattern.
+
 llm_by_hand_stuck_car_two -- stuck_car, object_amount = 2 (robots r0, r1; cars c0, c1). ONE joint
 pattern over both cars (any robot can push any car, so the cars share both robots):
     car_out x2, tired x2, free(r, hands) x2, rock_under_car(c, good) x2, got_rock(r, good) x2
@@ -66,6 +82,23 @@ def _rover(rover: str, rocks: Tuple[str, str], hands: Tuple[str, str], stores: T
             (goals, goals + have + store_facts, f"stores_{rover}")]
 
 
+def _rover_by_rock(rover: str, rocks: Tuple[str, str], hands: Tuple[str, str], stores: Tuple[str, str]):
+    out = []
+    for x in rocks:
+        base = [f"communicated_rock_data({x})", f"have_rock_analysis({rover}, {x})"]
+        out += [([base[0]], base + [f"free_h({h})", f"ready({h}, {x})"], f"hand_{h}_{x}") for h in hands]
+        out += [([base[0]], base + [f"free_s({s})", f"full({s})", f"ready_to_drop({s})"], f"store_{s}_{x}")
+                for s in stores]
+    return out
+
+
+def _rover_joint_small(rover: str, rocks: Tuple[str, str], hands: Tuple[str, str], stores: Tuple[str, str]):
+    goals = [f"communicated_rock_data({x})" for x in rocks]
+    base = goals + [f"have_rock_analysis({rover}, {x})" for x in rocks]
+    return ([(goals, base + [f"full({s})"], f"store_{s}") for s in stores]
+            + [(goals, base + [f"ready({h}, {x})" for x in rocks], f"hand_{h}") for h in hands])
+
+
 def _image(rover: str, objective: str, camera: str):
     goal = f"communicated_image_data({objective})"
     return [([goal], [goal, f"have_image({rover}, {objective})", f"calibrated({camera}, {objective})"],
@@ -112,7 +145,11 @@ HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
     # nasa_rover object_amount = 1 is rover r0 of the problem above: the same picks for one rover.
     "llm_by_hand_nasa_one": (_image("r0", "o0", "c0")
                              + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))),
-    "llm_by_hand_nasa_three": (_image("r0", "o0", "c0") + _image("r1", "o1", "c1") + _image("r2", "o2", "c2")
+    "llm_by_hand_nasa_one_rock": (_image("r0", "o0", "c0")
+                                  + _rover_by_rock("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))),
+    "llm_by_hand_nasa_one_joint": (_image("r0", "o0", "c0")
+                                   + _rover_joint_small("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))),
+    "llm_by_hand_nasa_three":(_image("r0", "o0", "c0") + _image("r1", "o1", "c1") + _image("r2", "o2", "c2")
                                + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))
                                + _rover("r1", ("x2", "x3"), ("h2", "h3"), ("s2", "s3"))
                                + _rover("r2", ("x4", "x5"), ("h4", "h5"), ("s4", "s5"))),
@@ -124,6 +161,7 @@ HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
     "llm_by_hand_machine_shop_four": _machine_pair(0) + _machine_pair(1),
 }
 AUTO = "llm_by_hand"          # picks the collection that fits the problem
+EXPLICIT_ONLY = frozenset({"llm_by_hand_nasa_one_rock", "llm_by_hand_nasa_one_joint"})   # never picked by AUTO
 HAND_GROWTHS = (AUTO,) + tuple(HAND_PATTERNS)
 
 
@@ -131,7 +169,7 @@ def pick_hand_collection(fact_by_name: Dict[str, object], goals) -> str:
     """The collection whose goals are exactly ``goals`` and whose facts all exist."""
     goal_names = {str(g) for g in goals}
     fits = [name for name, spec in HAND_PATTERNS.items()
-            if {x for g, _f, _l in spec for x in g} == goal_names
+            if name not in EXPLICIT_ONLY and {x for g, _f, _l in spec for x in g} == goal_names
             and all(x in fact_by_name for _g, facts, _l in spec for x in facts)]
     if len(fits) != 1:
         raise ValueError(f"TP_MCTS_WILAO_PATTERN_GROWTH={AUTO!r}: {len(fits)} hand collections fit this problem "
