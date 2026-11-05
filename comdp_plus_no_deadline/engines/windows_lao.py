@@ -224,20 +224,25 @@ def _stn_close(D) -> bool:
 
 
 def _stn_keep(D, keep, z_shift=0):
-    """The key of the nodes ``keep`` (in that order); Z (first) moved up by ``z_shift``."""
+    """The key of the nodes ``keep`` (in that order); Z (first) moved up by ``z_shift``.
+    Z keeps only LOWER bounds (t_v - Z >= c_v: the charges read nothing else). Its upper bounds
+    are dropped: before the first end Z = N exactly, after it only N >= Z, and keeping that
+    difference would split one situation into two states (same values)."""
     out = []
     for i, a in enumerate(keep):
         row = []
         for j, b in enumerate(keep):
             w = D[a][b]
-            if w is not None and z_shift:
+            if i == 0 and j != 0:
+                w = None
+            elif w is not None and z_shift:
                 w = w + (z_shift if j == 0 else 0) - (z_shift if i == 0 else 0)
             row.append(w)
         out.append(tuple(row))
     return tuple(out)
 
 
-STN_EMPTY = ((0, 0, 0), (0, 0, 0), (0, 0, 0))
+STN_EMPTY = ((0, None, None), (0, 0, 0), (0, 0, 0))
 
 
 def stn_root(remaining: Sequence, durations: Sequence) -> Optional[tuple]:
