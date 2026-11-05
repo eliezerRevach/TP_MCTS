@@ -9,6 +9,8 @@
 # tables ran the 96 GB VM out of memory -- one scenario at a time, so every config runs under the same load.
 #   bash gcp/stn_small.sh   -> results/stn_small/{prebuild,log,csv}/ and results/stn_small/summary.txt
 # Other configs / folder: STN_SMALL_CONFIGS="name|rules|blur|growth ..." STN_SMALL_OUT=results/<dir> bash gcp/stn_small.sh
+#   STN_SMALL_PHASES=tables  stop after the tables;  STN_SMALL_SEEDS="123 124"  one TP-MCTS run (100 runs) per seed;
+#   STN_SMALL_STN_PARALLEL=1 build the STN tables together (STN_SMALL_STN_MEM_KB each, STN_SMALL_TIMEOUT seconds)
 set -u
 cd /opt/tp_mcts
 PY=.venv/bin/python
@@ -46,19 +48,20 @@ prebuild() {   # name rules blur growth mem_kb timeout
        "max RSS $(grep -o 'Maximum resident set size (kbytes): [0-9]*' $OUT/prebuild/$1.log | grep -o '[0-9]*$') kB"
 }
 
-script3() {   # name rules blur growth
-  [ -f $OUT/csv/$1.csv ] && { echo "[skip] $1 (csv exists)"; return; }
-  grep -q '^\[prebuild\]' $OUT/prebuild/$1.log 2>/dev/null || { echo "[skip] $1 (no table)"; return; }
-  echo "[$(date +%H:%M:%S)] mcts $1"
+script3() {   # name rules blur growth seed
+  local run=$1; [ -n "${STN_SMALL_SEEDS:-}" ] && run=$1_s$5
+  [ -f $OUT/csv/$run.csv ] && { echo "[skip] $run (csv exists)"; return; }
+  grep -q '^\[prebuild\]' $OUT/prebuild/$1.log 2>/dev/null || { echo "[skip] $run (no table)"; return; }
+  echo "[$(date +%H:%M:%S)] mcts $run"
   $PY -u scripts/run_notebook_cells.py experiments.ipynb --cells 1 3 19 \
     --set "DOMAINS=['$DOM']" --set "OBJECTS=[$OBJ]" --set "GARBAGE_AMOUNTS=[$GARB]" --set "DEADLINES=[$DL]" \
-    --set "HEURISTICS=['windows_ilao_pdb']" --set "WORKERS=$WORKERS" \
-    --set "SCRIPT3_CSV='/opt/tp_mcts/$OUT/csv/$1.tmp.csv'" \
+    --set "HEURISTICS=['windows_ilao_pdb']" --set "WORKERS=$WORKERS" --set "SEED=$5" \
+    --set "SCRIPT3_CSV='/opt/tp_mcts/$OUT/csv/$run.tmp.csv'" \
     --env TP_MCTS_WILAO_RULES=$2 --env TP_MCTS_WILAO_BLUR=$3 --env TP_MCTS_WILAO_PATTERN_GROWTH=$4 \
     --env TP_MCTS_WILAO_TABLE_CACHE=/opt/tp_mcts/$OUT/cache_$1 \
-    > $OUT/log/$1.log 2>&1 < /dev/null
-  [ -f $OUT/csv/$1.tmp.csv ] && mv $OUT/csv/$1.tmp.csv $OUT/csv/$1.csv
-  echo "[$(date +%H:%M:%S)] done $1 $(grep -o 'success=[0-9]*/[0-9]*' $OUT/log/$1.log | tail -1)"
+    > $OUT/log/$run.log 2>&1 < /dev/null
+  [ -f $OUT/csv/$run.tmp.csv ] && mv $OUT/csv/$run.tmp.csv $OUT/csv/$run.csv
+  echo "[$(date +%H:%M:%S)] done $run $(grep -o 'success=[0-9]*/[0-9]*' $OUT/log/$run.log | tail -1)"
 }
 
 echo "[$(date +%H:%M:%S)] phase 1: tables (D $DL)"
@@ -66,16 +69,28 @@ for cfg in "${CONFIGS[@]}"; do
   IFS='|' read -r name rules blur growth <<< "$cfg"
   [ "$rules" = windows ] && prebuild $name $rules $blur $growth 16777216 3600 &
 done
-( for cfg in "${CONFIGS[@]}"; do
+STN_MEM=${STN_SMALL_STN_MEM_KB:-41943040}; STN_TIMEOUT=${STN_SMALL_TIMEOUT:-3600}
+if [ "${STN_SMALL_STN_PARALLEL:-0}" = 1 ]; then
+  for cfg in "${CONFIGS[@]}"; do
     IFS='|' read -r name rules blur growth <<< "$cfg"
-    [ "$rules" = stn ] && prebuild $name $rules $blur $growth 41943040 3600
-  done ) &
+    [ "$rules" = stn ] && prebuild $name $rules $blur $growth $STN_MEM $STN_TIMEOUT &
+  done
+else
+  ( for cfg in "${CONFIGS[@]}"; do
+      IFS='|' read -r name rules blur growth <<< "$cfg"
+      [ "$rules" = stn ] && prebuild $name $rules $blur $growth $STN_MEM $STN_TIMEOUT
+    done ) &
+fi
 wait
-echo "[$(date +%H:%M:%S)] phase 2: TP-MCTS ($WORKERS workers)"
-for cfg in "${CONFIGS[@]}"; do
-  IFS='|' read -r name rules blur growth <<< "$cfg"
-  script3 $name $rules $blur $growth
-done
+if [ "${STN_SMALL_PHASES:-all}" != tables ]; then
+  echo "[$(date +%H:%M:%S)] phase 2: TP-MCTS ($WORKERS workers)"
+  for seed in ${STN_SMALL_SEEDS:-123}; do
+    for cfg in "${CONFIGS[@]}"; do
+      IFS='|' read -r name rules blur growth <<< "$cfg"
+      script3 $name $rules $blur $growth $seed
+    done
+  done
+fi
 
 $PY - <<'PY' > $OUT/summary.txt
 import csv, glob, json, os
@@ -86,9 +101,11 @@ for log in sorted(glob.glob(f"{OUT}/prebuild/*.log")):
     pre = [l for l in open(log) if l.startswith("[prebuild]")]
     b = json.loads(pre[-1][len("[prebuild] "):]) if pre else None
     ts = b["report"].get("table_states") if b else None
-    rows = list(csv.DictReader(open(f"{OUT}/csv/{name}.csv"))) if os.path.exists(f"{OUT}/csv/{name}.csv") else []
-    score = f'{rows[0]["amount_success"]}/{rows[0]["runs_total"]}' if rows else "-"
-    wall = rows[0]["wall_time_sec"] if rows else "-"
+    rows = [r for f in sorted(glob.glob(f"{OUT}/csv/{name}.csv") + glob.glob(f"{OUT}/csv/{name}_s*.csv"))
+            for r in csv.DictReader(open(f))]
+    score = (f'{sum(int(r["amount_success"]) for r in rows)}/{sum(int(r["runs_total"]) for r in rows)} '
+             f'({" ".join(r["amount_success"] for r in rows)})') if rows else "-"
+    wall = " ".join(r["wall_time_sec"] for r in rows) if rows else "-"
     print(f"{name} | {b['build_seconds'] if b else 'failed'} | {ts} | {b['h_s0'] if b else '-'} | {score} | {wall}")
 PY
 cat $OUT/summary.txt

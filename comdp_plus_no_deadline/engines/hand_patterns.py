@@ -27,6 +27,12 @@ llm_by_hand_nasa_one_rock -- one rock per pattern:
                                                                                          (5 facts)
     for each rock x0, x1 and each hand / store, plus the image pattern. The two rocks share a group,
     so their values meet in a min (single-rock values: "both rocks by the deadline" is not seen).
+llm_by_hand_nasa_one_rock6 | _rock7 | _rock12 -- one rock per pattern, more resource facts (sized for the STN
+    rules' build time):
+    rock6  : communicated, have_rock_analysis, free_h + ready of BOTH hands (6 facts), + the 5-fact store patterns
+    rock7  : communicated, have_rock_analysis, free_h + ready of one hand, free_s / full / ready_to_drop of one
+             store (7 facts; a sample needs both at once), one pattern per hand x store
+    rock12 : communicated, have_rock_analysis, both hands, both stores (12 facts)
 llm_by_hand_nasa_one_joint -- both rocks in every pattern, fewer resource facts:
     store : communicated_rock_data x2, have_rock_analysis x2, full(s)                       (5 facts)
             a full store needs a drop before the next sample (ready_to_drop counted free)
@@ -92,6 +98,25 @@ def _rover_by_rock(rover: str, rocks: Tuple[str, str], hands: Tuple[str, str], s
     return out
 
 
+def _rover_by_rock_grown(rover: str, rocks: Tuple[str, str], hands: Tuple[str, str], stores: Tuple[str, str],
+                         how: str):
+    """One rock per pattern, more resource facts than _rover_by_rock (see the module doc)."""
+    out = []
+    for x in rocks:
+        base = [f"communicated_rock_data({x})", f"have_rock_analysis({rover}, {x})"]
+        hand = {h: [f"free_h({h})", f"ready({h}, {x})"] for h in hands}
+        store = {s: [f"free_s({s})", f"full({s})", f"ready_to_drop({s})"] for s in stores}
+        if how == "hands":                                   # 6 facts: both hands, + the 5-fact store patterns
+            out.append(([base[0]], base + hand[hands[0]] + hand[hands[1]], f"hands_{x}"))
+            out += [([base[0]], base + store[s], f"store_{s}_{x}") for s in stores]
+        elif how == "hand_store":                            # 7 facts: one hand x one store
+            out += [([base[0]], base + hand[h] + store[s], f"{h}_{s}_{x}") for h in hands for s in stores]
+        else:                                                # 12 facts: both hands, both stores
+            out.append(([base[0]], base + hand[hands[0]] + hand[hands[1]] + store[stores[0]] + store[stores[1]],
+                        f"all_{x}"))
+    return out
+
+
 def _rover_joint_small(rover: str, rocks: Tuple[str, str], hands: Tuple[str, str], stores: Tuple[str, str]):
     goals = [f"communicated_rock_data({x})" for x in rocks]
     base = goals + [f"have_rock_analysis({rover}, {x})" for x in rocks]
@@ -149,6 +174,12 @@ HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
                                   + _rover_by_rock("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))),
     "llm_by_hand_nasa_one_joint": (_image("r0", "o0", "c0")
                                    + _rover_joint_small("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))),
+    "llm_by_hand_nasa_one_rock6": (_image("r0", "o0", "c0")
+                                   + _rover_by_rock_grown("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"), "hands")),
+    "llm_by_hand_nasa_one_rock7": (_image("r0", "o0", "c0") + _rover_by_rock_grown(
+        "r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"), "hand_store")),
+    "llm_by_hand_nasa_one_rock12": (_image("r0", "o0", "c0")
+                                    + _rover_by_rock_grown("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"), "all")),
     "llm_by_hand_nasa_three":(_image("r0", "o0", "c0") + _image("r1", "o1", "c1") + _image("r2", "o2", "c2")
                                + _rover("r0", ("x0", "x1"), ("h0", "h1"), ("s0", "s1"))
                                + _rover("r1", ("x2", "x3"), ("h2", "h3"), ("s2", "s3"))
@@ -161,7 +192,8 @@ HAND_PATTERNS: Dict[str, List[Tuple[List[str], List[str], str]]] = {
     "llm_by_hand_machine_shop_four": _machine_pair(0) + _machine_pair(1),
 }
 AUTO = "llm_by_hand"          # picks the collection that fits the problem
-EXPLICIT_ONLY = frozenset({"llm_by_hand_nasa_one_rock", "llm_by_hand_nasa_one_joint"})   # never picked by AUTO
+EXPLICIT_ONLY = frozenset({"llm_by_hand_nasa_one_rock", "llm_by_hand_nasa_one_joint", "llm_by_hand_nasa_one_rock6",
+                           "llm_by_hand_nasa_one_rock7", "llm_by_hand_nasa_one_rock12"})   # never picked by AUTO
 HAND_GROWTHS = (AUTO,) + tuple(HAND_PATTERNS)
 
 
