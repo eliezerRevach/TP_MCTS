@@ -103,7 +103,10 @@ Knobs (environment, set from experiments.ipynb):
                                     (fewer states, still an upper bound;
                                     windows_lao.py "Blur"); 0 = off          (0)
     TP_MCTS_WILAO_RULES             window rules: windows | fixed_stn (the STN never moves,
-                                    only LB goes up; windows_lao.py "Rules") (windows)
+                                    only LB goes up; windows_lao.py "Rules") | stn (the state
+                                    keeps the path's STN, no hand rules) | stn_lb (the STN
+                                    only gives the LB: one state per (F, Q), least charge;
+                                    windows_lao.py "rules = stn")             (windows)
     TP_MCTS_WILAO_FIT               cover lookup: shift (closed form) | stn (the same
                                     fit by Floyd-Warshall)                   (shift)
     TP_MCTS_WILAO_UB                1 = each table state keeps T(s), the least time to a

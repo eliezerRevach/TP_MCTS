@@ -155,11 +155,183 @@ def end_windows_fixed(windows: Sequence[Window], durations: Sequence[Fraction]
 
 
 def rules_default() -> str:
-    """TP_MCTS_WILAO_RULES: windows (default) | fixed_stn."""
+    """TP_MCTS_WILAO_RULES: windows (default) | fixed_stn | stn | stn_lb."""
     text = (os.environ.get("TP_MCTS_WILAO_RULES") or "windows").strip().lower()
-    if text not in ("windows", "fixed_stn"):
-        raise ValueError(f"TP_MCTS_WILAO_RULES={text!r}: use windows | fixed_stn")
+    if text not in ("windows", "fixed_stn", "stn", "stn_lb"):
+        raise ValueError(f"TP_MCTS_WILAO_RULES={text!r}: use windows | fixed_stn | stn | stn_lb")
     return text
+
+
+# ---------------------------------------------------------------------------
+# rules = "stn": the state keeps the path's STN itself, no hand rules
+# ---------------------------------------------------------------------------
+# Nodes, in this order: Z (LB, the time charged so far), N (the last end = now), S (the last start:
+# starts are taken in time order, so a later start comes at or after it), then E of every running
+# action, in queue order. The key is the closed distance matrix, key[a][b] = least upper bound on
+# t_b - t_a (None = none). Every event is the same three steps: add its constraints, close
+# (Floyd-Warshall; a negative cycle = no schedule fits this path, the branch is dropped), keep the
+# nodes still needed. Z is moved so that N - Z >= 0 is tight: the key holds no clock.
+#   start x at gap g : S_x >= N, S_x >= S, S_x <= E_1 (before the first end), E_x - S_x = d_x,
+#                      E_front <= E_x <= E_behind; S_x becomes S.  Charge 0.
+#   end of E_1       : E_a - E_1 <= d_a for every a still running (it started before E_1);
+#                      charge = the least E_1 - Z; E_1 becomes N and S, Z moves up by the charge.
+#   instant action   : no change (done at S, the earliest it can be; later only adds constraints).
+# rules = "stn" keeps the STN in the state key (one state per distinct STN). rules = "stn_lb" uses it
+# only for the LB: the table walks the same STNs, then keeps ONE state per (F, Q) -- an option is there
+# if any STN reaching that (F, Q) has it, and it charges the least of their charges (WindowsTable).
+_SZ, _SN, _SS = 0, 1, 2
+
+
+def _num(x):
+    """Fractions with denominator 1 as ints (much faster to close, same value and hash)."""
+    if isinstance(x, Fraction) and x.denominator == 1:
+        return int(x)
+    return x
+
+
+def _stn_matrix(key, extra: int = 0):
+    n = len(key)
+    D = [list(row) + [None] * extra for row in key]
+    for i in range(extra):
+        D.append([None] * (n + extra))
+        D[n + i][n + i] = 0
+    return D
+
+
+def _stn_edge(D, a, b, w) -> None:
+    """t_b - t_a <= w."""
+    if D[a][b] is None or w < D[a][b]:
+        D[a][b] = w
+
+
+def _stn_close(D) -> bool:
+    """Floyd-Warshall in place; False on a negative cycle (inconsistent)."""
+    n = len(D)
+    for k in range(n):
+        Dk = D[k]
+        for a in range(n):
+            via = D[a][k]
+            if via is None:
+                continue
+            Da = D[a]
+            for b in range(n):
+                w = Dk[b]
+                if w is not None:
+                    s = via + w
+                    if Da[b] is None or s < Da[b]:
+                        Da[b] = s
+    return all(D[a][a] >= 0 for a in range(n))
+
+
+def _stn_keep(D, keep, z_shift=0):
+    """The key of the nodes ``keep`` (in that order); Z (first) moved up by ``z_shift``."""
+    out = []
+    for i, a in enumerate(keep):
+        row = []
+        for j, b in enumerate(keep):
+            w = D[a][b]
+            if w is not None and z_shift:
+                w = w + (z_shift if j == 0 else 0) - (z_shift if i == 0 else 0)
+            row.append(w)
+        out.append(tuple(row))
+    return tuple(out)
+
+
+STN_EMPTY = ((0, 0, 0), (0, 0, 0), (0, 0, 0))
+
+
+def stn_root(remaining: Sequence, durations: Sequence) -> Optional[tuple]:
+    """A query's key: Z = N = S = now; each running end exactly ``rem`` away, or anywhere in
+    [0, d] (in queue order) when its remaining time is unknown."""
+    k = len(remaining)
+    D = _stn_matrix(STN_EMPTY, k)
+    for i, (rem, d) in enumerate(zip(remaining, durations)):
+        e = 3 + i
+        if rem is None:
+            _stn_edge(D, _SN, e, _num(Fraction(d)))
+            _stn_edge(D, e, _SN, 0)
+        else:
+            rem = _num(Fraction(rem))
+            _stn_edge(D, _SN, e, rem)
+            _stn_edge(D, e, _SN, -rem)
+        if i:
+            _stn_edge(D, e, e - 1, 0)
+    if not _stn_close(D):
+        return None
+    return _stn_keep(D, list(range(3 + k)))
+
+
+def stn_start(key, d, gap: int) -> Optional[tuple]:
+    k = len(key) - 3
+    d = _num(Fraction(d))
+    n = len(key)
+    D = _stn_matrix(key, 2)
+    sx, ex = n, n + 1
+    _stn_edge(D, sx, _SN, 0)
+    _stn_edge(D, sx, _SS, 0)
+    if k:
+        _stn_edge(D, 3, sx, 0)
+    _stn_edge(D, sx, ex, d)
+    _stn_edge(D, ex, sx, -d)
+    if gap > 0:
+        _stn_edge(D, ex, 3 + gap - 1, 0)
+    if gap < k:
+        _stn_edge(D, 3 + gap, ex, 0)
+    if not _stn_close(D):
+        return None
+    ends = list(range(3, 3 + k))
+    return _stn_keep(D, [_SZ, _SN, sx] + ends[:gap] + [ex] + ends[gap:])
+
+
+def stn_end(key, durations: Sequence) -> Tuple[Optional[tuple], object]:
+    """The first end fires; returns (key of the rest, time charged)."""
+    D = _stn_matrix(key)
+    for i, d in enumerate(durations):
+        _stn_edge(D, 3, 4 + i, _num(Fraction(d)))
+    if not _stn_close(D):
+        return None, 0
+    charge = -D[3][_SZ]
+    return _stn_keep(D, [_SZ, 3, 3] + list(range(4, len(key))), charge), charge
+
+
+def stn_e(key) -> tuple:
+    """Per running action the least E - Z: the time sure to be charged by its end (windows' e)."""
+    return tuple(-key[3 + i][_SZ] for i in range(len(key) - 3))
+
+
+def stn_covers(big, small) -> bool:
+    """Every schedule of ``small`` is one of ``big`` (each bound of big at least as loose)."""
+    return all(wb is None or (ws is not None and ws <= wb)
+               for rb, rs in zip(big, small) for wb, ws in zip(rb, rs))
+
+
+def stn_fit(key_j, query, slack) -> Optional[object]:
+    """The smallest d in [0, slack] such that the query moved back by d lies in table state j, or None.
+    The query is a point (every remaining time known): relative to j's N, Z = N = 0, S = d (later
+    starts come after the query's now) and E_a = rem_a + d."""
+    k = len(query) - 3
+    rem = []
+    for i in range(k):
+        up, low = query[_SN][3 + i], query[3 + i][_SN]
+        if up is None or low is None or up != -low:
+            return None                                   # not a point: no fit (a miss)
+        rem.append(up)
+    base = [0, 0, 0] + rem
+    coef = [0, 0, 1] + [1] * k
+    d_lo, d_hi = 0, slack
+    for a, row in enumerate(key_j):
+        for b, w in enumerate(row):
+            if w is None:
+                continue
+            diff, dc = base[b] - base[a], coef[b] - coef[a]
+            if dc == 0:
+                if diff > w:
+                    return None
+            elif dc == 1:
+                d_hi = min(d_hi, w - diff)
+            else:
+                d_lo = max(d_lo, diff - w)
+    return d_lo if d_lo <= d_hi else None
 
 
 def fit_default() -> str:
@@ -244,6 +416,8 @@ class WindowsLAO:
         # Window rules (module doc, "Rules"); None = TP_MCTS_WILAO_RULES.
         self.rules = rules_default() if rules is None else rules
         self._fixed = self.rules == "fixed_stn"
+        self._stn = self.rules in ("stn", "stn_lb")     # the path's STN (no blur); stn_lb: table merges by (F, Q)
+        self.empty_windows = STN_EMPTY if self._stn else ()
         self.heuristic = heuristic
         self.epsilon = float(epsilon)
         self.max_expansions = int(max_expansions)
@@ -297,7 +471,10 @@ class WindowsLAO:
         roots = []
         if any(rem is None for _key, rem in entries):
             for order in itertools.permutations([key for key, _rem in entries]):
-                windows = normalise(tuple((Fraction(0), self.durations[k], Fraction(0)) for k in order))
+                if self._stn:
+                    windows = stn_root([None] * len(order), [self.durations[k] for k in order])
+                else:
+                    windows = normalise(tuple((Fraction(0), self.durations[k], Fraction(0)) for k in order))
                 if windows is not None:
                     roots.append((facts, order, windows, r))
         else:
@@ -305,7 +482,11 @@ class WindowsLAO:
             groups = [list(g) for _, g in itertools.groupby(known, key=lambda x: x[0])]
             for combo in itertools.product(*(itertools.permutations(g) for g in groups)):
                 queue = tuple(key for group in combo for _, key in group)
-                windows = tuple((rem, rem, rem) for group in combo for rem, _ in group)
+                if self._stn:
+                    windows = stn_root([rem for group in combo for rem, _ in group],
+                                       [self.durations[k] for k in queue])
+                else:
+                    windows = tuple((rem, rem, rem) for group in combo for rem, _ in group)
                 roots.append((facts, queue, windows, r))
         return roots
 
@@ -420,8 +601,8 @@ class WindowsLAO:
             w2, r2 = other[2], other[3]
             if r2 < r:
                 continue
-            if all(lo2 <= lo and hi2 >= hi and e2 <= e
-                   for (lo2, hi2, e2), (lo, hi, e) in zip(w2, windows)):
+            if stn_covers(w2, windows) if self._stn else all(
+                    lo2 <= lo and hi2 >= hi and e2 <= e for (lo2, hi2, e2), (lo, hi, e) in zip(w2, windows)):
                 value = self.V[other]
                 best = value if best is None else min(best, value)
         return best
@@ -596,20 +777,28 @@ class WindowsLAO:
             d = self.durations[name]
             inert = self.prune_inert and self._inert(name)
             for gap in range(len(queue) + 1):
-                new = blur_windows(start_windows(windows, d, gap), self.blur, self._fixed)
+                if self._stn:
+                    new = stn_start(windows, d, gap)
+                    need = None if new is None or not inert else -new[3 + gap][_SZ]
+                else:
+                    new = blur_windows(start_windows(windows, d, gap), self.blur, self._fixed)
+                    need = None if new is None or not inert else new[gap][2]
                 if new is None:
                     self.stats["pruned_gap"] += 1
                     continue
                 for outs in variants:
-                    yield (("start", name, gap), Fraction(0), new[gap][2] if inert else None,
+                    yield (("start", name, gap), Fraction(0), need,
                            queue[:gap] + (name,) + queue[gap:], new, outs)
         if queue:
             x = queue[0]
             op = self.ops[x]
             if self._end_legal(op, facts):
-                end_rule = end_windows_fixed if self._fixed else end_windows
-                rest, charge = end_rule(windows, [self.durations[k] for k in queue[1:]])
-                rest = blur_windows(rest, self.blur, self._fixed)
+                if self._stn:
+                    rest, charge = stn_end(windows, [self.durations[k] for k in queue[1:]])
+                else:
+                    end_rule = end_windows_fixed if self._fixed else end_windows
+                    rest, charge = end_rule(windows, [self.durations[k] for k in queue[1:]])
+                    rest = blur_windows(rest, self.blur, self._fixed)
                 if rest is None:
                     self.stats["pruned_gap"] += 1
                 else:
@@ -652,7 +841,8 @@ class WindowsLAO:
         if self.heuristic == "none":
             return 1.0
         facts, queue, windows, r = s
-        running = tuple((k, w[2]) for k, w in zip(queue, windows))   # guaranteed end e, same clock as r
+        es = stn_e(windows) if self._stn else tuple(w[2] for w in windows)
+        running = tuple(zip(queue, es))                 # guaranteed end e, same clock as r
         # PDB lookup: with one shared relaxed table the sweep reads only the facts
         # its actions and goals mention, so states that agree on those facts share
         # one curve -- the projection is exact, not an approximation.
@@ -857,7 +1047,7 @@ class WindowsTable:
         started = time.perf_counter()
         stop_at = None if time_budget is None else started + float(time_budget)
         lao, goals = self.lao, self.lao.model.goals
-        root = (frozenset(root_facts), (), ())
+        root = (frozenset(root_facts), (), lao.empty_windows)
         pending = object()                                # created, not expanded (yet)
         index, states, options, tmin = {root: 0}, [root], [pending], [Fraction(0)]
         heap = [(Fraction(0), 0)]
@@ -914,13 +1104,20 @@ class WindowsTable:
                 self._cut.append(i)
         self.states, self.index, self.options = states, index, options
         self.tmin = [self.horizon + 1 if x is None else x for x in tmin]
+        stn_paths = None
+        if lao.rules == "stn_lb":
+            stn_paths = len(states)
+            self._merge_by_fq()
+            states, options = self.states, self.options
         forward_seconds = time.perf_counter() - started
         self.T = self._time_to_goal() if self.ub else None
         ub_seconds = time.perf_counter() - started - forward_seconds
         method = self._backward()
-        for k, (facts, queue, windows) in enumerate(states):
+        for (facts, queue, windows), k in self.index.items():
             self._by_fq.setdefault((facts, queue), []).append((windows, k))
         self.complete = True
+        if stn_paths is not None:
+            self.stats["stn_walked"] = stn_paths
         self.stats.update(
             states=len(states), cut_after_deadline=cut,
             edges=sum(len(b) for row in options if row for _c, _e, b, _l in row),
@@ -931,6 +1128,55 @@ class WindowsTable:
             seconds=round(time.perf_counter() - started, 2), rules=lao.rules, ub=self.ub,
             never_reach_goal=None if self.T is None else sum(1 for t in self.T if t is None))
         return True
+
+    def _merge_by_fq(self) -> None:
+        """rules = stn_lb: the STN gives only the LB, it does not split states. The forward graph
+        holds one state per (F, Q, STN) walked; here they become ONE state per (F, Q):
+            option there  iff  some STN reaching (F, Q) has it (consistent on some path)
+            its charge    =    the least charge over those STNs (same for an inert need)
+        Every outcome of an option has the same F' and Q' whichever STN it came from, so the
+        successors are the same (F', Q') states. Sound: more options and smaller charges than
+        every STN state it replaces, so V(F, Q, r) >= V of each of them. The index keeps every
+        walked STN, pointing at its (F, Q) state, so a lookup still fits the leaf to an STN
+        (``stn_fit``) and reads its (F, Q) state."""
+        states, options, tmin = self.states, self.options, self.tmin
+        fq_of, nodes, node = {}, [], [0] * len(states)
+        for i, (facts, queue, _w) in enumerate(states):
+            n = fq_of.get((facts, queue))
+            if n is None:
+                n = fq_of[(facts, queue)] = len(nodes)
+                nodes.append((facts, queue, None))
+            node[i] = n
+        merged: List[Optional[dict]] = [{} for _ in nodes]
+        expanded = [False] * len(nodes)
+        cut = set(self._cut)
+        node_tmin = [self.horizon + 1] * len(nodes)
+        for i, row in enumerate(options):
+            n = node[i]
+            node_tmin[n] = min(node_tmin[n], tmin[i])
+            if row is None:                               # a goal (every STN of this F is one)
+                merged[n] = None
+                continue
+            if merged[n] is None or i in cut:
+                continue
+            expanded[n] = True
+            for charge, need, branches, label in row:
+                to = collections.Counter()
+                for p, j in branches:
+                    to[node[j]] += p
+                key = (label, tuple(sorted(to.items())))
+                old = merged[n].get(key)
+                if old is None:
+                    merged[n][key] = [charge, need]
+                else:
+                    old[0] = min(old[0], charge)
+                    old[1] = None if old[1] is None or need is None else min(old[1], need)
+        self._cut = [n for n in range(len(nodes)) if merged[n] is not None and not expanded[n]]
+        self.options = [None if m is None else
+                        [(c, need, tuple((p, j) for j, p in to), label) for (label, to), (c, need) in m.items()]
+                        for m in merged]
+        self.index = {key: node[i] for key, i in self.index.items()}
+        self.states, self.tmin = nodes, node_tmin
 
     # -- UB --------------------------------------------------------------------
     def _time_to_goal(self) -> List[Optional[Fraction]]:
@@ -1288,7 +1534,7 @@ class WindowsTable:
         st = self.fit_stats
         st["fit_d0" if any(dd == 0 for dd, _j, _w in fits) else "shift_only"] += 1
         st["d_used=" + str(d)] += 1
-        if d and len(self.fit_examples) < 8:
+        if d and len(self.fit_examples) < 8 and not self.lao._stn:
             self.fit_examples.append(dict(
                 queue=list(queue), query_time_left=[str(hi) for _lo, hi, _e in windows], r=str(r),
                 table_windows_lo_hi_e=[[str(x) for x in win] for win in w_j],
@@ -1375,7 +1621,11 @@ class WindowsTable:
 
     def _fits(self, facts, queue, windows, r) -> List[Tuple[Fraction, int, tuple]]:
         """(d, j, w_j) for every table state j with this F and Q that the leaf fits after shift d."""
-        fit = self.stn_shift if self.fit == "stn" else self.shift
+        if self.lao._stn:
+            def fit(j, w_j, w, r):
+                return stn_fit(w_j, w, self.horizon - self.tmin[j] - r)
+        else:
+            fit = self.stn_shift if self.fit == "stn" else self.shift
         out = []
         for w_j, j in self._by_fq.get((facts, queue), ()):
             d = fit(j, w_j, windows, r)
