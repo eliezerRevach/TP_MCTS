@@ -8,10 +8,12 @@
 # phase 2 runs Script 3 (experiments.ipynb cells 1 3 19, 100 runs) with 6 workers -- 12 workers x ~10 GB of nasa
 # tables ran the 96 GB VM out of memory -- one scenario at a time, so every config runs under the same load.
 #   bash gcp/stn_small.sh   -> results/stn_small/{prebuild,log,csv}/ and results/stn_small/summary.txt
+# Other configs / folder: STN_SMALL_CONFIGS="name|rules|blur|growth ..." STN_SMALL_OUT=results/<dir> bash gcp/stn_small.sh
 set -u
 cd /opt/tp_mcts
 PY=.venv/bin/python
-OUT=results/stn_small
+OUT=${STN_SMALL_OUT:-results/stn_small}
+export STN_SMALL_OUT=$OUT
 mkdir -p $OUT/prebuild $OUT/log $OUT/csv
 DOM=nasa_rover; OBJ=1; GARB=0; DL=${STN_SMALL_DEADLINE:-25}
 WORKERS=${STN_SMALL_WORKERS:-6}
@@ -34,6 +36,7 @@ CONFIGS=("win3_pairs|windows|3|pairs"
          "win3_rock|windows|3|llm_by_hand_nasa_one_rock"
          "stn_joint|stn|0|llm_by_hand_nasa_one_joint" "win0_joint|windows|0|llm_by_hand_nasa_one_joint"
          "win3_joint|windows|3|llm_by_hand_nasa_one_joint")
+[ -n "${STN_SMALL_CONFIGS:-}" ] && read -r -a CONFIGS <<< "$STN_SMALL_CONFIGS"
 
 prebuild() {   # name rules blur growth mem_kb timeout
   ( wilao_env $2 $3 $4 /opt/tp_mcts/$OUT/cache_$1; ulimit -v $5
@@ -76,7 +79,7 @@ done
 
 $PY - <<'PY' > $OUT/summary.txt
 import csv, glob, json, os
-OUT = "results/stn_small"
+OUT = os.environ.get("STN_SMALL_OUT", "results/stn_small")
 print("config | build s | table states (per pattern) | h(s0) | score | wall s")
 for log in sorted(glob.glob(f"{OUT}/prebuild/*.log")):
     name = os.path.basename(log)[:-4]
